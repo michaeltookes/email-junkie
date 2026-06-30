@@ -63,7 +63,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - No claim of 24/7 coverage; sleep/wake behavior is well-defined.
 
 6. **Pluggable LLM provider layer**
-   Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 12) drops in cleanly.
+   Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 16) drops in cleanly.
    *As Sam, I want to choose which LLM provider drafts my replies, so that I'm not locked to one vendor and can keep data where I want.*
    - Common interface with adapters for cloud providers (Claude, OpenAI, etc.) via BYO key/endpoint.
    - Switching providers in Settings takes effect immediately with no code changes.
@@ -109,94 +109,192 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Sparkle auto-update works against a published appcast.
     - Pipeline mirrors the Prompter release workflow.
 
+12. **Stale-thread / conflict detection before send**
+    Re-check thread state at approval time so an approved draft is never sent into a changed conversation.
+    *As Priya, I want the app to notice if a thread changed before it sends my approved draft, so that I never send a duplicate or out-of-context reply.*
+    - Before sending/saving (item 9), the source thread is re-fetched and compared to when the draft was generated.
+    - If a new reply arrived, the user already replied, or the message was archived/deleted, the send is blocked and the user is warned with options (regenerate, send anyway, discard).
+    - Especially enforced in auto-send mode, where a stale send is silent and embarrassing.
+    - Detection logic is covered by tests against representative thread-change cases.
+
+13. **Low-confidence / "needs info" draft handling**
+    When the model can't draft well without facts only the user has, flag it instead of hallucinating.
+    *As Priya, I want the app to tell me when it can't confidently draft a reply, so that I trust the drafts it does produce.*
+    - The engine detects low-confidence or missing-information cases (e.g. the reply requires data not in the thread).
+    - Instead of a fabricated reply, the user is shown a clear "needs your input" state with what's missing.
+    - No auto-send ever fires on a flagged draft.
+    - Flagged items appear distinctly in the approval UI and activity history (item 21).
+
+14. **Open-source repo scaffolding**
+    The OSS hygiene needed to "offer it to others": license, README, contribution guide.
+    *As Sam, I want a clear license, README, and contributing guide, so that I can trust, run, and contribute to the project.*
+    - `LICENSE` added (MIT, matching the Prompter family).
+    - `README` covering what it is, install (DMG + Homebrew), setup, privacy posture, and BYO-key/provider notes.
+    - `CONTRIBUTING` with build/run/test instructions and PR expectations.
+    - Issue/PR templates and a basic code of conduct.
+
+15. **CI pipeline (build, test, lint on push/PR)**
+    Continuous integration via GitHub Actions so every push and PR is built, tested, and linted.
+    *As a maintainer, I want every push and PR validated automatically, so that broken or unformatted code never reaches main.*
+    - GitHub Actions workflow runs on push and pull_request against a macOS runner.
+    - Steps: build the app, run unit/integration tests, run SwiftLint/format checks.
+    - Required status checks must pass before merge; failures are clearly surfaced.
+    - Workflow is fast enough to be useful on every PR and caches dependencies.
+
 ## Medium Priority
 
-12. **Local model support**
+16. **Local model support**
     A local-model adapter for fully-offline drafting.
     *As Sam, I want to run drafting against a local model, so that no email content ever leaves my machine.*
-    - Local-model adapter (e.g. Ollama) implements the same provider interface as cloud adapters.
+    - Local-model adapter (e.g. Ollama) implements the same provider interface as cloud adapters (item 6).
     - Selectable in Settings with no behavioral difference elsewhere.
     - Documented setup for the local runtime.
 
-13. **Reply-worthiness filtering**
+17. **Reply-worthiness filtering**
     Decide which incoming emails get a draft.
     *As Priya, I want newsletters, no-reply, and bulk mail filtered out, so that I'm not flooded with pointless drafts and don't burn LLM cost.*
     - Heuristics skip obvious non-replyable mail (no-reply senders, bulk/list headers, automated notifications, calendar invites).
-    - Skipped reasons visible in the activity log (item 17).
+    - Skipped reasons visible in the activity log (item 21).
     - User can override and force a draft for a skipped message.
 
-14. **Sender allowlist / blocklist & rules**
+18. **Sender allowlist / blocklist & rules**
     Control which senders are drafted.
     *As Priya, I want to choose which senders are always or never drafted, so that I control the watcher's scope.*
     - Settings supports allowlist / blocklist by sender address or domain.
     - Rules take effect on the next poll without restart.
     - Rules persisted locally.
 
-15. **Inline draft editing before send**
+19. **Inline draft editing before send**
     Tweak a draft in the approval UI before approving.
     *As Priya, I want to tweak a draft before approving, so that I can fix small things without rejecting the whole reply.*
     - Approval UI allows inline editing of the draft body.
     - Edited content is what gets sent or saved.
     - Edits can optionally be captured as a signal for future voice tuning.
 
-16. **Voice profile refresh / re-learn**
+20. **Voice profile refresh / re-learn**
     Keep the profile current.
     *As Priya, I want to re-learn my voice on demand or on a schedule, so that drafts keep up as my style changes.*
     - A "re-learn" action re-samples Sent and updates the profile.
     - Optional scheduled refresh interval in Settings.
     - Previous profile replaced atomically; a summary of changes shown.
 
-17. **Activity history view**
+21. **Activity history view**
     See what the assistant has done.
     *As Priya, I want to see drafted/approved/denied/sent/skipped events, so that I can trust it and debug surprises.*
     - History lists events with timestamps and reasons.
     - Entries link back to the relevant message where possible.
     - History stored locally and can be cleared.
 
-18. **Cost & rate guardrails for cloud LLMs**
+22. **Cost & rate guardrails for cloud LLMs**
     Prevent surprise bills.
     *As Priya, I want usage limits and cost visibility for cloud providers, so that BYO-key drafting never surprises me.*
     - Token/usage tracked per run and per day.
     - Configurable caps pause drafting when exceeded, with a clear notification.
     - Estimated cost visible in the activity log/settings.
 
+23. **Send safety net (undo / cancel window)**
+    A grace period after approval so a bad auto-send can be stopped.
+    *As Priya, I want a few seconds to cancel after I approve, so that one mistaken approval doesn't go out.*
+    - In auto-send mode, approval starts a short, configurable countdown before the actual send.
+    - The user can cancel during the window; cancel returns the draft to pending.
+    - Disabling the window is possible for users who want instant send.
+    - Pairs with item 12 — stale-thread checks run at the end of the window, immediately before send.
+
+24. **Email signature handling**
+    Respect the user's signature so drafts look right.
+    *As Priya, I want drafts to use my normal signature correctly, so that replies don't drop it or double it up.*
+    - Signature policy is configurable (use Gmail's, a custom one, or none).
+    - Generated drafts neither omit an expected signature nor duplicate one already present.
+    - Quoted history below the signature is handled correctly.
+
+25. **Voice-profile cold start**
+    Graceful behavior when there's little or no Sent history.
+    *As a new user, I want sensible drafts even before the app has learned much, so that an empty Sent folder doesn't break onboarding.*
+    - Detects sparse/empty Sent history and falls back to a sensible neutral profile.
+    - Communicates that voice will improve as more mail is sent and on re-learn (item 20).
+    - Never blocks onboarding (item 2) on insufficient history.
+
+26. **Quiet hours / notification batching**
+    Don't interrupt at night; optionally batch drafts.
+    *As Priya, I want quiet hours and batched notifications, so that the assistant doesn't ping me at 2am or one message at a time.*
+    - Configurable quiet-hours window during which notifications are suppressed and queued.
+    - Optional batching so multiple ready drafts surface together rather than individually.
+    - Queued drafts are delivered when quiet hours end.
+
+27. **Resilience: offline queue + retry**
+    Handle network/API/token failures as a system, not just per draft.
+    *As Priya, I want the app to recover from dropped connections and transient API errors, so that it keeps working without my intervention.*
+    - Operations (fetch, draft, send) retry with backoff on transient failures.
+    - Work is queued while offline and resumes on reconnect.
+    - Token-expiry and auth failures are recovered or surfaced clearly (ties to item 3).
+    - No duplicate sends result from retries.
+
+28. **Accessibility of the approval UI**
+    Make the core loop usable for everyone.
+    *As a keyboard/VoiceOver user, I want to review and approve drafts without a mouse, so that the app is usable for me.*
+    - Popover and approval UI are fully VoiceOver-labeled and keyboard-navigable.
+    - Approve/deny/edit actions have keyboard shortcuts.
+    - Respects system Dynamic Type, contrast, and reduce-motion settings.
+
+29. **CD release automation**
+    Automate the item 11 release pipeline via GitHub Actions on tagged releases.
+    *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*
+    - On a version tag, a workflow builds, signs, and notarizes the app and produces the DMG.
+    - It publishes a GitHub release, updates the Sparkle appcast, and bumps the Homebrew cask.
+    - Signing secrets are handled securely via encrypted CI secrets.
+    - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
+
 ## Low Priority
 
-19. **Slack approval channel**
+30. **Slack approval channel**
     Optional Slack integration for users who live in Slack.
     *As a Slack-native user, I want drafts posted to Slack with approve/deny actions, so that approval fits my existing workflow.*
     - Opt-in, configured in Settings.
     - Posts drafts to a channel/DM with approve/deny actions.
     - Approve/deny routes through the same send/draft path as the native UX.
 
-20. **Outlook / Microsoft 365 support**
+31. **Outlook / Microsoft 365 support**
     Add an Outlook/M365 provider behind the email-provider abstraction.
     *As an Outlook user, I want to connect my M365 mailbox, so that I can use email-junkie without Gmail.*
     - Graph API + OAuth provider implementing the shared email-provider interface.
     - Feature parity with Gmail for read/draft/send.
 
-21. **Generic IMAP/SMTP support**
+32. **Generic IMAP/SMTP support**
     Provider-agnostic backend for self-hosters.
     *As Sam, I want to connect any IMAP/SMTP mailbox, so that I'm not limited to Gmail or Outlook.*
     - IMAP read + SMTP send behind the shared provider interface.
     - Graceful handling of missing provider-native features (push, labels).
 
-22. **Multiple-account support**
+33. **Multiple-account support**
     Watch more than one mailbox.
     *As Priya, I want to connect multiple mailboxes, so that work and personal email are both handled.*
     - Multiple accounts, each with its own voice profile and settings.
     - Clear per-account attribution in notifications and history.
 
-23. **Per-recipient / per-context voice profiles**
+34. **Per-recipient / per-context voice profiles**
     Distinct voice tuning per relationship.
     *As Priya, I want different tone for clients vs teammates, so that drafts fit each relationship.*
     - Optional per-recipient or per-context voice variants.
     - Falls back to the base profile when no variant applies.
 
-24. **Opt-in anonymous telemetry**
+35. **Opt-in anonymous telemetry**
     Privacy-respecting, off-by-default metrics.
     *As a maintainer, I want opt-in usage signal, so that I can prioritize development without compromising privacy.*
     - Off by default, fully disclosed, opt-in only.
     - No email content ever included.
+
+36. **Diagnostics / log export**
+    Developer-facing logs for OSS bug reports.
+    *As Sam, I want to export diagnostic logs, so that I can file a useful bug report without leaking email content.*
+    - A "export diagnostics" action produces redacted logs (no message bodies/PII by default).
+    - Distinct from the user-facing activity history (item 21).
+    - Log verbosity is configurable.
+
+37. **Gmail push (watch API) real-time option**
+    True real-time inbox updates as an upgrade over polling.
+    *As Priya, I want near-instant drafts when mail arrives, so that I'm not waiting on a poll interval.*
+    - Optional Gmail `watch` (Pub/Sub) push path as an alternative to the item 5 poller.
+    - Documented infrastructure tradeoffs vs the local-first polling default.
+    - Falls back to polling when push isn't available.
 
 ## Completed

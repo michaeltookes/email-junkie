@@ -1,0 +1,40 @@
+import XCTest
+@testable import EmailJunkie
+
+/// Unit tests for the `Settings` model.
+///
+/// These are intentionally small — they exist so the CI pipeline has a real
+/// test target to run and a place for future logic tests (voice profile,
+/// stale-thread detection, provider selection, etc.) to live.
+final class SettingsTests: XCTestCase {
+
+    func testDefaultUsesCurrentSchemaVersion() {
+        XCTAssertEqual(Settings.default.schemaVersion, Settings.currentSchemaVersion)
+    }
+
+    func testDefaultPollIntervalIsFiveMinutes() {
+        XCTAssertEqual(Settings.default.pollIntervalSeconds, 300)
+    }
+
+    func testValidatedClampsPollIntervalBelowMinimum() {
+        let settings = Settings(schemaVersion: 1, pollIntervalSeconds: 5).validated()
+        XCTAssertEqual(settings.pollIntervalSeconds, 30)
+    }
+
+    func testValidatedClampsPollIntervalAboveMaximum() {
+        let settings = Settings(schemaVersion: 1, pollIntervalSeconds: 100_000).validated()
+        XCTAssertEqual(settings.pollIntervalSeconds, 3600)
+    }
+
+    func testValidatedKeepsInRangeValueUnchanged() {
+        let settings = Settings(schemaVersion: 1, pollIntervalSeconds: 120).validated()
+        XCTAssertEqual(settings.pollIntervalSeconds, 120)
+    }
+
+    func testSettingsRoundTripsThroughCodable() throws {
+        let original = Settings(schemaVersion: 1, pollIntervalSeconds: 240)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(original, decoded)
+    }
+}

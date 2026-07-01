@@ -21,17 +21,17 @@ Distributing one shared Google OAuth client for a public build means either stay
 
 ## Backlog Management
 
-This project's backlog is tracked at: `docs/backlog.md`
+Active items live in `docs/backlog.md`; completed items live in `docs/resolved.md`.
 
 **Conventions** (follow these exactly):
-- Items use priority tiers (**High / Medium / Low**) with **sequential numbering across all tiers**.
+- Items use priority tiers (**High / Medium / Low**). New items are numbered sequentially after the highest existing number.
+- **Item numbers are stable IDs.** They are not reused or renumbered when an item is completed — this keeps cross-references (e.g. "see item 10") and git history (commits that reference "item N") valid. A resolved tier may therefore start at a number other than 1.
 - Each item has: a **bold title**, a one-line summary, a **user story** in *As a … I want … so that …* form, and **acceptance criteria** as a bullet list. We embed user stories directly in backlog items — do **not** create a separate user-stories file.
 - Keep descriptions concise but complete enough for any agent to act without re-deriving intent.
 
-When you **complete** work that corresponds to a backlog item:
-- Read the backlog file and find the matching item.
-- Move it to the `## Completed` section with the date: `(completed: YYYY-MM-DD)`.
-- Use a bullet (remove the number prefix) and re-number remaining items to stay sequential.
+When you **complete** work that corresponds to a backlog item, follow the `/update-backlog` skill:
+- Move the item to `docs/resolved.md` using the strikethrough format: `### ~~N: Title~~`, with a `**Resolved**: YYYY-MM-DD (commit HASH or branch NAME)` line and a synthesized description of what was actually delivered.
+- Remove the item's block from `docs/backlog.md`. Do **not** renumber the remaining items.
 
 When you **discover** new bugs, tech debt, or feature opportunities:
 - Read the backlog file and add the item to the appropriate priority tier (default **Medium** if unsure).

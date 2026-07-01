@@ -20,13 +20,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 ## High Priority
 
-1. **macOS menu-bar app shell**
-   Swift menu-bar (`NSStatusItem`) app with a popover UI, background-agent lifecycle, and a Settings window — the foundation every other feature hangs off of. Model it on the Prompter app structure.
-   *As Priya, I want email-junkie to live quietly in my menu bar, so that it runs in the background without cluttering my Dock or stealing focus.*
-   - App launches as a menu-bar item with no Dock icon by default.
-   - Clicking the icon opens a popover showing status (watching / idle / drafts pending) and a path to Settings.
-   - App can be set to launch at login.
-   - Quitting from the popover fully stops background watching.
+> Resolved items are recorded in [`resolved.md`](./resolved.md). Item numbers are stable IDs — they are not reused or renumbered when items are completed.
 
 2. **First-run onboarding flow**
    Guided setup on first launch so a non-tinkering technical user can finish in a few minutes.
@@ -296,5 +290,3 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Optional Gmail `watch` (Pub/Sub) push path as an alternative to the item 5 poller.
     - Documented infrastructure tradeoffs vs the local-first polling default.
     - Falls back to polling when push isn't available.
-
-## Completed

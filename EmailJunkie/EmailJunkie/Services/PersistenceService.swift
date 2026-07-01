@@ -84,11 +84,13 @@ final class PersistenceService: PersistenceProvider {
 
     func saveSettingsSync(_ settings: Settings) {
         let validated = settings.validated()
-        do {
-            let data = try encoder.encode(validated)
-            try data.write(to: settingsURL, options: .atomic)
-        } catch {
-            logger.error("Failed to save settings (sync): \(error.localizedDescription)")
+        ioQueue.sync { [encoder, settingsURL] in
+            do {
+                let data = try encoder.encode(validated)
+                try data.write(to: settingsURL, options: .atomic)
+            } catch {
+                logger.error("Failed to save settings (sync): \(error.localizedDescription)")
+            }
         }
     }
 }

@@ -119,22 +119,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - No auto-send ever fires on a flagged draft.
     - Flagged items appear distinctly in the approval UI and activity history (item 21).
 
-14. **Open-source repo scaffolding**
-    The OSS hygiene needed to "offer it to others": license, README, contribution guide.
-    *As Sam, I want a clear license, README, and contributing guide, so that I can trust, run, and contribute to the project.*
-    - `LICENSE` added (MIT, matching the Prompter family).
-    - `README` covering what it is, install (DMG + Homebrew), setup, privacy posture, and BYO-key/provider notes.
-    - `CONTRIBUTING` with build/run/test instructions and PR expectations.
-    - Issue/PR templates and a basic code of conduct.
-
-15. **CI pipeline (build, test, lint on push/PR)**
-    Continuous integration via GitHub Actions so every push and PR is built, tested, and linted.
-    *As a maintainer, I want every push and PR validated automatically, so that broken or unformatted code never reaches main.*
-    - GitHub Actions workflow runs on push and pull_request against a macOS runner.
-    - Steps: build the app, run unit/integration tests, run SwiftLint/format checks.
-    - Required status checks must pass before merge; failures are clearly surfaced.
-    - Workflow is fast enough to be useful on every PR and caches dependencies.
-
 ## Medium Priority
 
 16. **Local model support**
@@ -290,3 +274,9 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Optional Gmail `watch` (Pub/Sub) push path as an alternative to the item 5 poller.
     - Documented infrastructure tradeoffs vs the local-first polling default.
     - Falls back to polling when push isn't available.
+
+38. **CI hardening (required checks + caching)**
+    Follow-ups from the initial CI pipeline (item 15).
+    *As a maintainer, I want CI enforced and fast, so that broken code can't merge and runs stay cheap.*
+    - Enable branch protection on `main` requiring the CI check to pass before merge.
+    - Cache SwiftPM/Xcode build dependencies to speed up runs.

@@ -39,8 +39,17 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Privacy") {
+                Text("Email Junkie is local-first. Your mail and settings stay on this "
+                     + "Mac, and secrets like API keys and OAuth tokens are stored in the "
+                     + "macOS Keychain — never in plaintext. Nothing leaves your machine "
+                     + "except the LLM request you configure and control.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 360)
+        .frame(width: 420, height: 420)
     }
 }

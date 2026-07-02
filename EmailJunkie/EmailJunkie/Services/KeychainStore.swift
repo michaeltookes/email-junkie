@@ -17,12 +17,31 @@ enum KeychainError: Error, Equatable {
 /// keychain and the generic-password class, so it needs no special entitlement.
 final class KeychainStore: SecretStore {
 
+    typealias AddItem = (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    typealias CopyMatching = (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    typealias DeleteItem = (CFDictionary) -> OSStatus
+    typealias UpdateItem = (CFDictionary, CFDictionary) -> OSStatus
+
     static let shared = KeychainStore()
 
     private let service: String
+    private let addItem: AddItem
+    private let copyMatching: CopyMatching
+    private let deleteItem: DeleteItem
+    private let updateItem: UpdateItem
 
-    init(service: String = "com.tookes.EmailJunkie") {
+    init(
+        service: String = "com.tookes.EmailJunkie",
+        addItem: @escaping AddItem = SecItemAdd,
+        copyMatching: @escaping CopyMatching = SecItemCopyMatching,
+        deleteItem: @escaping DeleteItem = SecItemDelete,
+        updateItem: @escaping UpdateItem = SecItemUpdate
+    ) {
         self.service = service
+        self.addItem = addItem
+        self.copyMatching = copyMatching
+        self.deleteItem = deleteItem
+        self.updateItem = updateItem
     }
 
     func set(_ value: String, for key: SecretKey) throws {
@@ -30,17 +49,38 @@ final class KeychainStore: SecretStore {
             throw KeychainError.dataEncodingFailed
         }
 
-        // Delete any existing item first so the write is idempotent.
-        SecItemDelete(baseQuery(for: key) as CFDictionary)
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data
+        ]
+
+        let updateStatus = updateItem(baseQuery(for: key) as CFDictionary, updateAttributes as CFDictionary)
+        switch updateStatus {
+        case errSecSuccess:
+            return
+        case errSecItemNotFound:
+            break
+        default:
+            logger.error("Keychain update failed for \(key.rawValue, privacy: .public): \(updateStatus)")
+            throw KeychainError.unexpectedStatus(updateStatus)
+        }
 
         var attributes = baseQuery(for: key)
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            logger.error("Keychain set failed for \(key.rawValue, privacy: .public): \(status)")
-            throw KeychainError.unexpectedStatus(status)
+        let addStatus = addItem(attributes as CFDictionary, nil)
+        switch addStatus {
+        case errSecSuccess:
+            return
+        case errSecDuplicateItem:
+            let retryStatus = updateItem(baseQuery(for: key) as CFDictionary, updateAttributes as CFDictionary)
+            guard retryStatus == errSecSuccess else {
+                logger.error("Keychain retry update failed for \(key.rawValue, privacy: .public): \(retryStatus)")
+                throw KeychainError.unexpectedStatus(retryStatus)
+            }
+        default:
+            logger.error("Keychain set failed for \(key.rawValue, privacy: .public): \(addStatus)")
+            throw KeychainError.unexpectedStatus(addStatus)
         }
     }
 
@@ -50,7 +90,7 @@ final class KeychainStore: SecretStore {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = copyMatching(query as CFDictionary, &result)
 
         switch status {
         case errSecSuccess:
@@ -68,7 +108,7 @@ final class KeychainStore: SecretStore {
     }
 
     func remove(_ key: SecretKey) throws {
-        let status = SecItemDelete(baseQuery(for: key) as CFDictionary)
+        let status = deleteItem(baseQuery(for: key) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
@@ -81,9 +121,9 @@ final class KeychainStore: SecretStore {
         ]
         // On macOS, SecItemDelete removes a single matching item per call, so
         // loop until nothing is left.
-        var status = SecItemDelete(query as CFDictionary)
+        var status = deleteItem(query as CFDictionary)
         while status == errSecSuccess {
-            status = SecItemDelete(query as CFDictionary)
+            status = deleteItem(query as CFDictionary)
         }
         guard status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)

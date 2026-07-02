@@ -65,3 +65,143 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNil(try store.value(for: SecretKey(rawValue: "test.b")))
     }
 }
+
+final class KeychainStoreBehaviorTests: XCTestCase {
+    private let key = SecretKey(rawValue: "test.sample")
+
+    func testSetUpdatesExistingValueWithoutAdding() throws {
+        let fakeKeychain = FakeKeychain(value: "first")
+        let store = fakeKeychain.makeStore()
+
+        try store.set("second", for: key)
+
+        XCTAssertEqual(try store.value(for: key), "second")
+        XCTAssertEqual(fakeKeychain.updateCallCount, 1)
+        XCTAssertEqual(fakeKeychain.addCallCount, 0)
+    }
+
+    func testSetFallsBackToAddWhenValueIsMissing() throws {
+        let fakeKeychain = FakeKeychain(
+            updateStatuses: [errSecItemNotFound],
+            addStatuses: [errSecSuccess]
+        )
+        let store = fakeKeychain.makeStore()
+
+        try store.set("created", for: key)
+
+        XCTAssertEqual(try store.value(for: key), "created")
+        XCTAssertEqual(fakeKeychain.updateCallCount, 1)
+        XCTAssertEqual(fakeKeychain.addCallCount, 1)
+    }
+
+    func testSetPreservesExistingValueWhenUpdateFails() throws {
+        let fakeKeychain = FakeKeychain(
+            value: "first",
+            updateStatuses: [errSecInteractionNotAllowed]
+        )
+        let store = fakeKeychain.makeStore()
+
+        XCTAssertThrowsError(try store.set("second", for: key)) { error in
+            XCTAssertEqual(error as? KeychainError, .unexpectedStatus(errSecInteractionNotAllowed))
+        }
+
+        XCTAssertEqual(try store.value(for: key), "first")
+        XCTAssertEqual(fakeKeychain.updateCallCount, 1)
+        XCTAssertEqual(fakeKeychain.addCallCount, 0)
+    }
+
+    func testSetRetriesUpdateWhenAddRacesWithAnotherWriter() throws {
+        let fakeKeychain = FakeKeychain(
+            updateStatuses: [errSecItemNotFound, errSecSuccess],
+            addStatuses: [errSecDuplicateItem]
+        )
+        let store = fakeKeychain.makeStore()
+
+        try store.set("second", for: key)
+
+        XCTAssertEqual(try store.value(for: key), "second")
+        XCTAssertEqual(fakeKeychain.updateCallCount, 2)
+        XCTAssertEqual(fakeKeychain.addCallCount, 1)
+    }
+}
+
+private final class FakeKeychain {
+    private var data: Data?
+    private var updateStatuses: [OSStatus]
+    private var addStatuses: [OSStatus]
+
+    private(set) var addCallCount = 0
+    private(set) var updateCallCount = 0
+
+    init(
+        value: String? = nil,
+        updateStatuses: [OSStatus] = [],
+        addStatuses: [OSStatus] = []
+    ) {
+        self.data = value?.data(using: .utf8)
+        self.updateStatuses = updateStatuses
+        self.addStatuses = addStatuses
+    }
+
+    func makeStore() -> KeychainStore {
+        KeychainStore(
+            service: "com.tookes.EmailJunkie.fake-tests",
+            addItem: addItem,
+            copyMatching: copyMatching,
+            deleteItem: deleteItem,
+            updateItem: updateItem
+        )
+    }
+
+    private func addItem(
+        _ attributes: CFDictionary,
+        _ result: UnsafeMutablePointer<CFTypeRef?>?
+    ) -> OSStatus {
+        addCallCount += 1
+        let status = addStatuses.isEmpty ? (data == nil ? errSecSuccess : errSecDuplicateItem) : addStatuses.removeFirst()
+        if status == errSecSuccess {
+            data = valueData(from: attributes)
+        }
+        result?.pointee = nil
+        return status
+    }
+
+    private func copyMatching(
+        _ _: CFDictionary,
+        _ result: UnsafeMutablePointer<CFTypeRef?>?
+    ) -> OSStatus {
+        guard let data else {
+            result?.pointee = nil
+            return errSecItemNotFound
+        }
+
+        result?.pointee = data as NSData
+        return errSecSuccess
+    }
+
+    private func deleteItem(_ _: CFDictionary) -> OSStatus {
+        guard data != nil else {
+            return errSecItemNotFound
+        }
+
+        data = nil
+        return errSecSuccess
+    }
+
+    private func updateItem(
+        _ _: CFDictionary,
+        _ attributesToUpdate: CFDictionary
+    ) -> OSStatus {
+        updateCallCount += 1
+        let status = updateStatuses.isEmpty ? (data == nil ? errSecItemNotFound : errSecSuccess) : updateStatuses.removeFirst()
+        if status == errSecSuccess {
+            data = valueData(from: attributesToUpdate)
+        }
+        return status
+    }
+
+    private func valueData(from attributes: CFDictionary) -> Data? {
+        let dictionary = attributes as NSDictionary
+        return dictionary[kSecValueData as String] as? Data
+    }
+}

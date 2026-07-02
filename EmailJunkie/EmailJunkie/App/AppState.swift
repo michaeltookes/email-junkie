@@ -28,8 +28,20 @@ final class AppState: ObservableObject {
     /// Number of drafts awaiting the user's approval.
     @Published var pendingDraftCount: Int = 0
 
-    /// Whether an email account is connected. False until Gmail OAuth lands.
+    /// Whether an email account is connected.
     @Published var isAccountConnected: Bool = false
+
+    /// Whether a Gmail connection attempt is in progress.
+    @Published var isConnecting: Bool = false
+
+    /// A user-facing message describing the last connection error, if any.
+    @Published var connectionError: String?
+
+    /// The BYO Google OAuth client ID, bound to the Settings field.
+    @Published var clientIDInput: String = ""
+
+    /// The BYO Google OAuth client secret, bound to the Settings field.
+    @Published var clientSecretInput: String = ""
 
     // MARK: - Preferences
 
@@ -42,6 +54,8 @@ final class AppState: ObservableObject {
     // MARK: - Private
 
     private let persistence: PersistenceProvider
+    private let gmailStore: GmailAuthStore
+    private let gmailAuth: GmailAuthCoordinator
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
 
@@ -64,14 +78,90 @@ final class AppState: ObservableObject {
 
     // MARK: - Initialization
 
-    init(persistence: PersistenceProvider = PersistenceService.shared) {
+    init(
+        persistence: PersistenceProvider = PersistenceService.shared,
+        gmailStore: GmailAuthStore = GmailAuthStore(),
+        gmailAuth: GmailAuthCoordinator? = nil
+    ) {
         self.persistence = persistence
+        self.gmailStore = gmailStore
+        self.gmailAuth = gmailAuth ?? GmailAuthCoordinator(
+            store: gmailStore,
+            tokenService: OAuthTokenService(transport: URLSessionTransport()),
+            makeListener: { LoopbackRedirectListener() },
+            browser: NSWorkspaceBrowserOpener()
+        )
 
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
+        self.isAccountConnected = gmailStore.isConnected
+        if let credentials = try? gmailStore.loadCredentials() {
+            self.clientIDInput = credentials.clientID
+            self.clientSecretInput = credentials.clientSecret
+        }
+
         setupAutoSave()
+    }
+
+    // MARK: - Gmail Account
+
+    /// Saves the entered BYO OAuth client credentials to the Keychain.
+    func saveGmailCredentials() {
+        let credentials = GmailCredentials(
+            clientID: clientIDInput.trimmingCharacters(in: .whitespacesAndNewlines),
+            clientSecret: clientSecretInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        try? gmailStore.saveCredentials(credentials)
+    }
+
+    /// Runs the Gmail connect flow, updating connection state and any error.
+    func connectGmail() async {
+        connectionError = nil
+        saveGmailCredentials()
+
+        guard !clientIDInput.isEmpty, !clientSecretInput.isEmpty else {
+            connectionError = "Enter your Google OAuth client ID and secret first."
+            return
+        }
+
+        isConnecting = true
+        defer { isConnecting = false }
+
+        do {
+            _ = try await gmailAuth.connect()
+            isAccountConnected = true
+        } catch {
+            connectionError = Self.message(for: error)
+        }
+    }
+
+    /// Disconnects the Gmail account (clears the token, keeps credentials).
+    func disconnectGmail() {
+        connectionError = nil
+        do {
+            try gmailAuth.disconnect()
+            isAccountConnected = false
+        } catch {
+            connectionError = Self.message(for: error)
+        }
+    }
+
+    /// Maps an error to a concise, user-facing message.
+    private static func message(for error: Error) -> String {
+        switch error {
+        case GmailAuthError.missingCredentials:
+            return "Enter your Google OAuth client ID and secret first."
+        case OAuthError.stateMismatch:
+            return "Security check failed. Please try connecting again."
+        case OAuthError.authorizationDenied:
+            return "Access was declined in the browser."
+        case let OAuthError.server(code, description):
+            return description ?? "Google returned an error (\(code))."
+        default:
+            return error.localizedDescription
+        }
     }
 
     /// Persists settings automatically when a tracked preference changes.

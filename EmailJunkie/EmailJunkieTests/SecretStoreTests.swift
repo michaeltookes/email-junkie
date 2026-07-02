@@ -7,13 +7,13 @@ final class SecretStoreTests: XCTestCase {
 
     func testSetAndGetRoundTrips() throws {
         let store = InMemorySecretStore()
-        try store.set("token-123", for: .gmailAccessToken)
-        XCTAssertEqual(try store.value(for: .gmailAccessToken), "token-123")
+        try store.set("token-123", for: .gmailToken)
+        XCTAssertEqual(try store.value(for: .gmailToken), "token-123")
     }
 
     func testValueIsNilWhenAbsent() throws {
         let store = InMemorySecretStore()
-        XCTAssertNil(try store.value(for: .gmailRefreshToken))
+        XCTAssertNil(try store.value(for: .googleClientID))
     }
 
     func testSetOverwritesExistingValue() throws {
@@ -25,32 +25,32 @@ final class SecretStoreTests: XCTestCase {
 
     func testRemoveDeletesValue() throws {
         let store = InMemorySecretStore()
-        try store.set("x", for: .gmailAccessToken)
-        try store.remove(.gmailAccessToken)
-        XCTAssertNil(try store.value(for: .gmailAccessToken))
+        try store.set("x", for: .gmailToken)
+        try store.remove(.gmailToken)
+        XCTAssertNil(try store.value(for: .gmailToken))
     }
 
     func testRemoveAllClearsEverything() throws {
         let store = InMemorySecretStore()
-        try store.set("a", for: .gmailAccessToken)
-        try store.set("b", for: .gmailRefreshToken)
+        try store.set("a", for: .gmailToken)
+        try store.set("b", for: .googleClientID)
         try store.removeAll()
-        XCTAssertNil(try store.value(for: .gmailAccessToken))
-        XCTAssertNil(try store.value(for: .gmailRefreshToken))
+        XCTAssertNil(try store.value(for: .gmailToken))
+        XCTAssertNil(try store.value(for: .googleClientID))
     }
 
     func testSeededStoreExposesInitialValues() throws {
-        let store = InMemorySecretStore(seed: [.gmailAccessToken: "seeded"])
-        XCTAssertEqual(try store.value(for: .gmailAccessToken), "seeded")
+        let store = InMemorySecretStore(seed: [.gmailToken: "seeded"])
+        XCTAssertEqual(try store.value(for: .gmailToken), "seeded")
     }
 
     func testHasValueReflectsPresenceAndEmptiness() throws {
         let store = InMemorySecretStore()
-        XCTAssertFalse(store.hasValue(for: .gmailAccessToken))
-        try store.set("", for: .gmailAccessToken)
-        XCTAssertFalse(store.hasValue(for: .gmailAccessToken), "empty string is not a value")
-        try store.set("real", for: .gmailAccessToken)
-        XCTAssertTrue(store.hasValue(for: .gmailAccessToken))
+        XCTAssertFalse(store.hasValue(for: .gmailToken))
+        try store.set("", for: .gmailToken)
+        XCTAssertFalse(store.hasValue(for: .gmailToken), "empty string is not a value")
+        try store.set("real", for: .gmailToken)
+        XCTAssertTrue(store.hasValue(for: .gmailToken))
     }
 
     func testLLMAPIKeyIsProviderScoped() {

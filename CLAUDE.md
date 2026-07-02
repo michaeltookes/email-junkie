@@ -16,8 +16,8 @@ It is a **Prompter-family product** — a native Mac app for individual knowledg
 - **LLM access:** pluggable BYO-any-provider, plus a local-model option (e.g. Ollama).
 - **Ethos:** local-first, private, BYO-key, no subscription. Nothing leaves the machine except the user-controlled LLM call. Secrets live in the macOS Keychain.
 
-### Open decision to resolve before building Gmail auth (item 3)
-Distributing one shared Google OAuth client for a public build means either staying under Google's 100-user "Testing mode" cap or paying for the annual CASA security assessment to reach Production. This affects how broadly the app can be distributed without spend. Decide before implementing the bundled-client path.
+### Resolved: Gmail OAuth distribution model (2026-07-02)
+**Bring-your-own credentials is the v1 primary path, with the OAuth client config built pluggable** so a bundled client can be added later. Each user supplies their own Google Cloud OAuth client. This avoids Google's verification + annual CASA assessment (required to distribute a shared client for restricted Gmail scopes), the 100-user Testing-mode cap, and the ~7-day Testing-mode refresh-token expiry — and it fits the technical/open-source audience while keeping the maintainer free of cost and inbox-data custody. When building item 3, **empirically verify refresh-token lifetime** (Testing vs Production) with a real account so onboarding docs are accurate. Bundled-client and CASA paths are deferred, not chosen.
 
 ## Backlog Management
 

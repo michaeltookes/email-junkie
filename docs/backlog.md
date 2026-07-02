@@ -30,15 +30,15 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Flow can be exited and resumed; completing it flips the app into "watching" state.
    - A clear privacy statement explains what stays local and what is sent to the chosen LLM.
 
-3. **Gmail connection (OAuth)**
+3. **Gmail connection (OAuth)** — *implementation landed on branch `gmail-connection`; live verification pending*
    Authenticate to Gmail with the minimum scopes needed to read inbox + Sent and create/send replies. **Distribution model (decided 2026-07-02): bring-your-own credentials — each user supplies their own Google Cloud OAuth client — with the client config built pluggable so a bundled client can be added later. See CLAUDE.md.**
    *As Priya, I want to connect my Gmail, so that the assistant can read my mail and draft replies.*
    *As Sam, I want to supply my own Google Cloud OAuth client, so that I authorize the app under my own project with no shared-client caps or verification.*
-   - OAuth requests only required scopes (`gmail.readonly` + `gmail.modify`/`gmail.send`), using a PKCE desktop-app flow.
-   - User supplies their own Google Cloud OAuth client ID/secret; the client config is pluggable so a bundled client can be added later without rework.
-   - Tokens and client credentials stored in the macOS Keychain (item 10, done); refresh handled automatically.
-   - Connected-account indicator and a "disconnect" action in Settings; revoking stops all reads/writes immediately.
-   - Empirically verify refresh-token lifetime (Testing vs Production status) and document the setup so users avoid weekly re-auth.
+   - ✅ PKCE desktop/loopback flow requesting only `gmail.modify` + `gmail.send`; authorization URL, code exchange, and refresh all built and unit-tested.
+   - ✅ User supplies their own client ID/secret in Settings; client config is pluggable so a bundled client can be added later.
+   - ✅ Tokens + client credentials stored in the macOS Keychain (item 10); access token auto-refreshes on expiry.
+   - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
+   - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
 4. **Voice profile from Sent folder**
    Derive a reusable voice profile from Sent mail and inject it into every draft prompt.

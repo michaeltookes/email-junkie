@@ -87,14 +87,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Draft-only: a native Gmail draft is created in the right thread; nothing is sent.
    - The approval UI clearly indicates what "Approve" will do in the current mode.
 
-10. **Secure local storage**
-    Keychain for secrets; local-only storage for profile and state.
-    *As Sam, I want my tokens and keys stored securely and my email kept local, so that I can trust the app with my inbox.*
-    - OAuth tokens and LLM API keys stored in the macOS Keychain, never plaintext.
-    - Voice profile and app state stored locally; nothing transmitted except the user-controlled LLM call.
-    - Accurate privacy statement shown in onboarding and Settings.
-    - Disconnecting an account or quitting removes/disables access cleanly.
-
 11. **Distribution: signed DMG + Sparkle + Homebrew cask**
     Reuse the Prompter shipping pipeline.
     *As Priya, I want to install via DMG or Homebrew and get automatic updates, so that setup and upkeep are frictionless and not scary.*

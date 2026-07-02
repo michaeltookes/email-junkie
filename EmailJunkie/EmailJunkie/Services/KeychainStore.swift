@@ -79,8 +79,13 @@ final class KeychainStore: SecretStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
+        // On macOS, SecItemDelete removes a single matching item per call, so
+        // loop until nothing is left.
+        var status = SecItemDelete(query as CFDictionary)
+        while status == errSecSuccess {
+            status = SecItemDelete(query as CFDictionary)
+        }
+        guard status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
     }

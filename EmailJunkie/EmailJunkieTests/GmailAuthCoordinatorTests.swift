@@ -106,6 +106,13 @@ final class GmailAuthCoordinatorTests: XCTestCase {
         await assertThrows(try await coordinator.connect(), OAuthError.stateMismatch)
     }
 
+    func testConnectRejectsErrorWhenStateMismatches() async {
+        let (coordinator, _, _, _) = makeCoordinator(
+            redirect: ["error": "access_denied", "state": "WRONG"], tokenJSON: "{}"
+        )
+        await assertThrows(try await coordinator.connect(), OAuthError.stateMismatch)
+    }
+
     func testConnectSurfacesAuthorizationDenied() async {
         let (coordinator, _, _, _) = makeCoordinator(
             redirect: ["error": "access_denied", "state": state], tokenJSON: "{}"
@@ -139,13 +146,31 @@ final class GmailAuthCoordinatorTests: XCTestCase {
     func testValidAccessTokenRefreshesWhenExpired() async throws {
         let (coordinator, store, _, _) = makeCoordinator(
             redirect: [:],
-            tokenJSON: #"{"access_token":"fresh-at","expires_in":3600,"token_type":"Bearer","scope":"s"}"#,
+            tokenJSON: """
+            {"access_token":"fresh-at","expires_in":3600,"token_type":"Bearer","scope":"\(requiredScopeString)"}
+            """,
             seedToken: token(expiresAt: now.addingTimeInterval(-10))
         )
         let access = try await coordinator.validAccessToken()
         XCTAssertEqual(access, "fresh-at")
         XCTAssertEqual(try store.loadToken()?.accessToken, "fresh-at")
         XCTAssertEqual(try store.loadToken()?.refreshToken, "rt", "refresh token carried forward")
+    }
+
+    func testValidAccessTokenRejectsRefreshedTokenMissingRequiredScopes() async {
+        let (coordinator, store, _, _) = makeCoordinator(
+            redirect: [:],
+            tokenJSON: """
+            {"access_token":"fresh-at","expires_in":3600,"token_type":"Bearer","scope":"\(GoogleOAuth.scopes[0])"}
+            """,
+            seedToken: token(expiresAt: now.addingTimeInterval(-10))
+        )
+
+        await assertThrows(
+            try await coordinator.validAccessToken(),
+            OAuthError.missingRequiredScopes([GoogleOAuth.scopes[1]])
+        )
+        XCTAssertEqual(try? store.loadToken()?.accessToken, "stored-at")
     }
 
     func testDisconnectClearsTokenButKeepsCredentials() async throws {

@@ -67,11 +67,11 @@ final class GmailAuthCoordinator {
         browser.open(authURL)
 
         let params = try await listener.waitForRedirect(timeout: redirectTimeout)
-        if let error = params["error"] {
-            throw OAuthError.authorizationDenied(error)
-        }
         guard params["state"] == state else {
             throw OAuthError.stateMismatch
+        }
+        if let error = params["error"] {
+            throw OAuthError.authorizationDenied(error)
         }
         guard let code = params["code"] else {
             throw OAuthError.invalidResponse
@@ -114,6 +114,10 @@ final class GmailAuthCoordinator {
             credentials: credentials,
             now: now()
         )
+        let missingScopes = refreshed.missingScopes(from: GoogleOAuth.scopes)
+        guard missingScopes.isEmpty else {
+            throw OAuthError.missingRequiredScopes(missingScopes)
+        }
         try store.saveToken(refreshed)
         return refreshed.accessToken
     }

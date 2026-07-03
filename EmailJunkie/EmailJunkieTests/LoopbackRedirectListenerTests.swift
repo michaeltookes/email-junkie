@@ -3,15 +3,27 @@ import XCTest
 
 final class LoopbackRedirectListenerTests: XCTestCase {
 
+    func testRedirectURIIsPathlessLoopbackURI() throws {
+        let redirectURI = LoopbackRedirectListener.redirectURI(forPort: 9999)
+        let components = try XCTUnwrap(URLComponents(string: redirectURI))
+
+        XCTAssertEqual(components.scheme, "http")
+        XCTAssertEqual(components.host, "127.0.0.1")
+        XCTAssertEqual(components.port, 9999)
+        XCTAssertEqual(components.path, "")
+        XCTAssertNil(components.query)
+        XCTAssertFalse(redirectURI.contains("/callback"))
+    }
+
     func testParsesCodeAndStateFromRequestLine() {
-        let request = "GET /callback?code=abc123&state=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        let request = "GET /?code=abc123&state=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
         let params = LoopbackRedirectListener.parseQuery(fromRequestLine: request)
         XCTAssertEqual(params["code"], "abc123")
         XCTAssertEqual(params["state"], "xyz")
     }
 
     func testParsesErrorRedirect() {
-        let request = "GET /callback?error=access_denied&state=xyz HTTP/1.1\r\n\r\n"
+        let request = "GET /?error=access_denied&state=xyz HTTP/1.1\r\n\r\n"
         let params = LoopbackRedirectListener.parseQuery(fromRequestLine: request)
         XCTAssertEqual(params["error"], "access_denied")
     }

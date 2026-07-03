@@ -25,7 +25,7 @@ final class GmailAuthCoordinatorTests: XCTestCase {
         let transport = FakeTransport(
             response: HTTPResponse(statusCode: tokenStatus, body: Data(tokenJSON.utf8))
         )
-        let listener = FakeRedirectListener(redirectURI: "http://127.0.0.1:9999/callback", params: redirect)
+        let listener = FakeRedirectListener(redirectURI: "http://127.0.0.1:9999", params: redirect)
         let browser = SpyBrowser()
         let coordinator = GmailAuthCoordinator(
             store: store,
@@ -59,7 +59,7 @@ final class GmailAuthCoordinatorTests: XCTestCase {
         let items = URLComponents(url: opened, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let byName = items.reduce(into: [String: String]()) { $0[$1.name] = $1.value }
         XCTAssertEqual(byName["client_id"], "cid")
-        XCTAssertEqual(byName["redirect_uri"], "http://127.0.0.1:9999/callback")
+        XCTAssertEqual(byName["redirect_uri"], "http://127.0.0.1:9999")
         XCTAssertEqual(byName["state"], state)
     }
 

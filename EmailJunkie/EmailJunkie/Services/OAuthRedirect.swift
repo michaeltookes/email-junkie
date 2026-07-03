@@ -33,14 +33,9 @@ protocol RedirectListener {
 /// the socket handling itself is verified live.
 final class LoopbackRedirectListener: RedirectListener {
 
-    private let path: String
     private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.loopback")
     private var listener: NWListener?
     private var hasResumed = false
-
-    init(path: String = "/callback") {
-        self.path = path
-    }
 
     func start() async throws -> String {
         let listener = try NWListener(using: .tcp)
@@ -51,7 +46,7 @@ final class LoopbackRedirectListener: RedirectListener {
                 switch state {
                 case .ready:
                     if let port = listener.port?.rawValue {
-                        continuation.resume(returning: "http://127.0.0.1:\(port)\(self.path)")
+                        continuation.resume(returning: Self.redirectURI(forPort: port))
                     } else {
                         continuation.resume(throwing: OAuthError.invalidResponse)
                     }
@@ -63,6 +58,10 @@ final class LoopbackRedirectListener: RedirectListener {
             }
             listener.start(queue: queue)
         }
+    }
+
+    static func redirectURI(forPort port: UInt16) -> String {
+        "http://127.0.0.1:\(port)"
     }
 
     func waitForRedirect() async throws -> [String: String] {
@@ -114,7 +113,7 @@ final class LoopbackRedirectListener: RedirectListener {
     }
 
     /// Parses query parameters from the first line of an HTTP request, e.g.
-    /// `GET /callback?code=abc&state=xyz HTTP/1.1`.
+    /// `GET /?code=abc&state=xyz HTTP/1.1`.
     static func parseQuery(fromRequestLine request: String) -> [String: String] {
         let lines = request.split(whereSeparator: { $0 == "\r" || $0 == "\n" })
         guard let firstLine = lines.first else { return [:] }

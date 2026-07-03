@@ -25,7 +25,7 @@ final class OAuthTokenServiceTests: XCTestCase {
             code: "auth-code",
             verifier: "verifier",
             credentials: credentials,
-            redirectURI: "http://127.0.0.1:9000/cb",
+            redirectURI: "http://127.0.0.1:9000",
             now: now
         )
 
@@ -36,7 +36,7 @@ final class OAuthTokenServiceTests: XCTestCase {
         XCTAssertEqual(transport.lastFields["grant_type"], "authorization_code")
         XCTAssertEqual(transport.lastFields["code"], "auth-code")
         XCTAssertEqual(transport.lastFields["code_verifier"], "verifier")
-        XCTAssertEqual(transport.lastFields["redirect_uri"], "http://127.0.0.1:9000/cb")
+        XCTAssertEqual(transport.lastFields["redirect_uri"], "http://127.0.0.1:9000")
         XCTAssertEqual(transport.lastFields["client_secret"], "secret")
     }
 

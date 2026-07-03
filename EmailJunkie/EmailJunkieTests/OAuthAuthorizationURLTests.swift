@@ -11,7 +11,7 @@ final class OAuthAuthorizationURLTests: XCTestCase {
     func testURLTargetsGoogleAuthorizationEndpoint() {
         let url = OAuthAuthorizationURL.make(
             clientID: "cid",
-            redirectURI: "http://127.0.0.1:5000/callback",
+            redirectURI: "http://127.0.0.1:5000",
             scopes: GoogleOAuth.scopes,
             pkce: PKCE(verifier: "v", challenge: "chal"),
             state: "state123"
@@ -24,14 +24,14 @@ final class OAuthAuthorizationURLTests: XCTestCase {
     func testURLCarriesPKCEStateAndOfflineAccess() {
         let url = OAuthAuthorizationURL.make(
             clientID: "cid",
-            redirectURI: "http://127.0.0.1:5000/callback",
+            redirectURI: "http://127.0.0.1:5000",
             scopes: ["scope.a", "scope.b"],
             pkce: PKCE(verifier: "verifier", challenge: "challenge-value"),
             state: "state123"
         )
         let items = queryItems(of: url)
         XCTAssertEqual(items["client_id"], "cid")
-        XCTAssertEqual(items["redirect_uri"], "http://127.0.0.1:5000/callback")
+        XCTAssertEqual(items["redirect_uri"], "http://127.0.0.1:5000")
         XCTAssertEqual(items["response_type"], "code")
         XCTAssertEqual(items["scope"], "scope.a scope.b")
         XCTAssertEqual(items["code_challenge"], "challenge-value")

@@ -40,7 +40,7 @@ final class LoopbackRedirectListener: RedirectListener {
     private var timeoutWorkItem: DispatchWorkItem?
 
     func start() async throws -> String {
-        let listener = try NWListener(using: .tcp)
+        let listener = try NWListener(using: Self.listenerParameters())
         self.listener = listener
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -72,6 +72,15 @@ final class LoopbackRedirectListener: RedirectListener {
 
     static func redirectURI(forPort port: UInt16) -> String {
         "http://127.0.0.1:\(port)"
+    }
+
+    static func listenerParameters() -> NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(
+            host: .ipv4(IPv4Address("127.0.0.1")!),
+            port: .any
+        )
+        return parameters
     }
 
     func waitForRedirect(timeout: TimeInterval) async throws -> [String: String] {

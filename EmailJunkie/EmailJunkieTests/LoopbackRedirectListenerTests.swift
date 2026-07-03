@@ -1,3 +1,4 @@
+import Network
 import XCTest
 @testable import EmailJunkie
 
@@ -13,6 +14,15 @@ final class LoopbackRedirectListenerTests: XCTestCase {
         XCTAssertEqual(components.path, "")
         XCTAssertNil(components.query)
         XCTAssertFalse(redirectURI.contains("/callback"))
+    }
+
+    func testListenerParametersBindToIPv4Loopback() throws {
+        let endpoint = try XCTUnwrap(LoopbackRedirectListener.listenerParameters().requiredLocalEndpoint)
+        guard case let .hostPort(host, port) = endpoint else {
+            return XCTFail("expected hostPort endpoint")
+        }
+        XCTAssertEqual(host, .ipv4(IPv4Address("127.0.0.1")!))
+        XCTAssertEqual(port, .any)
     }
 
     func testParsesCodeAndStateFromRequestLine() {

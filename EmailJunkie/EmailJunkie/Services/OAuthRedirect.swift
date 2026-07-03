@@ -42,16 +42,24 @@ final class LoopbackRedirectListener: RedirectListener {
         self.listener = listener
 
         return try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+            func finish(_ result: Result<String, Error>) {
+                guard !didResume else { return }
+                didResume = true
+                listener.stateUpdateHandler = nil
+                continuation.resume(with: result)
+            }
+
             listener.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     if let port = listener.port?.rawValue {
-                        continuation.resume(returning: Self.redirectURI(forPort: port))
+                        finish(.success(Self.redirectURI(forPort: port)))
                     } else {
-                        continuation.resume(throwing: OAuthError.invalidResponse)
+                        finish(.failure(OAuthError.invalidResponse))
                     }
                 case .failed(let error):
-                    continuation.resume(throwing: error)
+                    finish(.failure(error))
                 default:
                     break
                 }

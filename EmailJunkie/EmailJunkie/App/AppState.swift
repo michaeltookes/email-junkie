@@ -108,20 +108,21 @@ final class AppState: ObservableObject {
     // MARK: - Gmail Account
 
     /// Saves the entered BYO OAuth client credentials to the Keychain.
-    func saveGmailCredentials() {
+    func saveGmailCredentials() throws {
         let credentials = GmailCredentials(
             clientID: clientIDInput.trimmingCharacters(in: .whitespacesAndNewlines),
             clientSecret: clientSecretInput.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        try? gmailStore.saveCredentials(credentials)
+        try gmailStore.saveCredentials(credentials)
     }
 
     /// Runs the Gmail connect flow, updating connection state and any error.
     func connectGmail() async {
         connectionError = nil
-        saveGmailCredentials()
 
-        guard !clientIDInput.isEmpty, !clientSecretInput.isEmpty else {
+        let clientID = clientIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clientSecret = clientSecretInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clientID.isEmpty, !clientSecret.isEmpty else {
             connectionError = "Enter your Google OAuth client ID and secret first."
             return
         }
@@ -130,6 +131,7 @@ final class AppState: ObservableObject {
         defer { isConnecting = false }
 
         do {
+            try saveGmailCredentials()
             _ = try await gmailAuth.connect()
             isAccountConnected = true
         } catch {

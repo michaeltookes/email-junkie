@@ -16,8 +16,17 @@ final class GmailAuthStore {
     // MARK: - Credentials
 
     func saveCredentials(_ credentials: GmailCredentials) throws {
-        try secrets.set(credentials.clientID, for: .googleClientID)
-        try secrets.set(credentials.clientSecret, for: .googleClientSecret)
+        let existingClientID = try secrets.value(for: .googleClientID)
+        let existingClientSecret = try secrets.value(for: .googleClientSecret)
+
+        do {
+            try secrets.set(credentials.clientID, for: .googleClientID)
+            try secrets.set(credentials.clientSecret, for: .googleClientSecret)
+        } catch {
+            restore(existingClientID, for: .googleClientID)
+            restore(existingClientSecret, for: .googleClientSecret)
+            throw error
+        }
     }
 
     func loadCredentials() throws -> GmailCredentials? {
@@ -32,6 +41,18 @@ final class GmailAuthStore {
     func deleteCredentials() throws {
         try secrets.remove(.googleClientID)
         try secrets.remove(.googleClientSecret)
+    }
+
+    private func restore(_ value: String?, for key: SecretKey) {
+        do {
+            if let value {
+                try secrets.set(value, for: key)
+            } else {
+                try secrets.remove(key)
+            }
+        } catch {
+            // Preserve the original save failure; rollback is best effort.
+        }
     }
 
     // MARK: - Token

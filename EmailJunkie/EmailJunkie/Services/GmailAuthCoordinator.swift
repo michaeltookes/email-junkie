@@ -19,6 +19,7 @@ final class GmailAuthCoordinator {
     private let tokenService: OAuthTokenService
     private let makeListener: () -> RedirectListener
     private let browser: BrowserOpening
+    private let redirectTimeout: TimeInterval
     private let now: () -> Date
     private let makeState: () -> String
 
@@ -27,6 +28,7 @@ final class GmailAuthCoordinator {
         tokenService: OAuthTokenService,
         makeListener: @escaping () -> RedirectListener,
         browser: BrowserOpening,
+        redirectTimeout: TimeInterval = 300,
         now: @escaping () -> Date = Date.init,
         makeState: @escaping () -> String = { PKCEGenerator.randomURLSafeString(byteCount: 16) }
     ) {
@@ -34,6 +36,7 @@ final class GmailAuthCoordinator {
         self.tokenService = tokenService
         self.makeListener = makeListener
         self.browser = browser
+        self.redirectTimeout = redirectTimeout
         self.now = now
         self.makeState = makeState
     }
@@ -63,7 +66,7 @@ final class GmailAuthCoordinator {
         )
         browser.open(authURL)
 
-        let params = try await listener.waitForRedirect()
+        let params = try await listener.waitForRedirect(timeout: redirectTimeout)
         if let error = params["error"] {
             throw OAuthError.authorizationDenied(error)
         }

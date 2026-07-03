@@ -159,6 +159,8 @@ final class AppState: ObservableObject {
             return "Security check failed. Please try connecting again."
         case OAuthError.authorizationDenied:
             return "Access was declined in the browser."
+        case OAuthError.redirectTimedOut:
+            return "Connection timed out. Please try again."
         case let OAuthError.server(code, description):
             return description ?? "Google returned an error (\(code))."
         default:

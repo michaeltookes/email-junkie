@@ -105,7 +105,7 @@ private final class AppStateFakeRedirectListener: RedirectListener {
     }
 
     func start() async throws -> String { redirectURI }
-    func waitForRedirect() async throws -> [String: String] { params }
+    func waitForRedirect(timeout: TimeInterval) async throws -> [String: String] { params }
     func stop() {}
 }
 

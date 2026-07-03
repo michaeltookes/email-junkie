@@ -22,7 +22,7 @@ protocol RedirectListener {
     /// Starts listening and returns the loopback redirect URI to register.
     func start() async throws -> String
     /// Waits for the browser redirect and returns its query parameters.
-    func waitForRedirect() async throws -> [String: String]
+    func waitForRedirect(timeout: TimeInterval) async throws -> [String: String]
     /// Stops listening and releases the port.
     func stop()
 }
@@ -36,6 +36,8 @@ final class LoopbackRedirectListener: RedirectListener {
     private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.loopback")
     private var listener: NWListener?
     private var hasResumed = false
+    private var redirectContinuation: CheckedContinuation<[String: String], Error>?
+    private var timeoutWorkItem: DispatchWorkItem?
 
     func start() async throws -> String {
         let listener = try NWListener(using: .tcp)
@@ -72,18 +74,31 @@ final class LoopbackRedirectListener: RedirectListener {
         "http://127.0.0.1:\(port)"
     }
 
-    func waitForRedirect() async throws -> [String: String] {
+    func waitForRedirect(timeout: TimeInterval) async throws -> [String: String] {
         try await withCheckedThrowingContinuation { continuation in
-            listener?.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection: connection, continuation: continuation)
+            queue.async { [weak self] in
+                guard let self, let listener = self.listener else {
+                    continuation.resume(throwing: OAuthError.invalidResponse)
+                    return
+                }
+
+                self.hasResumed = false
+                self.redirectContinuation = continuation
+
+                let timeoutWorkItem = DispatchWorkItem { [weak self] in
+                    self?.finishRedirect(.failure(OAuthError.redirectTimedOut))
+                }
+                self.timeoutWorkItem = timeoutWorkItem
+                self.queue.asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
+
+                listener.newConnectionHandler = { [weak self] connection in
+                    self?.handle(connection: connection)
+                }
             }
         }
     }
 
-    private func handle(
-        connection: NWConnection,
-        continuation: CheckedContinuation<[String: String], Error>
-    ) {
+    private func handle(connection: NWConnection) {
         connection.start(queue: queue)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, _, _ in
             guard let self else { return }
@@ -94,10 +109,20 @@ final class LoopbackRedirectListener: RedirectListener {
 
             // Ignore incidental requests (e.g. favicon) that carry no result.
             guard params["code"] != nil || params["error"] != nil else { return }
-            guard !self.hasResumed else { return }
-            self.hasResumed = true
-            continuation.resume(returning: params)
+            self.finishRedirect(.success(params))
         }
+    }
+
+    private func finishRedirect(_ result: Result<[String: String], Error>) {
+        guard !hasResumed else { return }
+        hasResumed = true
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        listener?.newConnectionHandler = nil
+
+        let continuation = redirectContinuation
+        redirectContinuation = nil
+        continuation?.resume(with: result)
     }
 
     private func respond(on connection: NWConnection) {
@@ -116,6 +141,9 @@ final class LoopbackRedirectListener: RedirectListener {
     }
 
     func stop() {
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        listener?.newConnectionHandler = nil
         listener?.cancel()
         listener = nil
     }

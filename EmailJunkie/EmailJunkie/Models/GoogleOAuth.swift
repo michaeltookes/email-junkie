@@ -48,4 +48,6 @@ enum OAuthError: Error, Equatable {
     case authorizationDenied(String)
     /// No refresh token is available to refresh the session.
     case missingRefreshToken
+    /// The browser did not return to the loopback listener in time.
+    case redirectTimedOut
 }

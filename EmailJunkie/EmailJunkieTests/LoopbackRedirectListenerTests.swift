@@ -37,4 +37,33 @@ final class LoopbackRedirectListenerTests: XCTestCase {
         let request = "GET /favicon.ico HTTP/1.1\r\n\r\n"
         XCTAssertTrue(LoopbackRedirectListener.parseQuery(fromRequestLine: request).isEmpty)
     }
+
+    func testWaitForRedirectTimesOutWhenNoRequestArrives() async throws {
+        let listener = LoopbackRedirectListener()
+        do {
+            _ = try await listener.start()
+        } catch {
+            throw XCTSkip("Loopback listener unavailable in this environment: \(error)")
+        }
+        defer { listener.stop() }
+
+        await assertThrows(
+            try await listener.waitForRedirect(timeout: 0.01),
+            OAuthError.redirectTimedOut
+        )
+    }
+
+    private func assertThrows<E: Error & Equatable>(
+        _ expression: @autoclosure () async throws -> some Any,
+        _ expected: E,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("expected \(expected)", file: file, line: line)
+        } catch {
+            XCTAssertEqual(error as? E, expected, file: file, line: line)
+        }
+    }
 }

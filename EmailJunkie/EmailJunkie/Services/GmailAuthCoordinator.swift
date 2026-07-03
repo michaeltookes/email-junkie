@@ -84,6 +84,10 @@ final class GmailAuthCoordinator {
             redirectURI: redirectURI,
             now: now()
         )
+        let missingScopes = token.missingScopes(from: GoogleOAuth.scopes)
+        guard missingScopes.isEmpty else {
+            throw OAuthError.missingRequiredScopes(missingScopes)
+        }
         try store.saveToken(token)
         logger.info("Gmail account connected")
         return token

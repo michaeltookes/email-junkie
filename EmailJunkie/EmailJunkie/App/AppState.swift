@@ -161,6 +161,8 @@ final class AppState: ObservableObject {
             return "Access was declined in the browser."
         case OAuthError.redirectTimedOut:
             return "Connection timed out. Please try again."
+        case OAuthError.missingRequiredScopes:
+            return "Grant all requested Gmail permissions, then try connecting again."
         case let OAuthError.server(code, description):
             return description ?? "Google returned an error (\(code))."
         default:

@@ -6,6 +6,9 @@ final class GmailAuthCoordinatorTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_000_000)
     private let state = "FIXED-STATE"
+    private var requiredScopeString: String {
+        GoogleOAuth.scopes.joined(separator: " ")
+    }
 
     private func makeCoordinator(
         redirect: [String: String],
@@ -47,13 +50,15 @@ final class GmailAuthCoordinatorTests: XCTestCase {
 
     private func token(expiresAt: Date, refreshToken: String? = "rt") -> OAuthToken {
         OAuthToken(accessToken: "stored-at", refreshToken: refreshToken,
-                   expiresAt: expiresAt, scope: "s", tokenType: "Bearer")
+                   expiresAt: expiresAt, scope: requiredScopeString, tokenType: "Bearer")
     }
 
     func testConnectHappyPathStoresTokenAndOpensBrowser() async throws {
         let (coordinator, store, browser, listener) = makeCoordinator(
             redirect: ["code": "auth-code", "state": state],
-            tokenJSON: #"{"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer","scope":"s"}"#
+            tokenJSON: """
+            {"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer","scope":"\(requiredScopeString)"}
+            """
         )
 
         let result = try await coordinator.connect()
@@ -68,6 +73,23 @@ final class GmailAuthCoordinatorTests: XCTestCase {
         XCTAssertEqual(byName["client_id"], "cid")
         XCTAssertEqual(byName["redirect_uri"], "http://127.0.0.1:9999")
         XCTAssertEqual(byName["state"], state)
+    }
+
+    func testConnectRejectsTokenMissingRequiredScopes() async {
+        let (coordinator, store, _, listener) = makeCoordinator(
+            redirect: ["code": "auth-code", "state": state],
+            tokenJSON: """
+            {"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer","scope":"\(GoogleOAuth.scopes[0])"}
+            """
+        )
+
+        await assertThrows(
+            try await coordinator.connect(),
+            OAuthError.missingRequiredScopes([GoogleOAuth.scopes[1]])
+        )
+        XCTAssertNil(try? store.loadToken())
+        XCTAssertFalse(store.isConnected)
+        XCTAssertTrue(listener.stopped, "listener is always stopped")
     }
 
     func testConnectWithoutCredentialsThrows() async {

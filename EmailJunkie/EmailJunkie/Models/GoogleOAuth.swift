@@ -34,6 +34,11 @@ struct OAuthToken: Codable, Equatable {
     func isExpired(now: Date, leeway: TimeInterval = 60) -> Bool {
         now.addingTimeInterval(leeway) >= expiresAt
     }
+
+    func missingScopes(from requiredScopes: [String]) -> [String] {
+        let grantedScopes = Set(scope.split(separator: " ").map(String.init))
+        return requiredScopes.filter { !grantedScopes.contains($0) }
+    }
 }
 
 /// Errors surfaced by the OAuth flow.
@@ -50,4 +55,6 @@ enum OAuthError: Error, Equatable {
     case missingRefreshToken
     /// The browser did not return to the loopback listener in time.
     case redirectTimedOut
+    /// Google returned a token that lacks one or more required Gmail scopes.
+    case missingRequiredScopes([String])
 }

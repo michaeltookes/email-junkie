@@ -24,14 +24,45 @@ struct SettingsView: View {
                 )
             }
 
-            Section("Email account") {
-                LabeledContent("Status") {
-                    Text(appState.isAccountConnected ? "Connected" : "Not connected")
-                        .foregroundStyle(.secondary)
+            Section("Email account (Gmail)") {
+                if appState.isAccountConnected {
+                    LabeledContent("Status") {
+                        Text("Connected").foregroundStyle(.green)
+                    }
+                    Button("Disconnect", role: .destructive) {
+                        appState.disconnectGmail()
+                    }
+                } else {
+                    TextField("Google client ID", text: $appState.clientIDInput)
+                        .textContentType(.username)
+                    SecureField("Google client secret", text: $appState.clientSecretInput)
+
+                    Button {
+                        Task { await appState.connectGmail() }
+                    } label: {
+                        if appState.isConnecting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Connect Gmail")
+                        }
+                    }
+                    .disabled(appState.isConnecting)
+
+                    DisclosureGroup("How do I get these?") {
+                        Text("In Google Cloud: create a project, enable the Gmail API, "
+                             + "configure the OAuth consent screen, then create an OAuth "
+                             + "client ID of type \u{201C}Desktop app.\u{201D} Paste its client "
+                             + "ID and secret here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Text("Gmail connection is coming soon.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+                if let error = appState.connectionError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("AI provider") {

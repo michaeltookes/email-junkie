@@ -84,11 +84,7 @@ final class GmailAuthCoordinator {
             redirectURI: redirectURI,
             now: now()
         )
-        let missingScopes = token.missingScopes(from: GoogleOAuth.scopes)
-        guard missingScopes.isEmpty else {
-            throw OAuthError.missingRequiredScopes(missingScopes)
-        }
-        try store.saveToken(token)
+        try saveFullyScopedToken(token)
         logger.info("Gmail account connected")
         return token
     }
@@ -114,11 +110,7 @@ final class GmailAuthCoordinator {
             credentials: credentials,
             now: now()
         )
-        let missingScopes = refreshed.missingScopes(from: GoogleOAuth.scopes)
-        guard missingScopes.isEmpty else {
-            throw OAuthError.missingRequiredScopes(missingScopes)
-        }
-        try store.saveToken(refreshed)
+        try saveFullyScopedToken(refreshed)
         return refreshed.accessToken
     }
 
@@ -127,5 +119,13 @@ final class GmailAuthCoordinator {
     func disconnect() throws {
         try store.deleteToken()
         logger.info("Gmail account disconnected")
+    }
+
+    private func saveFullyScopedToken(_ token: OAuthToken) throws {
+        let missingScopes = token.missingScopes(from: GoogleOAuth.scopes)
+        guard missingScopes.isEmpty else {
+            throw OAuthError.missingRequiredScopes(missingScopes)
+        }
+        try store.saveToken(token)
     }
 }

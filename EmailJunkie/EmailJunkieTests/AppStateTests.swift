@@ -1,44 +1,74 @@
+import EmailJunkieMail
 import XCTest
 @testable import EmailJunkie
 
 @MainActor
 final class AppStateTests: XCTestCase {
 
-    func testConnectStopsWhenCredentialSavePartiallyFails() async {
-        let secrets = PartiallyFailingSecretStore(seed: [
-            .googleClientID: "old-client-id",
-            .googleClientSecret: "old-client-secret"
-        ])
-        let store = GmailAuthStore(secrets: secrets)
-        let browser = AppStateSpyBrowser()
-        let coordinator = GmailAuthCoordinator(
-            store: store,
-            tokenService: OAuthTokenService(transport: AppStateFakeTransport()),
-            makeListener: {
-                AppStateFakeRedirectListener(
-                    redirectURI: "http://127.0.0.1:9999",
-                    params: ["code": "auth-code", "state": "state"]
-                )
-            },
-            browser: browser,
-            now: { Date(timeIntervalSince1970: 1_000_000) },
-            makeState: { "state" }
-        )
-        let appState = AppState(
+    private func makeAppState(
+        provider: MailProvider,
+        secrets: SecretStore = InMemorySecretStore()
+    ) -> AppState {
+        AppState(
             persistence: AppStateMemoryPersistence(),
-            gmailStore: store,
-            gmailAuth: coordinator
+            secrets: secrets,
+            mailProvider: provider
         )
-        appState.clientIDInput = "new-client-id"
-        appState.clientSecretInput = "new-client-secret"
-        secrets.failOnSet = .googleClientSecret
+    }
 
-        await appState.connectGmail()
+    func testTestConnectionSuccessSavesPasswordAndConnects() async {
+        let secrets = InMemorySecretStore()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "app-pw"
 
-        XCTAssertNil(browser.openedURL)
-        XCTAssertFalse(appState.isAccountConnected)
+        await appState.testConnection()
+
+        XCTAssertTrue(appState.isAccountConnected)
         XCTAssertFalse(appState.isConnecting)
-        XCTAssertEqual(appState.connectionError, "Unable to save Gmail credentials.")
+        XCTAssertNil(appState.connectionError)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
+    }
+
+    func testTestConnectionFailureSurfacesError() async {
+        let provider = FakeAppMailProvider(result: .failure(.authenticationFailed("bad creds")))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "wrong"
+
+        await appState.testConnection()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNotNil(appState.connectionError)
+    }
+
+    func testTestConnectionRequiresCredentials() async {
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = ""
+        appState.mailAppPassword = ""
+
+        await appState.testConnection()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil(provider.lastCredentials, "provider must not be called with incomplete credentials")
+        XCTAssertNotNil(appState.connectionError)
+    }
+
+    func testDisconnectClearsStoredPassword() async {
+        let secrets = InMemorySecretStore()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "app-pw"
+        await appState.testConnection()
+
+        appState.disconnectMail()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
     }
 }
 
@@ -48,71 +78,16 @@ private final class AppStateMemoryPersistence: PersistenceProvider {
     func saveSettingsSync(_ settings: Settings) {}
 }
 
-private enum AppStateSecretError: LocalizedError {
-    case saveFailed
+private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
+    private let result: Result<Void, MailError>
+    private(set) var lastCredentials: MailAccountCredentials?
 
-    var errorDescription: String? {
-        "Unable to save Gmail credentials."
-    }
-}
-
-private final class PartiallyFailingSecretStore: SecretStore {
-    var failOnSet: SecretKey?
-    private var storage: [String: String]
-
-    init(seed: [SecretKey: String] = [:]) {
-        storage = seed.reduce(into: [:]) { result, item in
-            result[item.key.rawValue] = item.value
-        }
+    init(result: Result<Void, MailError>) {
+        self.result = result
     }
 
-    func set(_ value: String, for key: SecretKey) throws {
-        if failOnSet == key {
-            throw AppStateSecretError.saveFailed
-        }
-        storage[key.rawValue] = value
-    }
-
-    func value(for key: SecretKey) throws -> String? {
-        storage[key.rawValue]
-    }
-
-    func remove(_ key: SecretKey) throws {
-        storage[key.rawValue] = nil
-    }
-
-    func removeAll() throws {
-        storage.removeAll()
-    }
-}
-
-private struct AppStateFakeTransport: HTTPTransport {
-    func postForm(_ url: URL, fields: [String: String]) async throws -> HTTPResponse {
-        HTTPResponse(
-            statusCode: 200,
-            body: Data(#"{"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer","scope":"s"}"#.utf8)
-        )
-    }
-}
-
-private final class AppStateFakeRedirectListener: RedirectListener {
-    private let redirectURI: String
-    private let params: [String: String]
-
-    init(redirectURI: String, params: [String: String]) {
-        self.redirectURI = redirectURI
-        self.params = params
-    }
-
-    func start() async throws -> String { redirectURI }
-    func waitForRedirect(timeout: TimeInterval) async throws -> [String: String] { params }
-    func stop() {}
-}
-
-private final class AppStateSpyBrowser: BrowserOpening {
-    private(set) var openedURL: URL?
-
-    func open(_ url: URL) {
-        openedURL = url
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {
+        lastCredentials = credentials
+        try result.get()
     }
 }

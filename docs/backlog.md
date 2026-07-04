@@ -234,8 +234,8 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 32. **IMAP/SMTP connection (app password)** — *PRIMARY connection path; in progress on branch `imap-connection`*
     IMAP + Google app password is the primary way users connect (decided 2026-07-03, superseding OAuth item 3). Provider-agnostic, works for Gmail/Outlook/any IMAP host. Built on SwiftNIO (`swift-nio-imap`) in `Packages/EmailJunkieMail`.
     *As anyone, I want to connect by pasting my email + an app password, so that I skip Google Cloud setup entirely.*
-    - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain.
-    - ⬜ **Remaining:** live-verify Test Connection against a real Gmail app password; IMAP fetch (recent inbox messages + Sent for voice); hand-rolled SMTP send over NIO; handle missing provider-native features (push, labels) gracefully.
+    - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain. **Live-verified against real Gmail 2026-07-04.**
+    - ⬜ **Remaining:** IMAP fetch (recent inbox messages + Sent for the voice profile); hand-rolled SMTP send over NIO; handle missing provider-native features (push, labels) gracefully.
 
 33. **Multiple-account support**
     Watch more than one mailbox.

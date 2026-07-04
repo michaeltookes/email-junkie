@@ -97,6 +97,7 @@ final class AppState: ObservableObject {
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
+        cleanupLegacyOAuthToken()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
 
         setupAutoSave()
@@ -150,6 +151,13 @@ final class AppState: ObservableObject {
     func disconnectMail() {
         connectionError = nil
         do {
+            try removeLegacyOAuthTokenIfPresent()
+        } catch {
+            connectionError = Self.legacyOAuthCleanupMessage(error: error)
+            return
+        }
+
+        do {
             try secrets.remove(.mailAppPassword)
         } catch {
             connectionError = Self.keychainMessage(action: "remove", error: error)
@@ -180,6 +188,26 @@ final class AppState: ObservableObject {
 
     private static func keychainMessage(action: String, error: Error) -> String {
         "Couldn't \(action) the app password in Keychain. \(message(for: error))"
+    }
+
+    private static func legacyOAuthCleanupMessage(error: Error) -> String {
+        "Couldn't remove the legacy Gmail OAuth token from Keychain. \(message(for: error))"
+    }
+
+    private func cleanupLegacyOAuthToken() {
+        do {
+            try removeLegacyOAuthTokenIfPresent()
+        } catch {
+            connectionError = Self.legacyOAuthCleanupMessage(error: error)
+        }
+    }
+
+    private func removeLegacyOAuthTokenIfPresent() throws {
+        guard try secrets.value(for: .gmailToken) != nil else {
+            return
+        }
+        try secrets.remove(.gmailToken)
+        logger.info("Legacy Gmail OAuth token removed")
     }
 
     /// Persists settings automatically when a tracked preference changes.

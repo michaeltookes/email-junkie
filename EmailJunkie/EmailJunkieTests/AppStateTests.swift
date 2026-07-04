@@ -115,6 +115,77 @@ final class AppStateTests: XCTestCase {
             "Couldn't remove the app password in Keychain. Keychain returned status -25308."
         )
     }
+
+    func testInitializationRemovesLegacyOAuthToken() {
+        let secrets = InMemorySecretStore(seed: [.gmailToken: "legacy-token"])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil(appState.connectionError)
+    }
+
+    func testInitializationSurfacesLegacyOAuthTokenRemoveFailure() {
+        let secrets = AppStateFailingSecretStore(seed: [.gmailToken: "legacy-token"])
+        secrets.failOnRemove = .gmailToken
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertEqual(try? secrets.value(for: .gmailToken), "legacy-token")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the legacy Gmail OAuth token from Keychain. Keychain returned status -25308."
+        )
+    }
+
+    func testDisconnectClearsLegacyOAuthToken() {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw"
+        ])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+
+        XCTAssertTrue(appState.isAccountConnected)
+        try? secrets.set("legacy-token", for: .gmailToken)
+
+        appState.disconnectMail()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
+    }
+
+    func testDisconnectKeepsConnectedStateWhenLegacyOAuthTokenRemoveFails() {
+        let secrets = AppStateFailingSecretStore(seed: [
+            .gmailToken: "legacy-token",
+            .mailAppPassword: "app-pw"
+        ])
+        secrets.failOnRemove = .gmailToken
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+
+        appState.disconnectMail()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(try? secrets.value(for: .gmailToken), "legacy-token")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the legacy Gmail OAuth token from Keychain. Keychain returned status -25308."
+        )
+    }
 }
 
 private final class AppStateMemoryPersistence: PersistenceProvider {

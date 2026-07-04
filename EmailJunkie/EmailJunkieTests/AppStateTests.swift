@@ -1,4 +1,5 @@
 import EmailJunkieMail
+import Security
 import XCTest
 @testable import EmailJunkie
 
@@ -7,10 +8,11 @@ final class AppStateTests: XCTestCase {
 
     private func makeAppState(
         provider: MailProvider,
-        secrets: SecretStore = InMemorySecretStore()
+        secrets: SecretStore = InMemorySecretStore(),
+        persistence: AppStateMemoryPersistence = AppStateMemoryPersistence()
     ) -> AppState {
         AppState(
-            persistence: AppStateMemoryPersistence(),
+            persistence: persistence,
             secrets: secrets,
             mailProvider: provider
         )
@@ -30,6 +32,26 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(appState.connectionError)
         XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
         XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
+    }
+
+    func testTestConnectionDoesNotConnectWhenPasswordSaveFails() async {
+        let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "old-pw"])
+        secrets.failOnSet = .mailAppPassword
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "new-pw"
+
+        await appState.testConnection()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertFalse(appState.isConnecting)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "old-pw")
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "new-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't save the app password in Keychain. Keychain returned status -25308."
+        )
     }
 
     func testTestConnectionFailureSurfacesError() async {
@@ -69,13 +91,42 @@ final class AppStateTests: XCTestCase {
 
         XCTAssertFalse(appState.isAccountConnected)
         XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
+        XCTAssertEqual(appState.mailAppPassword, "")
+    }
+
+    func testDisconnectKeepsConnectedStateWhenPasswordRemoveFails() {
+        let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "app-pw"])
+        secrets.failOnRemove = .mailAppPassword
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+
+        appState.disconnectMail()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailAppPassword, "app-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the app password in Keychain. Keychain returned status -25308."
+        )
     }
 }
 
 private final class AppStateMemoryPersistence: PersistenceProvider {
-    func loadSettings() -> Settings { .default }
-    func saveSettings(_ settings: Settings) {}
-    func saveSettingsSync(_ settings: Settings) {}
+    private var settings: Settings
+
+    init(settings: Settings = .default) {
+        self.settings = settings
+    }
+
+    func loadSettings() -> Settings { settings }
+    func saveSettings(_ settings: Settings) { self.settings = settings }
+    func saveSettingsSync(_ settings: Settings) { self.settings = settings }
 }
 
 private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
@@ -89,5 +140,39 @@ private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {
         lastCredentials = credentials
         try result.get()
+    }
+}
+
+private final class AppStateFailingSecretStore: SecretStore {
+    var failOnSet: SecretKey?
+    var failOnRemove: SecretKey?
+    private var storage: [String: String]
+
+    init(seed: [SecretKey: String] = [:]) {
+        storage = seed.reduce(into: [:]) { result, item in
+            result[item.key.rawValue] = item.value
+        }
+    }
+
+    func set(_ value: String, for key: SecretKey) throws {
+        if failOnSet == key {
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+        }
+        storage[key.rawValue] = value
+    }
+
+    func value(for key: SecretKey) throws -> String? {
+        storage[key.rawValue]
+    }
+
+    func remove(_ key: SecretKey) throws {
+        if failOnRemove == key {
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+        }
+        storage[key.rawValue] = nil
+    }
+
+    func removeAll() throws {
+        storage.removeAll()
     }
 }

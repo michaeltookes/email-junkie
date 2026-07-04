@@ -129,19 +129,33 @@ final class AppState: ObservableObject {
 
         do {
             try await mailProvider.verifyConnection(credentials)
-            try? secrets.set(credentials.appPassword, for: .mailAppPassword)
-            saveSettings()
-            isAccountConnected = true
-            logger.info("Mailbox connected")
         } catch {
             connectionError = Self.message(for: error)
+            return
         }
+
+        do {
+            try secrets.set(credentials.appPassword, for: .mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "save", error: error)
+            return
+        }
+
+        saveSettings()
+        isAccountConnected = true
+        logger.info("Mailbox connected")
     }
 
     /// Disconnects the mailbox by clearing the stored app password.
     func disconnectMail() {
         connectionError = nil
-        try? secrets.remove(.mailAppPassword)
+        do {
+            try secrets.remove(.mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "remove", error: error)
+            return
+        }
+        mailAppPassword = ""
         isAccountConnected = false
         logger.info("Mailbox disconnected")
     }
@@ -155,9 +169,17 @@ final class AppState: ObservableObject {
             return "Sign-in failed — check your email and app password. (\(detail))"
         case MailError.connectionFailed(let detail):
             return "Couldn't reach the mail server. (\(detail))"
+        case KeychainError.unexpectedStatus(let status):
+            return "Keychain returned status \(status)."
+        case KeychainError.dataEncodingFailed:
+            return "Keychain could not encode the app password."
         default:
             return error.localizedDescription
         }
+    }
+
+    private static func keychainMessage(action: String, error: Error) -> String {
+        "Couldn't \(action) the app password in Keychain. \(message(for: error))"
     }
 
     /// Persists settings automatically when a tracked preference changes.

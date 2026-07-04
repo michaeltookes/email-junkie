@@ -16,8 +16,12 @@ It is a **Prompter-family product** — a native Mac app for individual knowledg
 - **LLM access:** pluggable BYO-any-provider, plus a local-model option (e.g. Ollama).
 - **Ethos:** local-first, private, BYO-key, no subscription. Nothing leaves the machine except the user-controlled LLM call. Secrets live in the macOS Keychain.
 
-### Resolved: Gmail OAuth distribution model (2026-07-02)
-**Bring-your-own credentials is the v1 primary path, with the OAuth client config built pluggable** so a bundled client can be added later. Each user supplies their own Google Cloud OAuth client. This avoids Google's verification + annual CASA assessment (required to distribute a shared client for restricted Gmail scopes), the 100-user Testing-mode cap, and the ~7-day Testing-mode refresh-token expiry — and it fits the technical/open-source audience while keeping the maintainer free of cost and inbox-data custody. When building item 3, **empirically verify refresh-token lifetime** (Testing vs Production) with a real account so onboarding docs are accurate. Bundled-client and CASA paths are deferred, not chosen.
+### Email connection method (updated 2026-07-03): IMAP + app password
+**The primary connection path is IMAP + a Google app password**, implemented with SwiftNIO (`swift-nio-imap`) in the local `Packages/EmailJunkieMail` package. Users paste their email + a 16-character app password (2FA required) — no Google Cloud console, no client ID/secret, no verification/CASA.
+
+This **superseded an earlier BYO-OAuth decision** (2026-07-02): we built the full Google OAuth flow (item 3) but live testing showed BYO OAuth is far too much friction for non-developers (create a Cloud project, enable APIs, configure a consent screen, make a Desktop client). The OAuth engine (`GmailAuthCoordinator`, `OAuthTokenService`, `LoopbackRedirectListener`, etc.) **remains in the codebase, parked** — it's the future "bundled verified client + CASA" option if the product ever targets the non-technical mass market. Known parked bug: the OAuth loopback listener throws `NWError 22` on start; unfixed because that path isn't primary.
+
+We first tried **MailCore2** for IMAP but its SPM/arm64 distribution is abandoned (2020/2022 binaries), so we use Apple's `swift-nio-imap` instead. See [[oauth-byo-credentials-decision]] memory.
 
 ## Backlog Management
 

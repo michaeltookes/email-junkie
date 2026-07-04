@@ -30,8 +30,10 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Flow can be exited and resumed; completing it flips the app into "watching" state.
    - A clear privacy statement explains what stays local and what is sent to the chosen LLM.
 
-3. **Gmail connection (OAuth)** — *implementation landed on branch `gmail-connection`; live verification pending*
-   Authenticate to Gmail with the minimum scopes needed to read inbox + Sent and create/send replies. **Distribution model (decided 2026-07-02): bring-your-own credentials — each user supplies their own Google Cloud OAuth client — with the client config built pluggable so a bundled client can be added later. See CLAUDE.md.**
+3. **Gmail connection (OAuth)** — *PARKED (superseded by item 32 as the primary path); engine kept for a future bundled-client option*
+   > **Parked 2026-07-03:** BYO OAuth proved too high-friction for non-developers, so IMAP + app password (item 32) is now the primary connection path. The OAuth engine stays in the codebase for a possible future "bundled verified client + CASA" revival. Known parked bug: loopback listener throws `NWError 22` on start. The ✅ items below are built; the ⬜ items are only relevant if OAuth is revived.
+
+   Authenticate to Gmail with the minimum scopes needed to read inbox + Sent and create/send replies. **Distribution model (decided 2026-07-02, later superseded): bring-your-own credentials with pluggable client config. See CLAUDE.md.**
    *As Priya, I want to connect my Gmail, so that the assistant can read my mail and draft replies.*
    *As Sam, I want to supply my own Google Cloud OAuth client, so that I authorize the app under my own project with no shared-client caps or verification.*
    - ✅ PKCE desktop/loopback flow requesting only `gmail.modify` + `gmail.send`; authorization URL, code exchange, and refresh all built and unit-tested.
@@ -229,11 +231,11 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Graph API + OAuth provider implementing the shared email-provider interface.
     - Feature parity with Gmail for read/draft/send.
 
-32. **Generic IMAP/SMTP support**
-    Provider-agnostic backend for self-hosters.
-    *As Sam, I want to connect any IMAP/SMTP mailbox, so that I'm not limited to Gmail or Outlook.*
-    - IMAP read + SMTP send behind the shared provider interface.
-    - Graceful handling of missing provider-native features (push, labels).
+32. **IMAP/SMTP connection (app password)** — *PRIMARY connection path; in progress on branch `imap-connection`*
+    IMAP + Google app password is the primary way users connect (decided 2026-07-03, superseding OAuth item 3). Provider-agnostic, works for Gmail/Outlook/any IMAP host. Built on SwiftNIO (`swift-nio-imap`) in `Packages/EmailJunkieMail`.
+    *As anyone, I want to connect by pasting my email + an app password, so that I skip Google Cloud setup entirely.*
+    - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain.
+    - ⬜ **Remaining:** live-verify Test Connection against a real Gmail app password; IMAP fetch (recent inbox messages + Sent for voice); hand-rolled SMTP send over NIO; handle missing provider-native features (push, labels) gracefully.
 
 33. **Multiple-account support**
     Watch more than one mailbox.

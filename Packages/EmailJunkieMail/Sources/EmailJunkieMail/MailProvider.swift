@@ -26,4 +26,3 @@ public protocol MailProvider: Sendable {
         limit: Int
     ) async throws -> [MailMessage]
 }
-

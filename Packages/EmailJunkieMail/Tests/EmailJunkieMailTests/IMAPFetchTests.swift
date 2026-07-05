@@ -31,28 +31,46 @@ final class IMAPFetchTests: XCTestCase {
         while (try? channel.readOutbound(as: ByteBuffer.self)) != nil {}
     }
 
-    func testFetchesAndParsesEnvelopesNewestFirst() throws {
+    func testFetchesAndParsesEnvelopesSortedByNewestUID() throws {
         let (channel, future) = try makeChannel()
 
         try feed(channel, "* OK Service Ready\r\n")
         try feed(channel, "A1 OK LOGIN completed\r\n")
         try feed(channel, "* 2 EXISTS\r\n")
         try feed(channel, "A2 OK [READ-WRITE] SELECT completed\r\n")
-        try feed(channel, "* 1 FETCH (UID 101 ENVELOPE (\"Wed, 1 Jan 2026 10:00:00 +0000\" "
-            + "\"Hello\" ((\"Alice\" NIL \"alice\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
         try feed(channel, "* 2 FETCH (UID 102 ENVELOPE (\"Thu, 2 Jan 2026 10:00:00 +0000\" "
             + "\"World\" ((\"Bob\" NIL \"bob\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
+        try feed(channel, "* 1 FETCH (UID 101 ENVELOPE (\"Wed, 1 Jan 2026 10:00:00 +0000\" "
+            + "\"Hello\" ((\"Alice\" NIL \"alice\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
         try feed(channel, "A3 OK FETCH completed\r\n")
 
         let messages = try future.wait()
         XCTAssertEqual(messages.count, 2)
-        // Newest first.
         XCTAssertEqual(messages[0].id, 102)
         XCTAssertEqual(messages[0].subject, "World")
         XCTAssertEqual(messages[0].from, MailAddress(name: "Bob", email: "bob@example.com"))
         XCTAssertEqual(messages[1].id, 101)
         XCTAssertEqual(messages[1].subject, "Hello")
         XCTAssertEqual(messages[1].from, MailAddress(name: "Alice", email: "alice@example.com"))
+        _ = try? channel.finish()
+    }
+
+    func testIgnoresUnsolicitedFetchResponsesWithoutEnvelope() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "* 1 EXISTS\r\n")
+        try feed(channel, "A2 OK [READ-WRITE] SELECT completed\r\n")
+        try feed(channel, "* 1 FETCH (FLAGS (\\Seen))\r\n")
+        try feed(channel, "* 1 FETCH (UID 101 ENVELOPE (\"Wed, 1 Jan 2026 10:00:00 +0000\" "
+            + "\"Hello\" ((\"Alice\" NIL \"alice\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        let messages = try future.wait()
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages[0].id, 101)
+        XCTAssertEqual(messages[0].subject, "Hello")
         _ = try? channel.finish()
     }
 

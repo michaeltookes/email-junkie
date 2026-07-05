@@ -97,8 +97,9 @@ final class IMAPFetchHandler: ChannelInboundHandler {
     }
 
     private struct PartialMessage {
-        var uid: UInt32 = 0
+        var uid: UInt32?
         var from: MailAddress?
+        var hasEnvelope = false
         var subject = ""
         var date = ""
     }
@@ -188,7 +189,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
             sendFetchOrFinish(context: context)
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
-            settle(.success(messages.reversed()))
+            settle(.success(messages.sorted { $0.id > $1.id }))
             send(.logout, tag: logoutTag, context: context)
             context.close(promise: nil)
         default:
@@ -203,12 +204,12 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         case .simpleAttribute(let attribute):
             apply(attribute)
         case .finish:
-            if let message = current {
+            if let message = current, let uid = message.uid, message.hasEnvelope {
                 messages.append(
-                    MailMessage(id: message.uid, from: message.from, subject: message.subject, date: message.date)
+                    MailMessage(id: uid, from: message.from, subject: message.subject, date: message.date)
                 )
-                current = nil
             }
+            current = nil
         default:
             break
         }
@@ -227,6 +228,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
 
     private func applyEnvelope(_ envelope: Envelope) {
         guard current != nil else { return }
+        current?.hasEnvelope = true
         if let subject = envelope.subject {
             current?.subject = String(buffer: subject)
         }

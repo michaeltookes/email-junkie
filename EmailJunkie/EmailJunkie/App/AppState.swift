@@ -180,6 +180,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
+        clearRecentMessagePreview()
         logger.info("Mailbox connected")
     }
 
@@ -201,6 +202,7 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
+        clearRecentMessagePreview()
         logger.info("Mailbox disconnected")
     }
 
@@ -226,6 +228,11 @@ final class AppState: ObservableObject {
         } catch {
             fetchError = Self.message(for: error)
         }
+    }
+
+    private func clearRecentMessagePreview() {
+        recentMessages = []
+        fetchError = nil
     }
 
     /// Maps an error to a concise, user-facing message.

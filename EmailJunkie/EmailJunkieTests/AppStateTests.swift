@@ -34,6 +34,23 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
     }
 
+    func testTestConnectionSuccessClearsRecentMessagePreview() async {
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider)
+        appState.recentMessages = [
+            MailMessage(id: 1, from: MailAddress(email: "old@example.com"), subject: "Old", date: "")
+        ]
+        appState.fetchError = "Previous fetch failed"
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+
+        await appState.testConnection()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertTrue(appState.recentMessages.isEmpty)
+        XCTAssertNil(appState.fetchError)
+    }
+
     func testTestConnectionPersistsVerifiedCredentialSnapshot() async {
         let secrets = InMemorySecretStore()
         let provider = SuspendedAppMailProvider()
@@ -183,12 +200,18 @@ final class AppStateTests: XCTestCase {
         appState.mailEmail = "me@gmail.com"
         appState.mailAppPassword = "app-pw"
         await appState.testConnection()
+        appState.recentMessages = [
+            MailMessage(id: 1, from: MailAddress(email: "me@example.com"), subject: "Hi", date: "")
+        ]
+        appState.fetchError = "Previous fetch failed"
 
         appState.disconnectMail()
 
         XCTAssertFalse(appState.isAccountConnected)
         XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
         XCTAssertEqual(appState.mailAppPassword, "")
+        XCTAssertTrue(appState.recentMessages.isEmpty)
+        XCTAssertNil(appState.fetchError)
     }
 
     func testDisconnectKeepsConnectedStateWhenPasswordRemoveFails() {

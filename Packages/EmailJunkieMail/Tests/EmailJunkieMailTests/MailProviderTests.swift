@@ -1,3 +1,4 @@
+import NIOEmbedded
 import XCTest
 @testable import EmailJunkieMail
 
@@ -24,6 +25,27 @@ final class MailProviderTests: XCTestCase {
             XCTFail("expected failure")
         } catch {
             XCTAssertEqual(error as? MailError, .authenticationFailed("bad"))
+        }
+    }
+
+    func testVerificationAttemptsAreScopedPerChannel() throws {
+        let attempts = IMAPVerificationAttempts()
+        let firstChannel = EmbeddedChannel()
+        let secondChannel = EmbeddedChannel()
+        let firstPromise = attempts.makePromise(for: firstChannel)
+        let secondPromise = attempts.makePromise(for: secondChannel)
+
+        firstPromise.fail(MailError.connectionFailed("lost race"))
+
+        let secondFuture = try XCTUnwrap(attempts.future(for: secondChannel))
+        secondPromise.succeed(())
+
+        XCTAssertNoThrow(try secondFuture.wait())
+        XCTAssertNil(attempts.future(for: secondChannel))
+
+        let firstFuture = try XCTUnwrap(attempts.future(for: firstChannel))
+        XCTAssertThrowsError(try firstFuture.wait()) { error in
+            XCTAssertEqual(error as? MailError, .connectionFailed("lost race"))
         }
     }
 }

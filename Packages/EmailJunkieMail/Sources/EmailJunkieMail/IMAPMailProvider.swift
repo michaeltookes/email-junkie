@@ -25,7 +25,7 @@ public struct IMAPMailProvider: MailProvider {
     public func verifyConnection(_ credentials: MailAccountCredentials) async throws {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
 
-        let promise = group.next().makePromise(of: Void.self)
+        let attempts = IMAPVerificationAttempts()
         let sslContext = try NIOSSLContext(configuration: TLSConfiguration.makeClientConfiguration())
         let host = credentials.host
         let email = credentials.email
@@ -36,6 +36,7 @@ public struct IMAPMailProvider: MailProvider {
             .channelInitializer { channel in
                 do {
                     let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+                    let promise = attempts.makePromise(for: channel)
                     let verify = IMAPVerifyHandler(email: email, password: password, promise: promise)
                     return channel.pipeline.addHandlers([ssl, IMAPClientHandler(), verify])
                 } catch {
@@ -49,6 +50,10 @@ public struct IMAPMailProvider: MailProvider {
         } catch {
             throw MailError.connectionFailed(String(describing: error))
         }
+        guard let verification = attempts.future(for: channel) else {
+            try? await channel.close().get()
+            throw MailError.connectionFailed("The mail connection could not start verification.")
+        }
 
         // Fail-safe: close the channel if nothing settles within the timeout;
         // channelInactive then completes the promise (guarded against races).
@@ -58,12 +63,33 @@ public struct IMAPMailProvider: MailProvider {
         defer { timeoutTask.cancel() }
 
         do {
-            try await promise.futureResult.get()
+            try await verification.get()
         } catch {
             try? await channel.close().get()
             throw error
         }
         try? await channel.close().get()
+    }
+}
+
+/// Tracks verification futures per channel so Happy Eyeballs connection attempts
+/// cannot settle the verification for the channel that ultimately wins.
+final class IMAPVerificationAttempts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var futures: [ObjectIdentifier: EventLoopFuture<Void>] = [:]
+
+    func makePromise(for channel: Channel) -> EventLoopPromise<Void> {
+        let promise = channel.eventLoop.makePromise(of: Void.self)
+        lock.lock()
+        futures[ObjectIdentifier(channel)] = promise.futureResult
+        lock.unlock()
+        return promise
+    }
+
+    func future(for channel: Channel) -> EventLoopFuture<Void>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return futures.removeValue(forKey: ObjectIdentifier(channel))
     }
 }
 

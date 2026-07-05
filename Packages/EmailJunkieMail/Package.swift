@@ -24,7 +24,10 @@ let package = Package(
         ),
         .testTarget(
             name: "EmailJunkieMailTests",
-            dependencies: ["EmailJunkieMail"]
+            dependencies: [
+                "EmailJunkieMail",
+                .product(name: "NIOEmbedded", package: "swift-nio")
+            ]
         )
     ]
 )

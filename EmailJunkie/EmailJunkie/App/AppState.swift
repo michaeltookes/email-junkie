@@ -71,6 +71,7 @@ final class AppState: ObservableObject {
     private let mailProvider: MailProvider
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
+    private var previewGeneration = 0
     private static let legacyOAuthKeys: [SecretKey] = [
         .gmailToken,
         .googleClientID,
@@ -180,7 +181,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
-        clearRecentMessagePreview()
+        resetRecentMessagePreviewForAccountChange()
         logger.info("Mailbox connected")
     }
 
@@ -202,13 +203,15 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
-        clearRecentMessagePreview()
+        resetRecentMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
     }
 
     /// Fetches recent messages from a mailbox for a quick preview.
     func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
-        fetchError = nil
+        let requestGeneration = nextPreviewGeneration()
+        clearRecentMessagePreview()
+        isFetching = false
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
@@ -217,22 +220,47 @@ final class AppState: ObservableObject {
         }
 
         isFetching = true
-        defer { isFetching = false }
+        defer {
+            if previewGeneration == requestGeneration {
+                isFetching = false
+            }
+        }
 
         do {
-            recentMessages = try await mailProvider.fetchRecentMessages(
+            let messages = try await mailProvider.fetchRecentMessages(
                 credentials,
                 mailbox: mailbox,
                 limit: limit
             )
+            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
+            recentMessages = messages
         } catch {
+            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
             fetchError = Self.message(for: error)
         }
+    }
+
+    private func nextPreviewGeneration() -> Int {
+        previewGeneration += 1
+        return previewGeneration
+    }
+
+    private func resetRecentMessagePreviewForAccountChange() {
+        _ = nextPreviewGeneration()
+        clearRecentMessagePreview()
+        isFetching = false
     }
 
     private func clearRecentMessagePreview() {
         recentMessages = []
         fetchError = nil
+    }
+
+    private func isCurrentPreviewRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        previewGeneration == requestGeneration && mailCredentials == credentials
     }
 
     /// Maps an error to a concise, user-facing message.

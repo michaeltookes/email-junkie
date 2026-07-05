@@ -45,6 +45,17 @@ final class AppState: ObservableObject {
     @Published var mailHost: String
     @Published var mailPort: Int
 
+    // MARK: - Recent Messages (preview)
+
+    /// The most recently fetched messages (envelope-level), newest first.
+    @Published var recentMessages: [MailMessage] = []
+
+    /// Whether a fetch is in progress.
+    @Published var isFetching: Bool = false
+
+    /// A user-facing message describing the last fetch error, if any.
+    @Published var fetchError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -60,6 +71,7 @@ final class AppState: ObservableObject {
     private let mailProvider: MailProvider
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
+    private var previewGeneration = 0
     private static let legacyOAuthKeys: [SecretKey] = [
         .gmailToken,
         .googleClientID,
@@ -169,6 +181,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
+        resetRecentMessagePreviewForAccountChange()
         logger.info("Mailbox connected")
     }
 
@@ -190,7 +203,65 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
+        resetRecentMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
+    }
+
+    /// Fetches recent messages from a mailbox for a quick preview.
+    func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
+        let requestGeneration = nextPreviewGeneration()
+        clearRecentMessagePreview()
+        isFetching = false
+
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            fetchError = "Connect an account first."
+            return
+        }
+
+        isFetching = true
+        defer {
+            if previewGeneration == requestGeneration {
+                isFetching = false
+            }
+        }
+
+        do {
+            let messages = try await mailProvider.fetchRecentMessages(
+                credentials,
+                mailbox: mailbox,
+                limit: limit
+            )
+            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
+            recentMessages = messages
+        } catch {
+            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
+            recentMessages = []
+            fetchError = Self.message(for: error)
+        }
+    }
+
+    private func nextPreviewGeneration() -> Int {
+        previewGeneration += 1
+        return previewGeneration
+    }
+
+    private func resetRecentMessagePreviewForAccountChange() {
+        _ = nextPreviewGeneration()
+        clearRecentMessagePreview()
+        isFetching = false
+    }
+
+    private func clearRecentMessagePreview() {
+        recentMessages = []
+        fetchError = nil
+    }
+
+    private func isCurrentPreviewRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        previewGeneration == requestGeneration && mailCredentials == credentials
     }
 
     /// Maps an error to a concise, user-facing message.
@@ -202,6 +273,8 @@ final class AppState: ObservableObject {
             return "Sign-in failed — check your email and app password. (\(detail))"
         case MailError.connectionFailed(let detail):
             return "Couldn't reach the mail server. (\(detail))"
+        case MailError.commandFailed(let detail):
+            return "The mail server rejected a request. (\(detail))"
         case KeychainError.unexpectedStatus(let status):
             return "Keychain returned status \(status)."
         case KeychainError.dataEncodingFailed:

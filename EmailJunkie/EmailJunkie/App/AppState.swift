@@ -60,6 +60,11 @@ final class AppState: ObservableObject {
     private let mailProvider: MailProvider
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
+    private static let legacyOAuthKeys: [SecretKey] = [
+        .gmailToken,
+        .googleClientID,
+        .googleClientSecret
+    ]
 
     // MARK: - Computed
 
@@ -97,7 +102,7 @@ final class AppState: ObservableObject {
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
-        cleanupLegacyOAuthToken()
+        cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
 
         setupAutoSave()
@@ -151,7 +156,7 @@ final class AppState: ObservableObject {
     func disconnectMail() {
         connectionError = nil
         do {
-            try removeLegacyOAuthTokenIfPresent()
+            try removeLegacyOAuthCredentialsIfPresent()
         } catch {
             connectionError = Self.legacyOAuthCleanupMessage(error: error)
             return
@@ -191,23 +196,27 @@ final class AppState: ObservableObject {
     }
 
     private static func legacyOAuthCleanupMessage(error: Error) -> String {
-        "Couldn't remove the legacy Gmail OAuth token from Keychain. \(message(for: error))"
+        "Couldn't remove the legacy Gmail OAuth credentials from Keychain. \(message(for: error))"
     }
 
-    private func cleanupLegacyOAuthToken() {
+    private func cleanupLegacyOAuthCredentials() {
         do {
-            try removeLegacyOAuthTokenIfPresent()
+            try removeLegacyOAuthCredentialsIfPresent()
         } catch {
             connectionError = Self.legacyOAuthCleanupMessage(error: error)
         }
     }
 
-    private func removeLegacyOAuthTokenIfPresent() throws {
-        guard try secrets.value(for: .gmailToken) != nil else {
-            return
+    private func removeLegacyOAuthCredentialsIfPresent() throws {
+        var removedAnyCredential = false
+        for key in Self.legacyOAuthKeys where try secrets.value(for: key) != nil {
+            try secrets.remove(key)
+            removedAnyCredential = true
         }
-        try secrets.remove(.gmailToken)
-        logger.info("Legacy Gmail OAuth token removed")
+
+        if removedAnyCredential {
+            logger.info("Legacy Gmail OAuth credentials removed")
+        }
     }
 
     /// Persists settings automatically when a tracked preference changes.

@@ -332,6 +332,14 @@ private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         lastCredentials = credentials
         try result.get()
     }
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
+    }
 }
 
 private final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
@@ -356,6 +364,14 @@ private final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable 
         self.continuation = nil
         lock.unlock()
         continuation?.resume(with: result)
+    }
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
     }
 }
 

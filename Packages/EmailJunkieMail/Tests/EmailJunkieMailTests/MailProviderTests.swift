@@ -64,4 +64,12 @@ final class FakeMailProvider: MailProvider, @unchecked Sendable {
         verifiedCredentials = credentials
         try result.get()
     }
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
+    }
 }

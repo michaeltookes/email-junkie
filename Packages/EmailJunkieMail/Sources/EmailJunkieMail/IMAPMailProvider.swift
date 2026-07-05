@@ -11,8 +11,8 @@ import NIOSSL
 /// action. Message fetch/send are added in later slices.
 public struct IMAPMailProvider: MailProvider {
 
-    private let group: EventLoopGroup
-    private let timeout: TimeAmount
+    let group: EventLoopGroup
+    let timeout: TimeAmount
 
     public init(
         group: EventLoopGroup = NIOSingletons.posixEventLoopGroup,

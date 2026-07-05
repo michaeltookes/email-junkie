@@ -236,6 +236,7 @@ final class AppState: ObservableObject {
             recentMessages = messages
         } catch {
             guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
+            recentMessages = []
             fetchError = Self.message(for: error)
         }
     }

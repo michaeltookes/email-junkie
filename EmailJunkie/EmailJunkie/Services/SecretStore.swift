@@ -10,7 +10,10 @@ struct SecretKey: RawRepresentable, Hashable {
     // MARK: Well-known keys
 
     /// The Gmail OAuth token set (access + refresh + expiry), stored as JSON.
+    /// (OAuth path is parked; kept for a future bundled-client revival.)
     static let gmailToken = SecretKey(rawValue: "gmail.token")
+    /// The mailbox app password used for IMAP/SMTP authentication.
+    static let mailAppPassword = SecretKey(rawValue: "mail.appPassword")
     /// The user-supplied Google Cloud OAuth client ID (BYO credentials).
     static let googleClientID = SecretKey(rawValue: "google.clientID")
     /// The user-supplied Google Cloud OAuth client secret (BYO credentials).

@@ -1,63 +1,367 @@
+import EmailJunkieMail
+import Security
 import XCTest
 @testable import EmailJunkie
 
 @MainActor
 final class AppStateTests: XCTestCase {
 
-    func testConnectStopsWhenCredentialSavePartiallyFails() async {
-        let secrets = PartiallyFailingSecretStore(seed: [
-            .googleClientID: "old-client-id",
-            .googleClientSecret: "old-client-secret"
-        ])
-        let store = GmailAuthStore(secrets: secrets)
-        let browser = AppStateSpyBrowser()
-        let coordinator = GmailAuthCoordinator(
-            store: store,
-            tokenService: OAuthTokenService(transport: AppStateFakeTransport()),
-            makeListener: {
-                AppStateFakeRedirectListener(
-                    redirectURI: "http://127.0.0.1:9999",
-                    params: ["code": "auth-code", "state": "state"]
-                )
-            },
-            browser: browser,
-            now: { Date(timeIntervalSince1970: 1_000_000) },
-            makeState: { "state" }
+    private func makeAppState(
+        provider: MailProvider,
+        secrets: SecretStore = InMemorySecretStore(),
+        persistence: AppStateMemoryPersistence = AppStateMemoryPersistence()
+    ) -> AppState {
+        AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider
         )
-        let appState = AppState(
-            persistence: AppStateMemoryPersistence(),
-            gmailStore: store,
-            gmailAuth: coordinator
-        )
-        appState.clientIDInput = "new-client-id"
-        appState.clientSecretInput = "new-client-secret"
-        secrets.failOnSet = .googleClientSecret
+    }
 
-        await appState.connectGmail()
+    func testTestConnectionSuccessSavesPasswordAndConnects() async {
+        let secrets = InMemorySecretStore()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "app-pw"
 
-        XCTAssertNil(browser.openedURL)
+        await appState.testConnection()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertFalse(appState.isConnecting)
+        XCTAssertNil(appState.connectionError)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
+    }
+
+    func testTestConnectionPersistsVerifiedCredentialSnapshot() async {
+        let secrets = InMemorySecretStore()
+        let provider = SuspendedAppMailProvider()
+        let persistence = AppStateMemoryPersistence()
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "verified-pw"
+        appState.mailHost = "imap.gmail.com"
+        appState.mailPort = 993
+
+        let connectionTask = Task { await appState.testConnection() }
+        await fulfillment(of: [provider.didStartVerification], timeout: 1)
+
+        appState.mailEmail = "other@example.com"
+        appState.mailAppPassword = "other-pw"
+        appState.mailHost = "imap.example.com"
+        appState.mailPort = 1993
+        provider.complete(with: .success(()))
+        await connectionTask.value
+
+        let settings = persistence.loadSettings()
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailEmail, "me@gmail.com")
+        XCTAssertEqual(appState.mailAppPassword, "verified-pw")
+        XCTAssertEqual(appState.mailHost, "imap.gmail.com")
+        XCTAssertEqual(appState.mailPort, 993)
+        XCTAssertEqual(settings.mailEmail, "me@gmail.com")
+        XCTAssertEqual(settings.mailHost, "imap.gmail.com")
+        XCTAssertEqual(settings.mailPort, 993)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "verified-pw")
+        XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "verified-pw")
+    }
+
+    func testTestConnectionDoesNotConnectWhenPasswordSaveFails() async {
+        let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "old-pw"])
+        secrets.failOnSet = .mailAppPassword
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "new-pw"
+
+        await appState.testConnection()
+
         XCTAssertFalse(appState.isAccountConnected)
         XCTAssertFalse(appState.isConnecting)
-        XCTAssertEqual(appState.connectionError, "Unable to save Gmail credentials.")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "old-pw")
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "new-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't save the app password in Keychain. Keychain returned status -25308."
+        )
+    }
+
+    func testTestConnectionRestoresPreviousStateWhenSettingsSaveFails() async {
+        let secrets = InMemorySecretStore(seed: [.mailAppPassword: "old-pw"])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "old@gmail.com",
+            mailHost: "imap.old.example.com",
+            mailPort: 993
+        ))
+        persistence.syncSaveError = AppStatePersistenceError.writeDenied
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        appState.mailHost = "imap.new.example.com"
+        appState.mailPort = 1993
+
+        await appState.testConnection()
+
+        let settings = persistence.loadSettings()
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailEmail, "old@gmail.com")
+        XCTAssertEqual(appState.mailAppPassword, "old-pw")
+        XCTAssertEqual(appState.mailHost, "imap.old.example.com")
+        XCTAssertEqual(appState.mailPort, 993)
+        XCTAssertEqual(settings.mailEmail, "old@gmail.com")
+        XCTAssertEqual(settings.mailHost, "imap.old.example.com")
+        XCTAssertEqual(settings.mailPort, 993)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "old-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't save mailbox settings. settings write denied"
+        )
+    }
+
+    func testTestConnectionFailureSurfacesError() async {
+        let provider = FakeAppMailProvider(result: .failure(.authenticationFailed("bad creds")))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "wrong"
+
+        await appState.testConnection()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNotNil(appState.connectionError)
+    }
+
+    func testTestConnectionRequiresCredentials() async {
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = ""
+        appState.mailAppPassword = ""
+
+        await appState.testConnection()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil(provider.lastCredentials, "provider must not be called with incomplete credentials")
+        XCTAssertNotNil(appState.connectionError)
+    }
+
+    func testDisconnectClearsStoredPassword() async {
+        let secrets = InMemorySecretStore()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "app-pw"
+        await appState.testConnection()
+
+        appState.disconnectMail()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
+        XCTAssertEqual(appState.mailAppPassword, "")
+    }
+
+    func testDisconnectKeepsConnectedStateWhenPasswordRemoveFails() {
+        let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "app-pw"])
+        secrets.failOnRemove = .mailAppPassword
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+
+        appState.disconnectMail()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailAppPassword, "app-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the app password in Keychain. Keychain returned status -25308."
+        )
+    }
+
+    func testInitializationRemovesLegacyOAuthCredentials() {
+        let secrets = InMemorySecretStore(seed: [
+            .gmailToken: "legacy-token",
+            .googleClientID: "legacy-client-id",
+            .googleClientSecret: "legacy-client-secret"
+        ])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientID)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientSecret)) ?? nil)
+        XCTAssertNil(appState.connectionError)
+    }
+
+    func testInitializationRemovesLegacyOAuthCredentialsWithoutToken() {
+        let secrets = InMemorySecretStore(seed: [
+            .googleClientID: "legacy-client-id",
+            .googleClientSecret: "legacy-client-secret"
+        ])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .googleClientID)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientSecret)) ?? nil)
+        XCTAssertNil(appState.connectionError)
+    }
+
+    func testInitializationSurfacesLegacyOAuthCredentialRemoveFailure() {
+        let secrets = AppStateFailingSecretStore(seed: [
+            .gmailToken: "legacy-token",
+            .googleClientID: "legacy-client-id",
+            .googleClientSecret: "legacy-client-secret"
+        ])
+        secrets.failOnRemove = .googleClientSecret
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientID)) ?? nil)
+        XCTAssertEqual(try? secrets.value(for: .googleClientSecret), "legacy-client-secret")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the legacy Gmail OAuth credentials from Keychain. Keychain returned status -25308."
+        )
+    }
+
+    func testDisconnectClearsLegacyOAuthCredentials() {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw"
+        ])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+
+        XCTAssertTrue(appState.isAccountConnected)
+        try? secrets.set("legacy-token", for: .gmailToken)
+        try? secrets.set("legacy-client-id", for: .googleClientID)
+        try? secrets.set("legacy-client-secret", for: .googleClientSecret)
+
+        appState.disconnectMail()
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientID)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientSecret)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword)) ?? nil)
+    }
+
+    func testDisconnectKeepsConnectedStateWhenLegacyOAuthCredentialRemoveFails() {
+        let secrets = AppStateFailingSecretStore(seed: [
+            .mailAppPassword: "app-pw"
+        ])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+        try? secrets.set("legacy-token", for: .gmailToken)
+        try? secrets.set("legacy-client-id", for: .googleClientID)
+        try? secrets.set("legacy-client-secret", for: .googleClientSecret)
+        secrets.failOnRemove = .googleClientSecret
+
+        appState.disconnectMail()
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertNil((try? secrets.value(for: .gmailToken)) ?? nil)
+        XCTAssertNil((try? secrets.value(for: .googleClientID)) ?? nil)
+        XCTAssertEqual(try? secrets.value(for: .googleClientSecret), "legacy-client-secret")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't remove the legacy Gmail OAuth credentials from Keychain. Keychain returned status -25308."
+        )
     }
 }
 
 private final class AppStateMemoryPersistence: PersistenceProvider {
-    func loadSettings() -> Settings { .default }
-    func saveSettings(_ settings: Settings) {}
-    func saveSettingsSync(_ settings: Settings) {}
-}
+    private var settings: Settings
+    var syncSaveError: Error?
 
-private enum AppStateSecretError: LocalizedError {
-    case saveFailed
+    init(settings: Settings = .default) {
+        self.settings = settings
+    }
 
-    var errorDescription: String? {
-        "Unable to save Gmail credentials."
+    func loadSettings() -> Settings { settings }
+    func saveSettings(_ settings: Settings) { self.settings = settings }
+    func saveSettingsSync(_ settings: Settings) throws {
+        if let syncSaveError {
+            throw syncSaveError
+        }
+        self.settings = settings
     }
 }
 
-private final class PartiallyFailingSecretStore: SecretStore {
+private enum AppStatePersistenceError: LocalizedError {
+    case writeDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .writeDenied:
+            return "settings write denied"
+        }
+    }
+}
+
+private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
+    private let result: Result<Void, MailError>
+    private(set) var lastCredentials: MailAccountCredentials?
+
+    init(result: Result<Void, MailError>) {
+        self.result = result
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {
+        lastCredentials = credentials
+        try result.get()
+    }
+}
+
+private final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
+    let didStartVerification = XCTestExpectation(description: "mail verification started")
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+    private(set) var lastCredentials: MailAccountCredentials?
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            lastCredentials = credentials
+            self.continuation = continuation
+            lock.unlock()
+            didStartVerification.fulfill()
+        }
+    }
+
+    func complete(with result: Result<Void, Error>) {
+        lock.lock()
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
+private final class AppStateFailingSecretStore: SecretStore {
     var failOnSet: SecretKey?
+    var failOnRemove: SecretKey?
     private var storage: [String: String]
 
     init(seed: [SecretKey: String] = [:]) {
@@ -68,7 +372,7 @@ private final class PartiallyFailingSecretStore: SecretStore {
 
     func set(_ value: String, for key: SecretKey) throws {
         if failOnSet == key {
-            throw AppStateSecretError.saveFailed
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
         }
         storage[key.rawValue] = value
     }
@@ -78,41 +382,13 @@ private final class PartiallyFailingSecretStore: SecretStore {
     }
 
     func remove(_ key: SecretKey) throws {
+        if failOnRemove == key {
+            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
+        }
         storage[key.rawValue] = nil
     }
 
     func removeAll() throws {
         storage.removeAll()
-    }
-}
-
-private struct AppStateFakeTransport: HTTPTransport {
-    func postForm(_ url: URL, fields: [String: String]) async throws -> HTTPResponse {
-        HTTPResponse(
-            statusCode: 200,
-            body: Data(#"{"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer","scope":"s"}"#.utf8)
-        )
-    }
-}
-
-private final class AppStateFakeRedirectListener: RedirectListener {
-    private let redirectURI: String
-    private let params: [String: String]
-
-    init(redirectURI: String, params: [String: String]) {
-        self.redirectURI = redirectURI
-        self.params = params
-    }
-
-    func start() async throws -> String { redirectURI }
-    func waitForRedirect(timeout: TimeInterval) async throws -> [String: String] { params }
-    func stop() {}
-}
-
-private final class AppStateSpyBrowser: BrowserOpening {
-    private(set) var openedURL: URL?
-
-    func open(_ url: URL) {
-        openedURL = url
     }
 }

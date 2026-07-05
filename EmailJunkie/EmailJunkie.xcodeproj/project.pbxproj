@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		CC0000000000000000000003 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000002 /* EmailJunkieMail */; };
+		CC0000000000000000000004 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* EmailJunkieMail */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		BB000000000000000000000B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +44,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC0000000000000000000003 /* EmailJunkieMail in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -46,6 +52,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC0000000000000000000004 /* EmailJunkieMail in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +96,9 @@
 				AA0000000000000000000004 /* EmailJunkie */,
 			);
 			name = EmailJunkie;
+			packageProductDependencies = (
+				CC0000000000000000000002 /* EmailJunkieMail */,
+			);
 			productName = EmailJunkie;
 			productReference = AA00000000000000000000A0 /* EmailJunkie.app */;
 			productType = "com.apple.product-type.application";
@@ -110,6 +120,9 @@
 				BB0000000000000000000001 /* EmailJunkieTests */,
 			);
 			name = EmailJunkieTests;
+			packageProductDependencies = (
+				CC0000000000000000000005 /* EmailJunkieMail */,
+			);
 			productName = EmailJunkieTests;
 			productReference = BB0000000000000000000003 /* EmailJunkieTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -143,6 +156,9 @@
 			);
 			mainGroup = AA0000000000000000000002;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -153,6 +169,26 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/EmailJunkieMail;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CC0000000000000000000002 /* EmailJunkieMail */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
+			productName = EmailJunkieMail;
+		};
+		CC0000000000000000000005 /* EmailJunkieMail */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
+			productName = EmailJunkieMail;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		AA0000000000000000000009 /* Resources */ = {

@@ -24,37 +24,45 @@ struct SettingsView: View {
                 )
             }
 
-            Section("Email account (Gmail)") {
+            Section("Email account") {
                 if appState.isAccountConnected {
                     LabeledContent("Status") {
                         Text("Connected").foregroundStyle(.green)
                     }
+                    LabeledContent("Account") {
+                        Text(appState.mailEmail).foregroundStyle(.secondary)
+                    }
                     Button("Disconnect", role: .destructive) {
-                        appState.disconnectGmail()
+                        appState.disconnectMail()
                     }
                 } else {
-                    TextField("Google client ID", text: $appState.clientIDInput)
+                    TextField("Email address", text: $appState.mailEmail)
                         .textContentType(.username)
-                    SecureField("Google client secret", text: $appState.clientSecretInput)
+                    SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {
-                        Task { await appState.connectGmail() }
+                        Task { await appState.testConnection() }
                     } label: {
                         if appState.isConnecting {
                             ProgressView().controlSize(.small)
                         } else {
-                            Text("Connect Gmail")
+                            Text("Test Connection")
                         }
                     }
                     .disabled(appState.isConnecting)
 
-                    DisclosureGroup("How do I get these?") {
-                        Text("In Google Cloud: create a project, enable the Gmail API, "
-                             + "configure the OAuth consent screen, then create an OAuth "
-                             + "client ID of type \u{201C}Desktop app.\u{201D} Paste its client "
-                             + "ID and secret here.")
+                    DisclosureGroup("How do I get an app password?") {
+                        Text("In your Google Account, turn on 2-Step Verification, then go "
+                             + "to Security \u{2192} App passwords and generate one. Paste the "
+                             + "16-character password here \u{2014} no Google Cloud setup "
+                             + "needed.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    DisclosureGroup("Advanced (IMAP server)") {
+                        TextField("IMAP host", text: $appState.mailHost)
+                        TextField("Port", value: $appState.mailPort, format: .number)
                     }
                 }
 

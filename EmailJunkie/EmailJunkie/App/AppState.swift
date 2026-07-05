@@ -1,5 +1,5 @@
-import AppKit
 import Combine
+import EmailJunkieMail
 import os
 import SwiftUI
 
@@ -7,9 +7,10 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "AppS
 
 /// Central application state container — the single source of truth.
 ///
-/// Views observe this object and update reactively. For now it holds the
-/// watch status, the launch-at-login preference, and the inbox poll interval.
-/// The email/voice/draft machinery is layered on in later milestones.
+/// Views observe this object and update reactively. It holds the watch status,
+/// launch-at-login preference, inbox poll interval, and the IMAP mail account
+/// connection. (The parked OAuth engine remains in the codebase but is no longer
+/// wired here — IMAP + app password is the primary connection path.)
 @MainActor
 final class AppState: ObservableObject {
 
@@ -31,17 +32,18 @@ final class AppState: ObservableObject {
     /// Whether an email account is connected.
     @Published var isAccountConnected: Bool = false
 
-    /// Whether a Gmail connection attempt is in progress.
+    /// Whether a connection attempt is in progress.
     @Published var isConnecting: Bool = false
 
     /// A user-facing message describing the last connection error, if any.
     @Published var connectionError: String?
 
-    /// The BYO Google OAuth client ID, bound to the Settings field.
-    @Published var clientIDInput: String = ""
+    // MARK: - Mail Account Inputs (bound to Settings fields)
 
-    /// The BYO Google OAuth client secret, bound to the Settings field.
-    @Published var clientSecretInput: String = ""
+    @Published var mailEmail: String
+    @Published var mailAppPassword: String
+    @Published var mailHost: String
+    @Published var mailPort: Int
 
     // MARK: - Preferences
 
@@ -54,10 +56,15 @@ final class AppState: ObservableObject {
     // MARK: - Private
 
     private let persistence: PersistenceProvider
-    private let gmailStore: GmailAuthStore
-    private let gmailAuth: GmailAuthCoordinator
+    private let secrets: SecretStore
+    private let mailProvider: MailProvider
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
+    private static let legacyOAuthKeys: [SecretKey] = [
+        .gmailToken,
+        .googleClientID,
+        .googleClientSecret
+    ]
 
     // MARK: - Computed
 
@@ -80,50 +87,46 @@ final class AppState: ObservableObject {
 
     init(
         persistence: PersistenceProvider = PersistenceService.shared,
-        gmailStore: GmailAuthStore = GmailAuthStore(),
-        gmailAuth: GmailAuthCoordinator? = nil
+        secrets: SecretStore = KeychainStore.shared,
+        mailProvider: MailProvider = IMAPMailProvider()
     ) {
         self.persistence = persistence
-        self.gmailStore = gmailStore
-        self.gmailAuth = gmailAuth ?? GmailAuthCoordinator(
-            store: gmailStore,
-            tokenService: OAuthTokenService(transport: URLSessionTransport()),
-            makeListener: { LoopbackRedirectListener() },
-            browser: NSWorkspaceBrowserOpener()
-        )
+        self.secrets = secrets
+        self.mailProvider = mailProvider
 
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
+        self.mailEmail = settings.mailEmail
+        self.mailHost = settings.mailHost
+        self.mailPort = settings.mailPort
+        self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
-        self.isAccountConnected = gmailStore.isConnected
-        if let credentials = try? gmailStore.loadCredentials() {
-            self.clientIDInput = credentials.clientID
-            self.clientSecretInput = credentials.clientSecret
-        }
+        cleanupLegacyOAuthCredentials()
+        self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
 
         setupAutoSave()
     }
 
-    // MARK: - Gmail Account
+    // MARK: - Mail Account
 
-    /// Saves the entered BYO OAuth client credentials to the Keychain.
-    func saveGmailCredentials() throws {
-        let credentials = GmailCredentials(
-            clientID: clientIDInput.trimmingCharacters(in: .whitespacesAndNewlines),
-            clientSecret: clientSecretInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Builds credentials from the current inputs.
+    private var mailCredentials: MailAccountCredentials {
+        MailAccountCredentials(
+            email: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            appPassword: mailAppPassword.trimmingCharacters(in: .whitespacesAndNewlines),
+            host: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: mailPort
         )
-        try gmailStore.saveCredentials(credentials)
     }
 
-    /// Runs the Gmail connect flow, updating connection state and any error.
-    func connectGmail() async {
+    /// Tests the mailbox connection and, on success, saves the credentials.
+    func testConnection() async {
         connectionError = nil
 
-        let clientID = clientIDInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clientSecret = clientSecretInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clientID.isEmpty, !clientSecret.isEmpty else {
-            connectionError = "Enter your Google OAuth client ID and secret first."
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            connectionError = "Enter your email address and app password first."
             return
         }
 
@@ -131,42 +134,112 @@ final class AppState: ObservableObject {
         defer { isConnecting = false }
 
         do {
-            try saveGmailCredentials()
-            _ = try await gmailAuth.connect()
-            isAccountConnected = true
+            try await mailProvider.verifyConnection(credentials)
         } catch {
             connectionError = Self.message(for: error)
+            return
         }
+
+        let previousSettings = persistence.loadSettings()
+        let previousAppPassword: String?
+        do {
+            previousAppPassword = try secrets.value(for: .mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "read", error: error)
+            return
+        }
+
+        do {
+            try secrets.set(credentials.appPassword, for: .mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "save", error: error)
+            return
+        }
+
+        do {
+            try persistVerifiedConnection(credentials)
+        } catch {
+            let rollbackError = rollbackMailAppPassword(to: previousAppPassword)
+            restoreConnectionSnapshot(settings: previousSettings, appPassword: previousAppPassword)
+            var message = Self.settingsMessage(action: "save", error: error)
+            if let rollbackError {
+                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+            }
+            connectionError = message
+            return
+        }
+        isAccountConnected = true
+        logger.info("Mailbox connected")
     }
 
-    /// Disconnects the Gmail account (clears the token, keeps credentials).
-    func disconnectGmail() {
+    /// Disconnects the mailbox by clearing the stored app password.
+    func disconnectMail() {
         connectionError = nil
         do {
-            try gmailAuth.disconnect()
-            isAccountConnected = false
+            try removeLegacyOAuthCredentialsIfPresent()
         } catch {
-            connectionError = Self.message(for: error)
+            connectionError = Self.legacyOAuthCleanupMessage(error: error)
+            return
         }
+
+        do {
+            try secrets.remove(.mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "remove", error: error)
+            return
+        }
+        mailAppPassword = ""
+        isAccountConnected = false
+        logger.info("Mailbox disconnected")
     }
 
     /// Maps an error to a concise, user-facing message.
     private static func message(for error: Error) -> String {
         switch error {
-        case GmailAuthError.missingCredentials:
-            return "Enter your Google OAuth client ID and secret first."
-        case OAuthError.stateMismatch:
-            return "Security check failed. Please try connecting again."
-        case OAuthError.authorizationDenied:
-            return "Access was declined in the browser."
-        case OAuthError.redirectTimedOut:
-            return "Connection timed out. Please try again."
-        case OAuthError.missingRequiredScopes:
-            return "Grant all requested Gmail permissions, then try connecting again."
-        case let OAuthError.server(code, description):
-            return description ?? "Google returned an error (\(code))."
+        case MailError.incompleteCredentials:
+            return "Enter your email address and app password first."
+        case MailError.authenticationFailed(let detail):
+            return "Sign-in failed — check your email and app password. (\(detail))"
+        case MailError.connectionFailed(let detail):
+            return "Couldn't reach the mail server. (\(detail))"
+        case KeychainError.unexpectedStatus(let status):
+            return "Keychain returned status \(status)."
+        case KeychainError.dataEncodingFailed:
+            return "Keychain could not encode the app password."
         default:
             return error.localizedDescription
+        }
+    }
+
+    private static func keychainMessage(action: String, error: Error) -> String {
+        "Couldn't \(action) the app password in Keychain. \(message(for: error))"
+    }
+
+    private static func legacyOAuthCleanupMessage(error: Error) -> String {
+        "Couldn't remove the legacy Gmail OAuth credentials from Keychain. \(message(for: error))"
+    }
+
+    private static func settingsMessage(action: String, error: Error) -> String {
+        "Couldn't \(action) mailbox settings. \(message(for: error))"
+    }
+
+    private func cleanupLegacyOAuthCredentials() {
+        do {
+            try removeLegacyOAuthCredentialsIfPresent()
+        } catch {
+            connectionError = Self.legacyOAuthCleanupMessage(error: error)
+        }
+    }
+
+    private func removeLegacyOAuthCredentialsIfPresent() throws {
+        var removedAnyCredential = false
+        for key in Self.legacyOAuthKeys where try secrets.value(for: key) != nil {
+            try secrets.remove(key)
+            removedAnyCredential = true
+        }
+
+        if removedAnyCredential {
+            logger.info("Legacy Gmail OAuth credentials removed")
         }
     }
 
@@ -190,10 +263,53 @@ final class AppState: ObservableObject {
 
     // MARK: - Persistence
 
-    private func buildSettings() -> Settings {
+    private func persistVerifiedConnection(_ credentials: MailAccountCredentials) throws {
+        mailEmail = credentials.email
+        mailHost = credentials.host
+        mailPort = credentials.port
+        mailAppPassword = credentials.appPassword
+
+        settingsDebouncer.cancel()
+        try persistence.saveSettingsSync(buildSettings(
+            mailEmail: credentials.email,
+            mailHost: credentials.host,
+            mailPort: credentials.port
+        ))
+    }
+
+    private func rollbackMailAppPassword(to previousAppPassword: String?) -> Error? {
+        do {
+            if let previousAppPassword {
+                try secrets.set(previousAppPassword, for: .mailAppPassword)
+            } else {
+                try secrets.remove(.mailAppPassword)
+            }
+            return nil
+        } catch {
+            logger.error("Failed to roll back mail app password: \(error.localizedDescription)")
+            return error
+        }
+    }
+
+    private func restoreConnectionSnapshot(settings: Settings, appPassword: String?) {
+        mailEmail = settings.mailEmail
+        mailHost = settings.mailHost
+        mailPort = settings.mailPort
+        mailAppPassword = appPassword ?? ""
+        isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
+    }
+
+    private func buildSettings(
+        mailEmail: String? = nil,
+        mailHost: String? = nil,
+        mailPort: Int? = nil
+    ) -> Settings {
         Settings(
             schemaVersion: Settings.currentSchemaVersion,
-            pollIntervalSeconds: pollIntervalSeconds
+            pollIntervalSeconds: pollIntervalSeconds,
+            mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailPort: mailPort ?? self.mailPort
         )
     }
 
@@ -209,6 +325,11 @@ final class AppState: ObservableObject {
     func saveSettingsSync() {
         let settings = buildSettings()
         settingsDebouncer.cancel()
-        persistence.saveSettingsSync(settings)
+        do {
+            try persistence.saveSettingsSync(settings)
+        } catch {
+            connectionError = Self.settingsMessage(action: "save", error: error)
+            logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
+        }
     }
 }

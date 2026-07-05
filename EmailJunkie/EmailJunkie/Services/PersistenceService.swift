@@ -11,7 +11,7 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Pers
 protocol PersistenceProvider {
     func loadSettings() -> Settings
     func saveSettings(_ settings: Settings)
-    func saveSettingsSync(_ settings: Settings)
+    func saveSettingsSync(_ settings: Settings) throws
 }
 
 /// File-based persistence for non-secret application settings.
@@ -82,15 +82,16 @@ final class PersistenceService: PersistenceProvider {
         }
     }
 
-    func saveSettingsSync(_ settings: Settings) {
+    func saveSettingsSync(_ settings: Settings) throws {
         let validated = settings.validated()
-        ioQueue.sync { [encoder, settingsURL] in
-            do {
+        do {
+            try ioQueue.sync { [encoder, settingsURL] in
                 let data = try encoder.encode(validated)
                 try data.write(to: settingsURL, options: .atomic)
-            } catch {
-                logger.error("Failed to save settings (sync): \(error.localizedDescription)")
             }
+        } catch {
+            logger.error("Failed to save settings (sync): \(error.localizedDescription)")
+            throw error
         }
     }
 }

@@ -40,6 +40,12 @@ jobs:
           swiftlint --version
           swiftlint lint --strict
 
+      - name: Test mail package
+        working-directory: ${{ github.workspace }}
+        run: |
+          cd Packages/EmailJunkieMail
+          swift test
+
       - name: Build & Test
         run: |
           set -o pipefail

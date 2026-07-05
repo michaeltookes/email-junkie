@@ -32,6 +32,7 @@ public struct IMAPMailProvider: MailProvider {
         let password = credentials.appPassword
 
         let bootstrap = ClientBootstrap(group: group)
+            .connectTimeout(timeout)
             .channelInitializer { channel in
                 do {
                     let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)

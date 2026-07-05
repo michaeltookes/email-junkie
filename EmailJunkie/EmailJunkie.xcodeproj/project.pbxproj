@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		CC0000000000000000000003 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000002 /* EmailJunkieMail */; };
+		CC0000000000000000000004 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* EmailJunkieMail */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -51,6 +52,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC0000000000000000000004 /* EmailJunkieMail in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +120,9 @@
 				BB0000000000000000000001 /* EmailJunkieTests */,
 			);
 			name = EmailJunkieTests;
+			packageProductDependencies = (
+				CC0000000000000000000005 /* EmailJunkieMail */,
+			);
 			productName = EmailJunkieTests;
 			productReference = BB0000000000000000000003 /* EmailJunkieTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -174,6 +179,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		CC0000000000000000000002 /* EmailJunkieMail */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EmailJunkieMail;
+		};
+		CC0000000000000000000005 /* EmailJunkieMail */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EmailJunkieMail;
 		};

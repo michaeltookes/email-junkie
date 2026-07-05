@@ -147,7 +147,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        saveSettings()
+        persistVerifiedConnection(credentials)
         isAccountConnected = true
         logger.info("Mailbox connected")
     }
@@ -239,13 +239,31 @@ final class AppState: ObservableObject {
 
     // MARK: - Persistence
 
-    private func buildSettings() -> Settings {
+    private func persistVerifiedConnection(_ credentials: MailAccountCredentials) {
+        mailEmail = credentials.email
+        mailHost = credentials.host
+        mailPort = credentials.port
+        mailAppPassword = credentials.appPassword
+
+        settingsDebouncer.cancel()
+        persistence.saveSettingsSync(buildSettings(
+            mailEmail: credentials.email,
+            mailHost: credentials.host,
+            mailPort: credentials.port
+        ))
+    }
+
+    private func buildSettings(
+        mailEmail: String? = nil,
+        mailHost: String? = nil,
+        mailPort: Int? = nil
+    ) -> Settings {
         Settings(
             schemaVersion: Settings.currentSchemaVersion,
             pollIntervalSeconds: pollIntervalSeconds,
-            mailEmail: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHost: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
-            mailPort: mailPort
+            mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailPort: mailPort ?? self.mailPort
         )
     }
 

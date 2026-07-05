@@ -180,10 +180,12 @@
 /* Begin XCSwiftPackageProductDependency section */
 		CC0000000000000000000002 /* EmailJunkieMail */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
 			productName = EmailJunkieMail;
 		};
 		CC0000000000000000000005 /* EmailJunkieMail */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
 			productName = EmailJunkieMail;
 		};
 /* End XCSwiftPackageProductDependency section */

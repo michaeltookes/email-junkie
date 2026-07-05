@@ -148,6 +148,34 @@ final class AppStateTests: XCTestCase {
         XCTAssertNotNil(appState.connectionError)
     }
 
+    func testPreviewRecentMessagesPopulatesResults() async {
+        let messages = [
+            MailMessage(id: 2, from: MailAddress(name: "Bob", email: "bob@x.com"), subject: "Hi", date: "")
+        ]
+        let provider = FakeAppMailProvider(result: .success(()), fetchResult: .success(messages))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+
+        await appState.previewRecentMessages()
+
+        XCTAssertEqual(appState.recentMessages, messages)
+        XCTAssertNil(appState.fetchError)
+        XCTAssertFalse(appState.isFetching)
+    }
+
+    func testPreviewRecentMessagesSurfacesError() async {
+        let provider = FakeAppMailProvider(result: .success(()), fetchResult: .failure(.commandFailed("SELECT failed")))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+
+        await appState.previewRecentMessages()
+
+        XCTAssertTrue(appState.recentMessages.isEmpty)
+        XCTAssertNotNil(appState.fetchError)
+    }
+
     func testDisconnectClearsStoredPassword() async {
         let secrets = InMemorySecretStore()
         let provider = FakeAppMailProvider(result: .success(()))
@@ -322,10 +350,15 @@ private enum AppStatePersistenceError: LocalizedError {
 
 private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let result: Result<Void, MailError>
+    private let fetchResult: Result<[MailMessage], MailError>
     private(set) var lastCredentials: MailAccountCredentials?
 
-    init(result: Result<Void, MailError>) {
+    init(
+        result: Result<Void, MailError>,
+        fetchResult: Result<[MailMessage], MailError> = .success([])
+    ) {
         self.result = result
+        self.fetchResult = fetchResult
     }
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {
@@ -338,7 +371,7 @@ private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         mailbox: Mailbox,
         limit: Int
     ) async throws -> [MailMessage] {
-        []
+        try fetchResult.get()
     }
 }
 

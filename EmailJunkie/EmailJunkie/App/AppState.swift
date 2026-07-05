@@ -45,6 +45,17 @@ final class AppState: ObservableObject {
     @Published var mailHost: String
     @Published var mailPort: Int
 
+    // MARK: - Recent Messages (preview)
+
+    /// The most recently fetched messages (envelope-level), newest first.
+    @Published var recentMessages: [MailMessage] = []
+
+    /// Whether a fetch is in progress.
+    @Published var isFetching: Bool = false
+
+    /// A user-facing message describing the last fetch error, if any.
+    @Published var fetchError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -193,6 +204,30 @@ final class AppState: ObservableObject {
         logger.info("Mailbox disconnected")
     }
 
+    /// Fetches recent messages from a mailbox for a quick preview.
+    func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
+        fetchError = nil
+
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            fetchError = "Connect an account first."
+            return
+        }
+
+        isFetching = true
+        defer { isFetching = false }
+
+        do {
+            recentMessages = try await mailProvider.fetchRecentMessages(
+                credentials,
+                mailbox: mailbox,
+                limit: limit
+            )
+        } catch {
+            fetchError = Self.message(for: error)
+        }
+    }
+
     /// Maps an error to a concise, user-facing message.
     private static func message(for error: Error) -> String {
         switch error {
@@ -202,6 +237,8 @@ final class AppState: ObservableObject {
             return "Sign-in failed — check your email and app password. (\(detail))"
         case MailError.connectionFailed(let detail):
             return "Couldn't reach the mail server. (\(detail))"
+        case MailError.commandFailed(let detail):
+            return "The mail server rejected a request. (\(detail))"
         case KeychainError.unexpectedStatus(let status):
             return "Keychain returned status \(status)."
         case KeychainError.dataEncodingFailed:

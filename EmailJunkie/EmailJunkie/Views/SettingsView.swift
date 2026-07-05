@@ -73,6 +73,38 @@ struct SettingsView: View {
                 }
             }
 
+            if appState.isAccountConnected {
+                Section("Recent messages") {
+                    Button {
+                        Task { await appState.previewRecentMessages() }
+                    } label: {
+                        if appState.isFetching {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Preview inbox")
+                        }
+                    }
+                    .disabled(appState.isFetching)
+
+                    if let error = appState.fetchError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    ForEach(appState.recentMessages) { message in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(message.subject.isEmpty ? "(no subject)" : message.subject)
+                                .font(.callout)
+                                .lineLimit(1)
+                            Text(message.from?.email ?? "unknown sender")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
             Section("AI provider") {
                 Text("Bring-your-own provider and local-model support are coming soon.")
                     .font(.caption)

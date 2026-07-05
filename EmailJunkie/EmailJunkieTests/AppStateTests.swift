@@ -88,6 +88,41 @@ final class AppStateTests: XCTestCase {
         )
     }
 
+    func testTestConnectionRestoresPreviousStateWhenSettingsSaveFails() async {
+        let secrets = InMemorySecretStore(seed: [.mailAppPassword: "old-pw"])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "old@gmail.com",
+            mailHost: "imap.old.example.com",
+            mailPort: 993
+        ))
+        persistence.syncSaveError = AppStatePersistenceError.writeDenied
+        let appState = makeAppState(provider: provider, secrets: secrets, persistence: persistence)
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        appState.mailHost = "imap.new.example.com"
+        appState.mailPort = 1993
+
+        await appState.testConnection()
+
+        let settings = persistence.loadSettings()
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailEmail, "old@gmail.com")
+        XCTAssertEqual(appState.mailAppPassword, "old-pw")
+        XCTAssertEqual(appState.mailHost, "imap.old.example.com")
+        XCTAssertEqual(appState.mailPort, 993)
+        XCTAssertEqual(settings.mailEmail, "old@gmail.com")
+        XCTAssertEqual(settings.mailHost, "imap.old.example.com")
+        XCTAssertEqual(settings.mailPort, 993)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "old-pw")
+        XCTAssertEqual(
+            appState.connectionError,
+            "Couldn't save mailbox settings. settings write denied"
+        )
+    }
+
     func testTestConnectionFailureSurfacesError() async {
         let provider = FakeAppMailProvider(result: .failure(.authenticationFailed("bad creds")))
         let appState = makeAppState(provider: provider)
@@ -258,6 +293,7 @@ final class AppStateTests: XCTestCase {
 
 private final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
+    var syncSaveError: Error?
 
     init(settings: Settings = .default) {
         self.settings = settings
@@ -265,7 +301,23 @@ private final class AppStateMemoryPersistence: PersistenceProvider {
 
     func loadSettings() -> Settings { settings }
     func saveSettings(_ settings: Settings) { self.settings = settings }
-    func saveSettingsSync(_ settings: Settings) { self.settings = settings }
+    func saveSettingsSync(_ settings: Settings) throws {
+        if let syncSaveError {
+            throw syncSaveError
+        }
+        self.settings = settings
+    }
+}
+
+private enum AppStatePersistenceError: LocalizedError {
+    case writeDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .writeDenied:
+            return "settings write denied"
+        }
+    }
 }
 
 private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {

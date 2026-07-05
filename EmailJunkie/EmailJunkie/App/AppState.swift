@@ -140,6 +140,15 @@ final class AppState: ObservableObject {
             return
         }
 
+        let previousSettings = persistence.loadSettings()
+        let previousAppPassword: String?
+        do {
+            previousAppPassword = try secrets.value(for: .mailAppPassword)
+        } catch {
+            connectionError = Self.keychainMessage(action: "read", error: error)
+            return
+        }
+
         do {
             try secrets.set(credentials.appPassword, for: .mailAppPassword)
         } catch {
@@ -147,7 +156,18 @@ final class AppState: ObservableObject {
             return
         }
 
-        persistVerifiedConnection(credentials)
+        do {
+            try persistVerifiedConnection(credentials)
+        } catch {
+            let rollbackError = rollbackMailAppPassword(to: previousAppPassword)
+            restoreConnectionSnapshot(settings: previousSettings, appPassword: previousAppPassword)
+            var message = Self.settingsMessage(action: "save", error: error)
+            if let rollbackError {
+                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+            }
+            connectionError = message
+            return
+        }
         isAccountConnected = true
         logger.info("Mailbox connected")
     }
@@ -199,6 +219,10 @@ final class AppState: ObservableObject {
         "Couldn't remove the legacy Gmail OAuth credentials from Keychain. \(message(for: error))"
     }
 
+    private static func settingsMessage(action: String, error: Error) -> String {
+        "Couldn't \(action) mailbox settings. \(message(for: error))"
+    }
+
     private func cleanupLegacyOAuthCredentials() {
         do {
             try removeLegacyOAuthCredentialsIfPresent()
@@ -239,18 +263,40 @@ final class AppState: ObservableObject {
 
     // MARK: - Persistence
 
-    private func persistVerifiedConnection(_ credentials: MailAccountCredentials) {
+    private func persistVerifiedConnection(_ credentials: MailAccountCredentials) throws {
         mailEmail = credentials.email
         mailHost = credentials.host
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
 
         settingsDebouncer.cancel()
-        persistence.saveSettingsSync(buildSettings(
+        try persistence.saveSettingsSync(buildSettings(
             mailEmail: credentials.email,
             mailHost: credentials.host,
             mailPort: credentials.port
         ))
+    }
+
+    private func rollbackMailAppPassword(to previousAppPassword: String?) -> Error? {
+        do {
+            if let previousAppPassword {
+                try secrets.set(previousAppPassword, for: .mailAppPassword)
+            } else {
+                try secrets.remove(.mailAppPassword)
+            }
+            return nil
+        } catch {
+            logger.error("Failed to roll back mail app password: \(error.localizedDescription)")
+            return error
+        }
+    }
+
+    private func restoreConnectionSnapshot(settings: Settings, appPassword: String?) {
+        mailEmail = settings.mailEmail
+        mailHost = settings.mailHost
+        mailPort = settings.mailPort
+        mailAppPassword = appPassword ?? ""
+        isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
     }
 
     private func buildSettings(
@@ -279,6 +325,11 @@ final class AppState: ObservableObject {
     func saveSettingsSync() {
         let settings = buildSettings()
         settingsDebouncer.cancel()
-        persistence.saveSettingsSync(settings)
+        do {
+            try persistence.saveSettingsSync(settings)
+        } catch {
+            connectionError = Self.settingsMessage(action: "save", error: error)
+            logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
+        }
     }
 }

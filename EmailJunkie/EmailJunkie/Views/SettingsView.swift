@@ -93,14 +93,36 @@ struct SettingsView: View {
                     }
 
                     ForEach(appState.recentMessages) { message in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(message.subject.isEmpty ? "(no subject)" : message.subject)
-                                .font(.callout)
-                                .lineLimit(1)
-                            Text(message.from?.email ?? "unknown sender")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Button {
+                            Task { await appState.previewBody(for: message) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(message.subject.isEmpty ? "(no subject)" : message.subject)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Text(message.from?.email ?? "unknown sender")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if appState.isFetchingBody {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(appState.isFetchingBody)
+                    }
+
+                    if let error = appState.bodyError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
             }
@@ -122,5 +144,36 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 420, height: 420)
+        .sheet(item: $appState.openedBody) { preview in
+            MessageBodyView(preview: preview)
+        }
+    }
+}
+
+/// A sheet showing the readable body text of a fetched message.
+private struct MessageBodyView: View {
+    let preview: MailBodyPreview
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(preview.subject.isEmpty ? "(no subject)" : preview.subject)
+                    .font(.headline)
+                    .lineLimit(2)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                Text(preview.text.isEmpty ? "(no text content)" : preview.text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+        }
+        .frame(width: 480, height: 420)
     }
 }

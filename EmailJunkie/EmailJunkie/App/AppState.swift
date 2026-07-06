@@ -56,6 +56,15 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last fetch error, if any.
     @Published var fetchError: String?
 
+    /// The readable body of the message the user opened, if any.
+    @Published var openedBody: MailBodyPreview?
+
+    /// Whether a body fetch is in progress.
+    @Published var isFetchingBody: Bool = false
+
+    /// A user-facing message describing the last body-fetch error, if any.
+    @Published var bodyError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -241,6 +250,36 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Fetches and reduces a single message's body to readable text for preview.
+    func previewBody(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+        bodyError = nil
+        openedBody = nil
+
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            bodyError = "Connect an account first."
+            return
+        }
+
+        isFetchingBody = true
+        defer { isFetchingBody = false }
+
+        do {
+            let raw = try await mailProvider.fetchBodyText(
+                credentials,
+                mailbox: mailbox,
+                uid: message.id
+            )
+            openedBody = MailBodyPreview(
+                id: message.id,
+                subject: message.subject,
+                text: MailBodyText.plainText(from: raw)
+            )
+        } catch {
+            bodyError = Self.message(for: error)
+        }
+    }
+
     private func nextPreviewGeneration() -> Int {
         previewGeneration += 1
         return previewGeneration
@@ -255,6 +294,8 @@ final class AppState: ObservableObject {
     private func clearRecentMessagePreview() {
         recentMessages = []
         fetchError = nil
+        openedBody = nil
+        bodyError = nil
     }
 
     private func isCurrentPreviewRequest(
@@ -405,4 +446,12 @@ final class AppState: ObservableObject {
             logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
         }
     }
+}
+
+/// A fetched, readable message body shown in the preview sheet.
+struct MailBodyPreview: Identifiable, Equatable {
+    /// The source message's IMAP UID.
+    let id: UInt32
+    let subject: String
+    let text: String
 }

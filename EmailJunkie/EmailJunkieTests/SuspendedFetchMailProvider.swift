@@ -28,4 +28,12 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
         lock.unlock()
         continuation?.resume(with: result)
     }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32
+    ) async throws -> String {
+        ""
+    }
 }

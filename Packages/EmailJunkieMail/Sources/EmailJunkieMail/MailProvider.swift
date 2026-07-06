@@ -25,4 +25,16 @@ public protocol MailProvider: Sendable {
         mailbox: Mailbox,
         limit: Int
     ) async throws -> [MailMessage]
+
+    /// Fetches the text body of the message identified by `uid` in `mailbox`.
+    ///
+    /// Uses `BODY.PEEK[TEXT]` so reading the body does not set the `\Seen`
+    /// flag. Returns the raw text body as sent by the server (still MIME-
+    /// structured for multipart messages); use `MailBodyText.plainText(from:)`
+    /// to reduce it to human-readable text.
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32
+    ) async throws -> String
 }

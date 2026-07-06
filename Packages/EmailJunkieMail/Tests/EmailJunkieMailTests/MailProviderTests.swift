@@ -72,4 +72,12 @@ final class FakeMailProvider: MailProvider, @unchecked Sendable {
     ) async throws -> [MailMessage] {
         []
     }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32
+    ) async throws -> String {
+        ""
+    }
 }

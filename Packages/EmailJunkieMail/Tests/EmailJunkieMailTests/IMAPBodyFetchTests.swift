@@ -13,9 +13,9 @@ final class IMAPBodyFetchTests: XCTestCase {
     private func makeChannel(
         uid: UInt32 = 101,
         mailbox: String = "INBOX"
-    ) throws -> (EmbeddedChannel, EventLoopFuture<String>) {
+    ) throws -> (EmbeddedChannel, EventLoopFuture<Data>) {
         let channel = EmbeddedChannel()
-        let promise = channel.eventLoop.makePromise(of: String.self)
+        let promise = channel.eventLoop.makePromise(of: Data.self)
         let handler = IMAPBodyFetchHandler(
             email: "me@gmail.com",
             password: "pw",
@@ -32,6 +32,11 @@ final class IMAPBodyFetchTests: XCTestCase {
         while (try? channel.readOutbound(as: ByteBuffer.self)) != nil {}
     }
 
+    private func feed(_ channel: EmbeddedChannel, bytes: [UInt8]) throws {
+        try channel.writeInbound(ByteBuffer(bytes: bytes))
+        while (try? channel.readOutbound(as: ByteBuffer.self)) != nil {}
+    }
+
     func testAssemblesStreamedBodyText() throws {
         let (channel, future) = try makeChannel()
         let body = "Hi Alice,\r\n\r\nThanks for the update.\r\n\r\n— Me"
@@ -43,7 +48,7 @@ final class IMAPBodyFetchTests: XCTestCase {
         try feed(channel, "* 1 FETCH (UID 101 BODY[TEXT] {\(body.utf8.count)}\r\n\(body))\r\n")
         try feed(channel, "A3 OK FETCH completed\r\n")
 
-        XCTAssertEqual(try future.wait(), body)
+        XCTAssertEqual(try future.wait(), Data(body.utf8))
         _ = try? channel.finish()
     }
 
@@ -62,7 +67,23 @@ final class IMAPBodyFetchTests: XCTestCase {
         try feed(channel, ")\r\n")
         try feed(channel, "A3 OK FETCH completed\r\n")
 
-        XCTAssertEqual(try future.wait(), body)
+        XCTAssertEqual(try future.wait(), Data(body.utf8))
+        _ = try? channel.finish()
+    }
+
+    func testPreservesNonUTF8BodyBytes() throws {
+        let (channel, future) = try makeChannel()
+        let body = Array("Content-Type: text/plain; charset=iso-8859-1\r\n\r\nCaf".utf8) + [0xE9]
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "A2 OK SELECT completed\r\n")
+        try feed(channel, "* 1 FETCH (UID 101 BODY[TEXT] {\(body.count)}\r\n")
+        try feed(channel, bytes: body)
+        try feed(channel, ")\r\n")
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        XCTAssertEqual(try future.wait(), Data(body))
         _ = try? channel.finish()
     }
 

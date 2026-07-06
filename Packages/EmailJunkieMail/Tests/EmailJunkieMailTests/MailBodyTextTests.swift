@@ -141,6 +141,21 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Café")
     }
 
+    func testDecodesEightBitPartUsingDeclaredCharset() {
+        var raw = Data()
+        raw.append(contentsOf: [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: 8bit",
+            "",
+            ""
+        ].joined(separator: "\r\n").utf8)
+        raw.append(contentsOf: [0x43, 0x61, 0x66, 0xE9])
+        raw.append(contentsOf: "\r\n--BOUND--".utf8)
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café")
+    }
+
     func testFallsBackToStrippedHTMLWhenNoPlainPart() {
         let raw = [
             "--BOUND",
@@ -211,5 +226,21 @@ final class MailBodyTextTests: XCTestCase {
         // A "-- " signature delimiter must not be mistaken for a MIME boundary.
         let raw = "See you then.\r\n\r\n-- \r\nMichael"
         XCTAssertEqual(MailBodyText.plainText(from: raw), "See you then.\n\n-- \nMichael")
+    }
+
+    func testRepeatedMarkdownSeparatorsAreNotTreatedAsMultipart() {
+        let raw = [
+            "Agenda",
+            "",
+            "---",
+            "",
+            "Notes",
+            "",
+            "---",
+            "",
+            "Thanks"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Agenda\n\n---\n\nNotes\n\n---\n\nThanks")
     }
 }

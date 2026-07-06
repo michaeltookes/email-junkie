@@ -38,14 +38,14 @@ enum AppStatePersistenceError: LocalizedError {
 final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let result: Result<Void, MailError>
     private let fetchResult: Result<[MailMessage], MailError>
-    private let bodyResult: Result<String, MailError>
+    private let bodyResult: Result<Data, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var lastBodyUID: UInt32?
 
     init(
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
-        bodyResult: Result<String, MailError> = .success("")
+        bodyResult: Result<Data, MailError> = .success(Data())
     ) {
         self.result = result
         self.fetchResult = fetchResult
@@ -69,7 +69,7 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         uid: UInt32
-    ) async throws -> String {
+    ) async throws -> Data {
         lastBodyUID = uid
         return try bodyResult.get()
     }
@@ -111,8 +111,8 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         uid: UInt32
-    ) async throws -> String {
-        ""
+    ) async throws -> Data {
+        Data()
     }
 }
 

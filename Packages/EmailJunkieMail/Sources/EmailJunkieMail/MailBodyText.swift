@@ -16,13 +16,24 @@ import Foundation
 public enum MailBodyText {
 
     /// Reduces a raw text body to readable plain text.
+    public static func plainText(from raw: Data) -> String {
+        let bytes = Array(raw)
+        return plainText(fromBytePreserving: String(bytes: bytes, encoding: .isoLatin1) ?? "")
+    }
+
+    /// Reduces a raw text body to readable plain text.
     public static func plainText(from raw: String) -> String {
+        plainText(from: Data(raw.utf8))
+    }
+
+    private static func plainText(fromBytePreserving raw: String) -> String {
         let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
         if let boundary = topBoundary(of: normalized),
            let text = text(fromMultipart: normalized, boundary: boundary) {
             return text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decoded = decodeBytes(bytes(fromBytePreserving: normalized), charset: .utf8)
+        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
         if looksLikeHTML(trimmed) {
             return strippingHTML(trimmed)
         }
@@ -41,8 +52,9 @@ public enum MailBodyText {
             let boundary = String(candidate.dropFirst(2))
             let delimiter = "--" + boundary
             let closing = delimiter + "--"
-            let occurrences = lines.filter { $0 == delimiter || $0 == closing }.count
-            if occurrences >= 2 { return boundary }
+            let hasDelimiter = lines.contains(delimiter)
+            let hasClosing = lines.contains(closing)
+            if hasDelimiter && hasClosing { return boundary }
         }
         return nil
     }
@@ -224,14 +236,14 @@ public enum MailBodyText {
             }
             return content
         default:
-            return content
+            return decodeBytes(bytes(fromBytePreserving: content), charset: charset)
         }
     }
 
     private static func decodeQuotedPrintable(_ content: String, charset: String.Encoding) -> String {
         // Join soft line breaks ("=" at end of line), then decode "=XX" bytes.
         let joined = content.replacingOccurrences(of: "=\n", with: "")
-        let chars = Array(joined.utf8)
+        let chars = bytes(fromBytePreserving: joined)
         var bytes: [UInt8] = []
         var index = 0
         while index < chars.count {
@@ -246,7 +258,33 @@ public enum MailBodyText {
             bytes.append(chars[index])
             index += 1
         }
-        return String(bytes: bytes, encoding: charset) ?? joined
+        return decodeBytes(bytes, charset: charset)
+    }
+
+    private static func bytes(fromBytePreserving text: String) -> [UInt8] {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(text.utf8.count)
+        for scalar in text.unicodeScalars {
+            if scalar.value <= UInt8.max {
+                bytes.append(UInt8(scalar.value))
+            } else {
+                bytes.append(contentsOf: String(scalar).utf8)
+            }
+        }
+        return bytes
+    }
+
+    private static func decodeBytes(_ bytes: [UInt8], charset: String.Encoding) -> String {
+        if let text = String(bytes: bytes, encoding: charset) {
+            return text
+        }
+        if charset != .utf8, let text = String(bytes: bytes, encoding: .utf8) {
+            return text
+        }
+        if let text = String(bytes: bytes, encoding: .isoLatin1) {
+            return text
+        }
+        return ""
     }
 
     // MARK: - HTML

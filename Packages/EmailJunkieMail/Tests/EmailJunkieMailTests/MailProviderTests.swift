@@ -77,7 +77,7 @@ final class FakeMailProvider: MailProvider, @unchecked Sendable {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         uid: UInt32
-    ) async throws -> String {
-        ""
+    ) async throws -> Data {
+        Data()
     }
 }

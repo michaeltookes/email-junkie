@@ -198,7 +198,7 @@ final class AppStateTests: XCTestCase {
 
     func testPreviewBodyPopulatesReadableText() async {
         let raw = "--BOUND\r\nContent-Type: text/plain\r\n\r\nHello there.\r\n--BOUND--"
-        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .success(raw))
+        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .success(Data(raw.utf8)))
         let appState = makeAppState(provider: provider)
         appState.mailEmail = "me@gmail.com"
         appState.mailAppPassword = "pw"
@@ -242,7 +242,7 @@ final class AppStateTests: XCTestCase {
         appState.mailAppPassword = "new-pw"
         await appState.testConnection()
 
-        provider.completeBodyFetch(with: .success("Body from old account"))
+        provider.completeBodyFetch(with: .success(Data("Body from old account".utf8)))
         await previewTask.value
 
         XCTAssertTrue(appState.isAccountConnected)
@@ -285,7 +285,7 @@ final class AppStateTests: XCTestCase {
         let refreshTask = Task { await appState.previewRecentMessages() }
         await fulfillment(of: [provider.didStartFetch], timeout: 1)
 
-        provider.completeBodyFetch(with: .success("Body from refreshed-away row"))
+        provider.completeBodyFetch(with: .success(Data("Body from refreshed-away row".utf8)))
         await bodyTask.value
 
         XCTAssertNil(appState.openedBody)

@@ -9,7 +9,7 @@ extension IMAPMailProvider {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         uid: UInt32
-    ) async throws -> String {
+    ) async throws -> Data {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
         guard uid > 0 else { throw MailError.commandFailed("A message UID is required to fetch a body.") }
 
@@ -70,17 +70,17 @@ extension IMAPMailProvider {
 /// Happy Eyeballs attempts can't settle the winning channel's result.
 final class IMAPBodyFetchAttempts: @unchecked Sendable {
     private let lock = NSLock()
-    private var futures: [ObjectIdentifier: EventLoopFuture<String>] = [:]
+    private var futures: [ObjectIdentifier: EventLoopFuture<Data>] = [:]
 
-    func makePromise(for channel: Channel) -> EventLoopPromise<String> {
-        let promise = channel.eventLoop.makePromise(of: String.self)
+    func makePromise(for channel: Channel) -> EventLoopPromise<Data> {
+        let promise = channel.eventLoop.makePromise(of: Data.self)
         lock.lock()
         futures[ObjectIdentifier(channel)] = promise.futureResult
         lock.unlock()
         return promise
     }
 
-    func future(for channel: Channel) -> EventLoopFuture<String>? {
+    func future(for channel: Channel) -> EventLoopFuture<Data>? {
         lock.lock()
         defer { lock.unlock() }
         return futures.removeValue(forKey: ObjectIdentifier(channel))
@@ -100,7 +100,7 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
     private let password: String
     private let mailboxName: String
     private let uid: UInt32
-    private let promise: EventLoopPromise<String>
+    private let promise: EventLoopPromise<Data>
 
     private let loginTag = "A1"
     private let selectTag = "A2"
@@ -117,7 +117,7 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
         password: String,
         mailboxName: String,
         uid: UInt32,
-        promise: EventLoopPromise<String>
+        promise: EventLoopPromise<Data>
     ) {
         self.email = email
         self.password = password
@@ -177,7 +177,7 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
             step = .fetch
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
-            settle(.success(String(buffer: body)))
+            settle(.success(bodyData()))
             step = .done
             send(.logout, tag: logoutTag, context: context)
             context.close(promise: nil)
@@ -226,7 +226,12 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
         }
     }
 
-    private func settle(_ result: Result<String, Error>) {
+    private func bodyData() -> Data {
+        var buffer = body
+        return Data(buffer.readBytes(length: buffer.readableBytes) ?? [])
+    }
+
+    private func settle(_ result: Result<Data, Error>) {
         guard !settled else { return }
         settled = true
         promise.completeWith(result)

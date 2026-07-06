@@ -6,7 +6,7 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
     let didStartBodyFetch = XCTestExpectation(description: "mail body fetch started")
     private let lock = NSLock()
     private var fetchContinuation: CheckedContinuation<[MailMessage], Error>?
-    private var bodyContinuation: CheckedContinuation<String, Error>?
+    private var bodyContinuation: CheckedContinuation<Data, Error>?
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
 
@@ -35,7 +35,7 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         uid: UInt32
-    ) async throws -> String {
+    ) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             bodyContinuation = continuation
@@ -44,7 +44,7 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
         }
     }
 
-    func completeBodyFetch(with result: Result<String, Error>) {
+    func completeBodyFetch(with result: Result<Data, Error>) {
         lock.lock()
         let continuation = bodyContinuation
         bodyContinuation = nil

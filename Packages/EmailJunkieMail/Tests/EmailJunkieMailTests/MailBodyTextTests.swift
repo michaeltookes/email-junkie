@@ -13,6 +13,17 @@ final class MailBodyTextTests: XCTestCase {
         )
     }
 
+    func testSinglePartHTMLIsStrippedWhenBodyTextOmitsContentType() {
+        let raw = """
+        <html>
+        <head><style>.hidden { display: none; }</style></head>
+        <body><p>Hello&nbsp;there</p><p>Second line</p></body>
+        </html>
+        """
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello there\nSecond line")
+    }
+
     func testMultipartAlternativePrefersPlainText() {
         let raw = [
             "--BOUND",
@@ -101,6 +112,23 @@ final class MailBodyTextTests: XCTestCase {
         ].joined(separator: "\r\n")
 
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested plain body.")
+    }
+
+    func testRecursesIntoNestedMultipartWithFoldedBoundaryParameter() {
+        let raw = [
+            "--OUTER",
+            "Content-Type: multipart/alternative;",
+            " boundary=\"INNER\"",
+            "",
+            "--INNER",
+            "Content-Type: text/plain",
+            "",
+            "Nested folded plain body.",
+            "--INNER--",
+            "--OUTER--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested folded plain body.")
     }
 
     func testPlainBodyWithSignatureDashesIsNotTreatedAsMultipart() {

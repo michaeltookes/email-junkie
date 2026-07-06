@@ -22,7 +22,11 @@ public enum MailBodyText {
            let text = text(fromMultipart: normalized, boundary: boundary) {
             return text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        if looksLikeHTML(trimmed) {
+            return strippingHTML(trimmed)
+        }
+        return trimmed
     }
 
     // MARK: - Multipart
@@ -102,18 +106,36 @@ public enum MailBodyText {
     /// Splits a MIME part into its header map and body content.
     private static func split(_ lines: [String]) -> (headers: [String: String], body: String) {
         var headers: [String: String] = [:]
+        var currentKey: String?
         var index = 0
         while index < lines.count {
             let line = lines[index]
             index += 1
             if line.trimmingCharacters(in: .whitespaces).isEmpty { break }
+
+            if isHeaderContinuation(line), let key = currentKey {
+                let continuation = line.trimmingCharacters(in: .whitespaces)
+                if let existing = headers[key], !existing.isEmpty {
+                    headers[key] = existing + " " + continuation
+                } else {
+                    headers[key] = continuation
+                }
+                continue
+            }
+
             guard let colon = line.firstIndex(of: ":") else { continue }
             let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
             headers[key] = value
+            currentKey = key
         }
         let body = index < lines.count ? lines[index...].joined(separator: "\n") : ""
         return (headers, body)
+    }
+
+    private static func isHeaderContinuation(_ line: String) -> Bool {
+        guard let first = line.unicodeScalars.first else { return false }
+        return first == " " || first == "\t"
     }
 
     /// Extracts the `boundary=` parameter from a `Content-Type` value.
@@ -170,6 +192,13 @@ public enum MailBodyText {
     }
 
     // MARK: - HTML
+
+    private static func looksLikeHTML(_ text: String) -> Bool {
+        text.range(
+            of: #"<!doctype\s+html\b|<\s*(html|head|body|style|script|p|div|br|table|span|a|blockquote)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
 
     private static func strippingHTML(_ html: String) -> String {
         var text = html

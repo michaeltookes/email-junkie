@@ -53,13 +53,18 @@ public enum MailBodyText {
     private static func text(fromMultipart body: String, boundary: String) -> String? {
         let parts = parts(fromMultipart: body, boundary: boundary)
         var htmlFallback: String?
+        var hasBlankPlainPart = false
 
         for part in parts {
-            if let text = text(fromPart: part, htmlFallback: &htmlFallback) {
+            if let text = text(
+                fromPart: part,
+                htmlFallback: &htmlFallback,
+                hasBlankPlainPart: &hasBlankPlainPart
+            ) {
                 return text
             }
         }
-        return htmlFallback
+        return htmlFallback ?? (hasBlankPlainPart ? "" : nil)
     }
 
     private static func parts(fromMultipart body: String, boundary: String) -> [[String]] {
@@ -85,16 +90,31 @@ public enum MailBodyText {
         return parts
     }
 
-    private static func text(fromPart part: [String], htmlFallback: inout String?) -> String? {
+    private static func text(
+        fromPart part: [String],
+        htmlFallback: inout String?,
+        hasBlankPlainPart: inout Bool
+    ) -> String? {
         let (headers, content) = split(part)
         let contentType = (headers["content-type"] ?? "text/plain").lowercased()
 
         if contentType.hasPrefix("multipart/"), let nested = boundaryParameter(headers["content-type"]) {
-            return text(fromMultipart: content, boundary: nested)
+            guard let nestedText = text(fromMultipart: content, boundary: nested) else {
+                return nil
+            }
+            if nestedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                hasBlankPlainPart = true
+                return nil
+            }
+            return nestedText
         }
 
         let decoded = decode(content, encoding: headers["content-transfer-encoding"]?.lowercased())
         if contentType.hasPrefix("text/plain") {
+            if decoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                hasBlankPlainPart = true
+                return nil
+            }
             return decoded
         }
         if contentType.hasPrefix("text/html"), htmlFallback == nil {
@@ -205,7 +225,7 @@ public enum MailBodyText {
         // Drop script/style blocks wholesale before removing remaining tags.
         for tag in ["script", "style"] {
             text = text.replacingOccurrences(
-                of: "<\(tag)[^>]*>.*?</\(tag)>",
+                of: "<\(tag)[^>]*>[\\s\\S]*?</\(tag)>",
                 with: " ",
                 options: [.regularExpression, .caseInsensitive]
             )

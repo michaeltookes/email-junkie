@@ -220,8 +220,10 @@ final class AppState: ObservableObject {
     /// Fetches recent messages from a mailbox for a quick preview.
     func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
         let requestGeneration = nextPreviewGeneration()
+        _ = nextBodyPreviewGeneration()
         clearRecentMessagePreview()
         isFetching = false
+        isFetchingBody = false
 
         let credentials = mailCredentials
         guard credentials.isComplete else {

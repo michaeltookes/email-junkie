@@ -272,6 +272,35 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.isFetchingBody)
     }
 
+    func testPreviewBodyIgnoresResultAfterMessageListRefresh() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+        let message = MailMessage(id: 9, from: nil, subject: "Stale body", date: "")
+
+        let bodyTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        let refreshTask = Task { await appState.previewRecentMessages() }
+        await fulfillment(of: [provider.didStartFetch], timeout: 1)
+
+        provider.completeBodyFetch(with: .success("Body from refreshed-away row"))
+        await bodyTask.value
+
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertTrue(appState.isFetching)
+
+        provider.completeFetch(with: .success([]))
+        await refreshTask.value
+
+        XCTAssertTrue(appState.recentMessages.isEmpty)
+        XCTAssertNil(appState.fetchError)
+        XCTAssertFalse(appState.isFetching)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
     func testPreviewRecentMessagesIgnoresResultAfterAccountChanges() async {
         let provider = SuspendedFetchMailProvider()
         let appState = makeAppState(provider: provider)

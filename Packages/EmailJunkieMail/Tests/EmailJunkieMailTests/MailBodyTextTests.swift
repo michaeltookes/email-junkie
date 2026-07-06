@@ -40,6 +40,35 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Plain version here.")
     }
 
+    func testMultipartAlternativeFallsBackToHTMLWhenPlainPartIsBlank() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "   ",
+            "",
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>HTML version here.</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "HTML version here.")
+    }
+
+    func testMultipartWithOnlyBlankPlainPartReturnsEmptyText() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "   ",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "")
+    }
+
     func testMultipartPreambleIsSkippedBeforeBoundaryDetection() {
         let raw = [
             "This is a multi-part message in MIME format.",
@@ -96,6 +125,26 @@ final class MailBodyTextTests: XCTestCase {
         ].joined(separator: "\r\n")
 
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello there\nSecond line")
+    }
+
+    func testStripsMultilineScriptAndStyleBlocksFromHTML() {
+        let raw = """
+        <html>
+        <head>
+        <style>
+        .hidden {
+            display: none;
+        }
+        </style>
+        <script>
+        window.trackingPixel = true;
+        </script>
+        </head>
+        <body><p>Visible body.</p></body>
+        </html>
+        """
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Visible body.")
     }
 
     func testRecursesIntoNestedMultipart() {

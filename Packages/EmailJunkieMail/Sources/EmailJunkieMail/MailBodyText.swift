@@ -27,26 +27,38 @@ public enum MailBodyText {
 
     // MARK: - Multipart
 
-    /// The boundary of a multipart body, detected from its opening delimiter.
-    /// Requires the delimiter to appear at least twice (open + close/next) so a
-    /// stray `--` line in a plain body isn't mistaken for a boundary.
+    /// The boundary of a multipart body, detected by scanning past any MIME
+    /// preamble to a repeated delimiter.
     private static func topBoundary(of body: String) -> String? {
         let lines = body.components(separatedBy: "\n")
-        guard let first = lines.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else {
-            return nil
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        for candidate in lines where candidate.hasPrefix("--") && candidate.count > 2 {
+            let boundary = String(candidate.dropFirst(2))
+            let delimiter = "--" + boundary
+            let closing = delimiter + "--"
+            let occurrences = lines.filter { $0 == delimiter || $0 == closing }.count
+            if occurrences >= 2 { return boundary }
         }
-        let candidate = first.trimmingCharacters(in: .whitespaces)
-        guard candidate.hasPrefix("--"), candidate.count > 2 else { return nil }
-        let boundary = String(candidate.dropFirst(2))
-        let delimiter = "--" + boundary
-        let occurrences = lines.filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix(delimiter) }.count
-        return occurrences >= 2 ? boundary : nil
+        return nil
     }
 
     /// Extracts readable text from a multipart body: prefers a `text/plain`
     /// part, falls back to a tag-stripped `text/html` part, and recurses into
     /// nested multiparts.
     private static func text(fromMultipart body: String, boundary: String) -> String? {
+        let parts = parts(fromMultipart: body, boundary: boundary)
+        var htmlFallback: String?
+
+        for part in parts {
+            if let text = text(fromPart: part, htmlFallback: &htmlFallback) {
+                return text
+            }
+        }
+        return htmlFallback
+    }
+
+    private static func parts(fromMultipart body: String, boundary: String) -> [[String]] {
         let delimiter = "--" + boundary
         let closing = delimiter + "--"
         var parts: [[String]] = []
@@ -66,25 +78,25 @@ public enum MailBodyText {
         }
         if let cur = current { parts.append(cur) }
 
-        var htmlFallback: String?
-        for part in parts {
-            let (headers, content) = split(part)
-            let contentType = (headers["content-type"] ?? "text/plain").lowercased()
+        return parts
+    }
 
-            if contentType.hasPrefix("multipart/"), let nested = boundaryParameter(headers["content-type"]) {
-                if let text = text(fromMultipart: content, boundary: nested) { return text }
-                continue
-            }
+    private static func text(fromPart part: [String], htmlFallback: inout String?) -> String? {
+        let (headers, content) = split(part)
+        let contentType = (headers["content-type"] ?? "text/plain").lowercased()
 
-            let decoded = decode(content, encoding: headers["content-transfer-encoding"]?.lowercased())
-            if contentType.hasPrefix("text/plain") {
-                return decoded
-            }
-            if contentType.hasPrefix("text/html"), htmlFallback == nil {
-                htmlFallback = strippingHTML(decoded)
-            }
+        if contentType.hasPrefix("multipart/"), let nested = boundaryParameter(headers["content-type"]) {
+            return text(fromMultipart: content, boundary: nested)
         }
-        return htmlFallback
+
+        let decoded = decode(content, encoding: headers["content-transfer-encoding"]?.lowercased())
+        if contentType.hasPrefix("text/plain") {
+            return decoded
+        }
+        if contentType.hasPrefix("text/html"), htmlFallback == nil {
+            htmlFallback = strippingHTML(decoded)
+        }
+        return nil
     }
 
     /// Splits a MIME part into its header map and body content.

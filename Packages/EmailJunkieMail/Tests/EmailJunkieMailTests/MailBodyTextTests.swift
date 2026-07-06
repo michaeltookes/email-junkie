@@ -29,6 +29,24 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Plain version here.")
     }
 
+    func testMultipartPreambleIsSkippedBeforeBoundaryDetection() {
+        let raw = [
+            "This is a multi-part message in MIME format.",
+            "",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "Readable body here.",
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>HTML version here.</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Readable body here.")
+    }
+
     func testDecodesQuotedPrintablePart() {
         let raw = [
             "--BOUND",

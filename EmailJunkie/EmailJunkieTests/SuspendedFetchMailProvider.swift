@@ -3,8 +3,10 @@ import XCTest
 
 final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
     let didStartFetch = XCTestExpectation(description: "mail fetch started")
+    let didStartBodyFetch = XCTestExpectation(description: "mail body fetch started")
     private let lock = NSLock()
     private var fetchContinuation: CheckedContinuation<[MailMessage], Error>?
+    private var bodyContinuation: CheckedContinuation<String, Error>?
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
 
@@ -34,6 +36,19 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
         mailbox: Mailbox,
         uid: UInt32
     ) async throws -> String {
-        ""
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            bodyContinuation = continuation
+            lock.unlock()
+            didStartBodyFetch.fulfill()
+        }
+    }
+
+    func completeBodyFetch(with result: Result<String, Error>) {
+        lock.lock()
+        let continuation = bodyContinuation
+        bodyContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }

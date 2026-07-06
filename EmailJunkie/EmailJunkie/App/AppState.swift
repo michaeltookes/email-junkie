@@ -81,6 +81,7 @@ final class AppState: ObservableObject {
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     private var previewGeneration = 0
+    private var bodyPreviewGeneration = 0
     private static let legacyOAuthKeys: [SecretKey] = [
         .gmailToken,
         .googleClientID,
@@ -252,8 +253,10 @@ final class AppState: ObservableObject {
 
     /// Fetches and reduces a single message's body to readable text for preview.
     func previewBody(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+        let requestGeneration = nextBodyPreviewGeneration()
         bodyError = nil
         openedBody = nil
+        isFetchingBody = false
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
@@ -262,7 +265,11 @@ final class AppState: ObservableObject {
         }
 
         isFetchingBody = true
-        defer { isFetchingBody = false }
+        defer {
+            if bodyPreviewGeneration == requestGeneration {
+                isFetchingBody = false
+            }
+        }
 
         do {
             let raw = try await mailProvider.fetchBodyText(
@@ -270,12 +277,14 @@ final class AppState: ObservableObject {
                 mailbox: mailbox,
                 uid: message.id
             )
+            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
             openedBody = MailBodyPreview(
                 id: message.id,
                 subject: message.subject,
                 text: MailBodyText.plainText(from: raw)
             )
         } catch {
+            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
             bodyError = Self.message(for: error)
         }
     }
@@ -285,10 +294,17 @@ final class AppState: ObservableObject {
         return previewGeneration
     }
 
+    private func nextBodyPreviewGeneration() -> Int {
+        bodyPreviewGeneration += 1
+        return bodyPreviewGeneration
+    }
+
     private func resetRecentMessagePreviewForAccountChange() {
         _ = nextPreviewGeneration()
+        _ = nextBodyPreviewGeneration()
         clearRecentMessagePreview()
         isFetching = false
+        isFetchingBody = false
     }
 
     private func clearRecentMessagePreview() {
@@ -303,6 +319,13 @@ final class AppState: ObservableObject {
         credentials: MailAccountCredentials
     ) -> Bool {
         previewGeneration == requestGeneration && mailCredentials == credentials
+    }
+
+    private func isCurrentBodyPreviewRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        bodyPreviewGeneration == requestGeneration && mailCredentials == credentials
     }
 
     /// Maps an error to a concise, user-facing message.

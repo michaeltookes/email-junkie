@@ -228,6 +228,50 @@ final class AppStateTests: XCTestCase {
         XCTAssertFalse(appState.isFetchingBody)
     }
 
+    func testPreviewBodyIgnoresResultAfterAccountChanges() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "old@gmail.com"
+        appState.mailAppPassword = "old-pw"
+        let message = MailMessage(id: 7, from: nil, subject: "Old body", date: "")
+
+        let previewTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        await appState.testConnection()
+
+        provider.completeBodyFetch(with: .success("Body from old account"))
+        await previewTask.value
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
+    func testPreviewBodyIgnoresErrorAfterDisconnect() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "old@gmail.com"
+        appState.mailAppPassword = "old-pw"
+        let message = MailMessage(id: 8, from: nil, subject: "Old body", date: "")
+
+        let previewTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        appState.disconnectMail()
+
+        provider.completeBodyFetch(with: .failure(MailError.commandFailed("FETCH failed")))
+        await previewTask.value
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
     func testPreviewRecentMessagesIgnoresResultAfterAccountChanges() async {
         let provider = SuspendedFetchMailProvider()
         let appState = makeAppState(provider: provider)

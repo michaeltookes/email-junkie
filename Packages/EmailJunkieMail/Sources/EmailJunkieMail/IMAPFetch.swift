@@ -118,6 +118,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
     private var step: Step = .greeting
     private var settled = false
     private var messageCount = 0
+    private var selectedUIDValidity: UInt32?
     private var messages: [MailMessage] = []
     private var current: PartialMessage?
 
@@ -164,6 +165,8 @@ final class IMAPFetchHandler: ChannelInboundHandler {
     // MARK: - Response handling
 
     private func handleUntagged(_ payload: ResponsePayload, context: ChannelHandlerContext) {
+        captureUIDValidity(from: payload)
+
         switch step {
         case .greeting:
             // First untagged response is the server greeting → authenticate.
@@ -186,6 +189,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
             step = .select
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
+            captureUIDValidity(from: tagged.state)
             sendFetchOrFinish(context: context)
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
@@ -206,7 +210,13 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         case .finish:
             if let message = current, let uid = message.uid, message.hasEnvelope {
                 messages.append(
-                    MailMessage(id: uid, from: message.from, subject: message.subject, date: message.date)
+                    MailMessage(
+                        id: uid,
+                        uidValidity: selectedUIDValidity,
+                        from: message.from,
+                        subject: message.subject,
+                        date: message.date
+                    )
                 )
             }
             current = nil
@@ -281,6 +291,22 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         case .ok:
             break
         }
+    }
+
+    private func captureUIDValidity(from payload: ResponsePayload) {
+        guard case .conditionalState(.ok(let text)) = payload,
+              case .some(.uidValidity(let value)) = text.code else {
+            return
+        }
+        selectedUIDValidity = UInt32(value)
+    }
+
+    private func captureUIDValidity(from state: TaggedResponse.State) {
+        guard case .ok(let text) = state,
+              case .some(.uidValidity(let value)) = text.code else {
+            return
+        }
+        selectedUIDValidity = UInt32(value)
     }
 
     private func settle(_ result: Result<[MailMessage], Error>) {

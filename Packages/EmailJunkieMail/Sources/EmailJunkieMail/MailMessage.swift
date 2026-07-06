@@ -16,12 +16,15 @@ public struct MailAddress: Equatable, Sendable {
 public struct MailMessage: Equatable, Sendable, Identifiable {
     /// The IMAP UID — stable within a mailbox.
     public var id: UInt32
+    /// The mailbox UIDVALIDITY captured with this UID, when the server provides it.
+    public var uidValidity: UInt32?
     public var from: MailAddress?
     public var subject: String
     public var date: String
 
-    public init(id: UInt32, from: MailAddress?, subject: String, date: String) {
+    public init(id: UInt32, uidValidity: UInt32? = nil, from: MailAddress?, subject: String, date: String) {
         self.id = id
+        self.uidValidity = uidValidity
         self.from = from
         self.subject = subject
         self.date = date

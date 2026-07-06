@@ -76,7 +76,8 @@ final class FakeMailProvider: MailProvider, @unchecked Sendable {
     func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
     ) async throws -> Data {
         Data()
     }

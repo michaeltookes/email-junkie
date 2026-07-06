@@ -277,7 +277,8 @@ final class AppState: ObservableObject {
             let raw = try await mailProvider.fetchBodyText(
                 credentials,
                 mailbox: mailbox,
-                uid: message.id
+                uid: message.id,
+                expectedUIDValidity: message.uidValidity
             )
             guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
             openedBody = MailBodyPreview(

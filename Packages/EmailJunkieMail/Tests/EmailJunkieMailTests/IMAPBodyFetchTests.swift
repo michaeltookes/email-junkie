@@ -12,7 +12,8 @@ final class IMAPBodyFetchTests: XCTestCase {
 
     private func makeChannel(
         uid: UInt32 = 101,
-        mailbox: String = "INBOX"
+        mailbox: String = "INBOX",
+        expectedUIDValidity: UInt32? = nil
     ) throws -> (EmbeddedChannel, EventLoopFuture<Data>) {
         let channel = EmbeddedChannel()
         let promise = channel.eventLoop.makePromise(of: Data.self)
@@ -21,6 +22,7 @@ final class IMAPBodyFetchTests: XCTestCase {
             password: "pw",
             mailboxName: mailbox,
             uid: uid,
+            expectedUIDValidity: expectedUIDValidity,
             promise: promise
         )
         try channel.pipeline.syncOperations.addHandlers([IMAPClientHandler(), handler])
@@ -99,6 +101,23 @@ final class IMAPBodyFetchTests: XCTestCase {
             XCTAssertEqual(
                 error as? MailError,
                 .commandFailed("No body was returned for the selected message.")
+            )
+        }
+        _ = try? channel.finish()
+    }
+
+    func testUIDValidityMismatchSurfacesCommandErrorBeforeFetchingBody() throws {
+        let (channel, future) = try makeChannel(expectedUIDValidity: 123)
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "* OK [UIDVALIDITY 456] UIDs valid\r\n")
+        try feed(channel, "A2 OK [READ-WRITE] SELECT completed\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            XCTAssertEqual(
+                error as? MailError,
+                .commandFailed("The mailbox changed before the message body was fetched.")
             )
         }
         _ = try? channel.finish()

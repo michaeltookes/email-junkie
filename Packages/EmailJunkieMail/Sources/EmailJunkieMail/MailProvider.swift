@@ -36,6 +36,22 @@ public protocol MailProvider: Sendable {
     func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
     ) async throws -> Data
+}
+
+public extension MailProvider {
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32
+    ) async throws -> Data {
+        try await fetchBodyText(
+            credentials,
+            mailbox: mailbox,
+            uid: uid,
+            expectedUIDValidity: nil
+        )
+    }
 }

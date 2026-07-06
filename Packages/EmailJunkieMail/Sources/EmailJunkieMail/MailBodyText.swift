@@ -1,5 +1,6 @@
 import Foundation
 
+// swiftlint:disable type_body_length
 /// Best-effort reduction of a raw IMAP text body (`BODY[TEXT]`) to human-readable
 /// plain text — the form the voice profile and draft prompts want.
 ///
@@ -108,7 +109,7 @@ public enum MailBodyText {
         hasBlankPlainPart: inout Bool
     ) -> String? {
         let (headers, content) = split(part)
-        if isAttachment(headers["content-disposition"]) {
+        if isAttachment(headers) {
             return nil
         }
 
@@ -173,11 +174,20 @@ public enum MailBodyText {
         return (headers, body)
     }
 
-    private static func isAttachment(_ contentDisposition: String?) -> Bool {
-        contentDisposition?
-            .trimmingCharacters(in: .whitespaces)
-            .lowercased()
-            .hasPrefix("attachment") == true
+    private static func isAttachment(_ headers: [String: String]) -> Bool {
+        let contentDisposition = headers["content-disposition"]
+        if headerValue(contentDisposition)?.lowercased() == "attachment" {
+            return true
+        }
+        if contentTypeParameter("filename", from: contentDisposition) != nil ||
+            contentTypeParameter("filename*", from: contentDisposition) != nil {
+            return true
+        }
+        if contentTypeParameter("name", from: headers["content-type"]) != nil ||
+            contentTypeParameter("name*", from: headers["content-type"]) != nil {
+            return true
+        }
+        return false
     }
 
     private static func isHeaderContinuation(_ line: String) -> Bool {
@@ -236,6 +246,14 @@ public enum MailBodyText {
             return value.isEmpty ? nil : value
         }
         return nil
+    }
+
+    private static func headerValue(_ header: String?) -> String? {
+        guard let first = header.map(headerParameters(_:))?.first else {
+            return nil
+        }
+        let value = first.trimmingCharacters(in: .whitespaces)
+        return value.isEmpty ? nil : value
     }
 
     private static func headerParameters(_ header: String) -> [String] {
@@ -359,3 +377,4 @@ public enum MailBodyText {
         return lines.joined(separator: "\n")
     }
 }
+// swiftlint:enable type_body_length

@@ -8,7 +8,8 @@ extension IMAPMailProvider {
     public func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32? = nil
     ) async throws -> Data {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
         guard uid > 0 else { throw MailError.commandFailed("A message UID is required to fetch a body.") }
@@ -31,6 +32,7 @@ extension IMAPMailProvider {
                         password: password,
                         mailboxName: mailboxName,
                         uid: uid,
+                        expectedUIDValidity: expectedUIDValidity,
                         promise: promise
                     )
                     return channel.pipeline.addHandlers([ssl, IMAPClientHandler(), handler])
@@ -100,6 +102,7 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
     private let password: String
     private let mailboxName: String
     private let uid: UInt32
+    private let expectedUIDValidity: UInt32?
     private let promise: EventLoopPromise<Data>
 
     private let loginTag = "A1"
@@ -112,18 +115,21 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
     private var body = ByteBuffer()
     private var receivedBody = false
     private var didReceiveBodySection = false
+    private var selectedUIDValidity: UInt32?
 
     init(
         email: String,
         password: String,
         mailboxName: String,
         uid: UInt32,
+        expectedUIDValidity: UInt32? = nil,
         promise: EventLoopPromise<Data>
     ) {
         self.email = email
         self.password = password
         self.mailboxName = mailboxName
         self.uid = uid
+        self.expectedUIDValidity = expectedUIDValidity
         self.promise = promise
     }
 
@@ -156,6 +162,8 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
     // MARK: - Response handling
 
     private func handleUntagged(_ payload: ResponsePayload, context: ChannelHandlerContext) {
+        captureUIDValidity(from: payload)
+
         // Only the greeting matters here; SELECT's untagged data (EXISTS etc.)
         // is irrelevant because we address the message by UID.
         if step == .greeting {
@@ -172,6 +180,13 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
             step = .select
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
+            captureUIDValidity(from: tagged.state)
+            guard verifySelectedUIDValidity() else {
+                step = .done
+                send(.logout, tag: logoutTag, context: context)
+                context.close(promise: nil)
+                return
+            }
             let range = MessageIdentifierRange<UID>(UID(rawValue: uid))
             let set = MessageIdentifierSetNonEmpty(range: range)
             send(.uidFetch(.set(set), [.bodySection(peek: true, .text, nil)], []), tag: fetchTag, context: context)
@@ -235,6 +250,35 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
         case .ok:
             break
         }
+    }
+
+    private func captureUIDValidity(from payload: ResponsePayload) {
+        guard case .conditionalState(.ok(let text)) = payload,
+              case .some(.uidValidity(let value)) = text.code else {
+            return
+        }
+        selectedUIDValidity = UInt32(value)
+    }
+
+    private func captureUIDValidity(from state: TaggedResponse.State) {
+        guard case .ok(let text) = state,
+              case .some(.uidValidity(let value)) = text.code else {
+            return
+        }
+        selectedUIDValidity = UInt32(value)
+    }
+
+    private func verifySelectedUIDValidity() -> Bool {
+        guard let expectedUIDValidity else { return true }
+        guard let selectedUIDValidity else {
+            settle(.failure(MailError.commandFailed("The mailbox UIDVALIDITY could not be verified.")))
+            return false
+        }
+        guard selectedUIDValidity == expectedUIDValidity else {
+            settle(.failure(MailError.commandFailed("The mailbox changed before the message body was fetched.")))
+            return false
+        }
+        return true
     }
 
     private func bodyData() -> Data {

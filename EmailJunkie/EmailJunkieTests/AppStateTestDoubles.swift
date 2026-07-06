@@ -41,6 +41,7 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let bodyResult: Result<Data, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var lastBodyUID: UInt32?
+    private(set) var lastExpectedUIDValidity: UInt32?
 
     init(
         result: Result<Void, MailError>,
@@ -68,9 +69,11 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
     ) async throws -> Data {
         lastBodyUID = uid
+        lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()
     }
 }
@@ -110,7 +113,8 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
     ) async throws -> Data {
         Data()
     }

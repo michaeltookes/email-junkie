@@ -34,7 +34,8 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
     func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        uid: UInt32
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
     ) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()

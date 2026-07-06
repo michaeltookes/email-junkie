@@ -1,6 +1,7 @@
 import XCTest
 @testable import EmailJunkieMail
 
+// swiftlint:disable type_body_length
 /// Pure, server-free coverage of `MailBodyText.plainText(from:)` — the reduction
 /// of raw MIME bodies to readable text for voice profiling and drafting.
 final class MailBodyTextTests: XCTestCase {
@@ -199,6 +200,39 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
     }
 
+    func testSkipsInlineTextAttachmentWithFilenameWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Disposition: inline; filename=\"notes.txt\"",
+            "",
+            "Inline attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
+    func testSkipsNamedTextAttachmentWithoutDispositionWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8; name=\"notes.txt\"",
+            "",
+            "Named attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
     func testStripsMultilineScriptAndStyleBlocksFromHTML() {
         let raw = """
         <html>
@@ -290,3 +324,4 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Agenda\n\n---\n\nNotes\n\n---\n\nThanks")
     }
 }
+// swiftlint:enable type_body_length

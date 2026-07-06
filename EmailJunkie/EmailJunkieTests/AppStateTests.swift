@@ -202,11 +202,12 @@ final class AppStateTests: XCTestCase {
         let appState = makeAppState(provider: provider)
         appState.mailEmail = "me@gmail.com"
         appState.mailAppPassword = "pw"
-        let message = MailMessage(id: 42, from: MailAddress(email: "a@x.com"), subject: "Hi", date: "")
+        let message = MailMessage(id: 42, uidValidity: 99, from: MailAddress(email: "a@x.com"), subject: "Hi", date: "")
 
         await appState.previewBody(for: message)
 
         XCTAssertEqual(provider.lastBodyUID, 42)
+        XCTAssertEqual(provider.lastExpectedUIDValidity, 99)
         XCTAssertEqual(appState.openedBody?.id, 42)
         XCTAssertEqual(appState.openedBody?.subject, "Hi")
         XCTAssertEqual(appState.openedBody?.text, "Hello there.")

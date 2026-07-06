@@ -231,12 +231,13 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Graph API + OAuth provider implementing the shared email-provider interface.
     - Feature parity with Gmail for read/draft/send.
 
-32. **IMAP/SMTP connection (app password)** — *PRIMARY connection path; in progress on branch `imap-connection`*
+32. **IMAP/SMTP connection (app password)** — *PRIMARY connection path*
     IMAP + Google app password is the primary way users connect (decided 2026-07-03, superseding OAuth item 3). Provider-agnostic, works for Gmail/Outlook/any IMAP host. Built on SwiftNIO (`swift-nio-imap`) in `Packages/EmailJunkieMail`.
     *As anyone, I want to connect by pasting my email + an app password, so that I skip Google Cloud setup entirely.*
     - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain. **Live-verified against real Gmail 2026-07-04.**
     - ✅ Recent-message fetch (LOGIN → SELECT → FETCH UID+ENVELOPE → LOGOUT), newest first; sender/subject/date parsed; "Preview inbox" action in Settings. State machine + envelope parsing covered by EmbeddedChannel tests.
-    - ⬜ **Remaining:** live-verify fetch against real Gmail (incl. `[Gmail]/Sent Mail`); IMAP **body-text fetch** (streaming BODY[TEXT] — needed for the voice profile and drafting); hand-rolled **SMTP send** over NIO; handle missing provider-native features (push, labels) gracefully.
+    - ✅ Body-text fetch (`UID FETCH BODY.PEEK[TEXT]`, streaming assembly over NIO, no `\Seen` flag set) + `MailBodyText` readable-text reduction (multipart, quoted-printable/base64, HTML-strip fallback). "View body" preview sheet in Settings. Covered by EmbeddedChannel + pure unit tests.
+    - ⬜ **Remaining:** live-verify fetch + body against real Gmail (incl. `[Gmail]/Sent Mail`); hand-rolled **SMTP send** over NIO; efficient `BODYSTRUCTURE`-guided fetch of just the `text/plain` part (avoids downloading attachments; also fixes single-part transfer-encoding decoding); handle missing provider-native features (push, labels) gracefully.
 
 33. **Multiple-account support**
     Watch more than one mailbox.

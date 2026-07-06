@@ -120,6 +120,24 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     }
 }
 
+final class FakeLLMConnectionTester: LLMConnectionTesting, @unchecked Sendable {
+    private let result: Result<Void, LLMError>
+    private(set) var lastProvider: LLMProviderKind?
+    private(set) var lastAPIKey: String?
+    private(set) var lastModel: String?
+
+    init(result: Result<Void, LLMError>) {
+        self.result = result
+    }
+
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {
+        lastProvider = provider
+        lastAPIKey = apiKey
+        lastModel = model
+        try result.get()
+    }
+}
+
 final class AppStateFailingSecretStore: SecretStore {
     var failOnSet: SecretKey?
     var failOnRemove: SecretKey?

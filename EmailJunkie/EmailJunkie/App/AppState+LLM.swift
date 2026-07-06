@@ -1,0 +1,93 @@
+import Foundation
+
+/// LLM-provider actions on `AppState`. Kept in a separate file so `AppState`
+/// stays within the file/type length limits.
+extension AppState {
+
+    /// The model to use: the user's choice, or the provider default if blank.
+    var resolvedLLMModel: String {
+        let trimmed = llmModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? llmProviderKind.defaultModel : trimmed
+    }
+
+    /// Switches the selected provider, reloading its stored key and status.
+    /// (With a single provider today this is a no-op path; it's the seam for
+    /// when a second adapter lands.)
+    func selectLLMProvider(_ provider: LLMProviderKind) {
+        guard provider != llmProviderKind else { return }
+        llmProviderKind = provider
+        llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+        isLLMConnected = secrets.hasValue(for: provider.apiKeySecret)
+        llmError = nil
+        saveSettings()
+    }
+
+    /// Verifies the API key with a live test call and, on success, stores it.
+    func testLLMConnection() async {
+        llmError = nil
+
+        let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            llmError = "Enter an API key first."
+            return
+        }
+
+        isTestingLLM = true
+        defer { isTestingLLM = false }
+
+        do {
+            try await llm.testConnection(provider: llmProviderKind, apiKey: key, model: resolvedLLMModel)
+        } catch {
+            llmError = Self.llmMessage(for: error)
+            return
+        }
+
+        do {
+            try secrets.set(key, for: llmProviderKind.apiKeySecret)
+        } catch {
+            llmError = Self.keychainLLMMessage(action: "save", error: error)
+            return
+        }
+
+        saveSettings()
+        isLLMConnected = true
+    }
+
+    /// Disconnects the provider by clearing its stored API key.
+    func disconnectLLM() {
+        llmError = nil
+        do {
+            try secrets.remove(llmProviderKind.apiKeySecret)
+        } catch {
+            llmError = Self.keychainLLMMessage(action: "remove", error: error)
+            return
+        }
+        llmAPIKey = ""
+        isLLMConnected = false
+    }
+
+    // MARK: - Error messages
+
+    static func llmMessage(for error: Error) -> String {
+        switch error {
+        case LLMError.missingAPIKey:
+            return "Enter an API key first."
+        case LLMError.transport(let detail):
+            return "Couldn't reach the provider. (\(detail))"
+        case LLMError.http(let status, let message):
+            return "The provider rejected the request (HTTP \(status)). \(message)"
+        case LLMError.invalidResponse(let detail):
+            return "Unexpected response from the provider. (\(detail))"
+        case KeychainError.unexpectedStatus(let status):
+            return "Keychain returned status \(status)."
+        case KeychainError.dataEncodingFailed:
+            return "Keychain could not encode the API key."
+        default:
+            return error.localizedDescription
+        }
+    }
+
+    static func keychainLLMMessage(action: String, error: Error) -> String {
+        "Couldn't \(action) the API key in Keychain. \(llmMessage(for: error))"
+    }
+}

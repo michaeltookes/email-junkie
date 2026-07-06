@@ -37,11 +37,6 @@ struct LLMMessage: Equatable, Sendable {
 
     let role: Role
     let content: String
-
-    init(role: Role, content: String) {
-        self.role = role
-        self.content = content
-    }
 }
 
 /// A provider-agnostic completion request. Adapters translate this into each

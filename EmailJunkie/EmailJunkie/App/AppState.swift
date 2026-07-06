@@ -65,6 +65,21 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last body-fetch error, if any.
     @Published var bodyError: String?
 
+    // MARK: - AI Provider (bound to Settings fields)
+
+    /// The selected LLM provider.
+    @Published var llmProviderKind: LLMProviderKind
+    /// The chosen model id (empty = provider default).
+    @Published var llmModel: String
+    /// The API key input (persisted to Keychain on a successful test).
+    @Published var llmAPIKey: String
+    /// Whether an LLM provider is connected (a verified key is stored).
+    @Published var isLLMConnected: Bool = false
+    /// Whether an LLM connection test is in progress.
+    @Published var isTestingLLM: Bool = false
+    /// A user-facing message describing the last LLM error, if any.
+    @Published var llmError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -76,8 +91,10 @@ final class AppState: ObservableObject {
     // MARK: - Private
 
     private let persistence: PersistenceProvider
-    private let secrets: SecretStore
+    /// Internal (not private) so the `AppState+LLM` extension can reach it.
+    let secrets: SecretStore
     private let mailProvider: MailProvider
+    let llm: LLMConnectionTesting
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     private var previewGeneration = 0
@@ -88,33 +105,18 @@ final class AppState: ObservableObject {
         .googleClientSecret
     ]
 
-    // MARK: - Computed
-
-    /// Human-readable status for the menu bar.
-    var statusText: String {
-        guard isAccountConnected else { return "No account connected" }
-        switch watchStatus {
-        case .idle:
-            return "Idle"
-        case .watching:
-            return pendingDraftCount > 0
-                ? "\(pendingDraftCount) draft\(pendingDraftCount == 1 ? "" : "s") pending"
-                : "Watching inbox"
-        case .paused:
-            return "Paused"
-        }
-    }
-
     // MARK: - Initialization
 
     init(
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
-        mailProvider: MailProvider = IMAPMailProvider()
+        mailProvider: MailProvider = IMAPMailProvider(),
+        llm: LLMConnectionTesting = LLMService()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
+        self.llm = llm
 
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
@@ -124,8 +126,14 @@ final class AppState: ObservableObject {
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
+        let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
+        self.llmProviderKind = provider
+        self.llmModel = settings.llmModel
+        self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
+        self.isLLMConnected = secrets.hasValue(for: provider.apiKeySecret)
 
         setupAutoSave()
     }
@@ -389,6 +397,11 @@ final class AppState: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.saveSettings() }
             .store(in: &cancellables)
+
+        $llmModel
+            .dropFirst()
+            .sink { [weak self] _ in self?.saveSettings() }
+            .store(in: &cancellables)
     }
 
     // MARK: - Launch at Login
@@ -449,7 +462,9 @@ final class AppState: ObservableObject {
             pollIntervalSeconds: pollIntervalSeconds,
             mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
-            mailPort: mailPort ?? self.mailPort
+            mailPort: mailPort ?? self.mailPort,
+            llmProvider: llmProviderKind.rawValue,
+            llmModel: llmModel.trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }
 
@@ -472,12 +487,4 @@ final class AppState: ObservableObject {
             logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
         }
     }
-}
-
-/// A fetched, readable message body shown in the preview sheet.
-struct MailBodyPreview: Identifiable, Equatable {
-    /// The source message's IMAP UID.
-    let id: UInt32
-    let subject: String
-    let text: String
 }

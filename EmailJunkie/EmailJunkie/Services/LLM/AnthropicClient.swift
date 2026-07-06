@@ -46,54 +46,6 @@ struct AnthropicClient: LLMClient {
 
     // MARK: - Wire format
 
-    private struct RequestBody: Encodable {
-        let model: String
-        let maxTokens: Int
-        let temperature: Double
-        let system: String?
-        let messages: [Message]
-
-        enum CodingKeys: String, CodingKey {
-            case model
-            case maxTokens = "max_tokens"
-            case temperature
-            case system
-            case messages
-        }
-
-        struct Message: Encodable {
-            let role: String
-            let content: String
-        }
-    }
-
-    private struct ResponseBody: Decodable {
-        let content: [Block]
-        let usage: Usage?
-
-        struct Block: Decodable {
-            let type: String
-            let text: String?
-        }
-
-        struct Usage: Decodable {
-            let inputTokens: Int?
-            let outputTokens: Int?
-
-            enum CodingKeys: String, CodingKey {
-                case inputTokens = "input_tokens"
-                case outputTokens = "output_tokens"
-            }
-        }
-    }
-
-    private struct ErrorBody: Decodable {
-        let error: Detail?
-        struct Detail: Decodable {
-            let message: String?
-        }
-    }
-
     private static func encodeBody(_ request: LLMRequest) throws -> Data {
         let body = RequestBody(
             model: request.model,
@@ -135,5 +87,55 @@ struct AnthropicClient: LLMClient {
             return raw
         }
         return "The provider returned an error."
+    }
+}
+
+// MARK: - Wire-format DTOs (file-private to keep type nesting shallow)
+
+private struct RequestBody: Encodable {
+    let model: String
+    let maxTokens: Int
+    let temperature: Double
+    let system: String?
+    let messages: [Message]
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case maxTokens = "max_tokens"
+        case temperature
+        case system
+        case messages
+    }
+
+    struct Message: Encodable {
+        let role: String
+        let content: String
+    }
+}
+
+private struct ResponseBody: Decodable {
+    let content: [Block]
+    let usage: Usage?
+
+    struct Block: Decodable {
+        let type: String
+        let text: String?
+    }
+
+    struct Usage: Decodable {
+        let inputTokens: Int?
+        let outputTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case outputTokens = "output_tokens"
+        }
+    }
+}
+
+private struct ErrorBody: Decodable {
+    let error: Detail?
+    struct Detail: Decodable {
+        let message: String?
     }
 }

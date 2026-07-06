@@ -128,9 +128,54 @@ struct SettingsView: View {
             }
 
             Section("AI provider") {
-                Text("Bring-your-own provider and local-model support are coming soon.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if LLMProviderKind.allCases.count > 1 {
+                    Picker("Provider", selection: Binding(
+                        get: { appState.llmProviderKind },
+                        set: { appState.selectLLMProvider($0) }
+                    )) {
+                        ForEach(LLMProviderKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                } else {
+                    LabeledContent("Provider") {
+                        Text(appState.llmProviderKind.displayName).foregroundStyle(.secondary)
+                    }
+                }
+
+                TextField(
+                    "Model",
+                    text: $appState.llmModel,
+                    prompt: Text(appState.llmProviderKind.defaultModel)
+                )
+
+                if appState.isLLMConnected {
+                    LabeledContent("Status") {
+                        Text("Connected").foregroundStyle(.green)
+                    }
+                    Button("Disconnect", role: .destructive) {
+                        appState.disconnectLLM()
+                    }
+                } else {
+                    SecureField("API key", text: $appState.llmAPIKey)
+
+                    Button {
+                        Task { await appState.testLLMConnection() }
+                    } label: {
+                        if appState.isTestingLLM {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Test Connection")
+                        }
+                    }
+                    .disabled(appState.isTestingLLM)
+                }
+
+                if let error = appState.llmError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("Privacy") {

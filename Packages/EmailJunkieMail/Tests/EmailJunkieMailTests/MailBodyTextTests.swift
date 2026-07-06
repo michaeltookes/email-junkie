@@ -169,6 +169,23 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello there\nSecond line")
     }
 
+    func testSkipsTextAttachmentWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Disposition: attachment; filename=\"notes.txt\"",
+            "",
+            "Attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
     func testStripsMultilineScriptAndStyleBlocksFromHTML() {
         let raw = """
         <html>

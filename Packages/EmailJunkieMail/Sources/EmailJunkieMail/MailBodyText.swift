@@ -108,6 +108,10 @@ public enum MailBodyText {
         hasBlankPlainPart: inout Bool
     ) -> String? {
         let (headers, content) = split(part)
+        if isAttachment(headers["content-disposition"]) {
+            return nil
+        }
+
         let contentType = (headers["content-type"] ?? "text/plain").lowercased()
 
         if contentType.hasPrefix("multipart/"), let nested = boundaryParameter(headers["content-type"]) {
@@ -167,6 +171,13 @@ public enum MailBodyText {
         }
         let body = index < lines.count ? lines[index...].joined(separator: "\n") : ""
         return (headers, body)
+    }
+
+    private static func isAttachment(_ contentDisposition: String?) -> Bool {
+        contentDisposition?
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+            .hasPrefix("attachment") == true
     }
 
     private static func isHeaderContinuation(_ line: String) -> Bool {

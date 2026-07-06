@@ -1,0 +1,327 @@
+import XCTest
+@testable import EmailJunkieMail
+
+// swiftlint:disable type_body_length
+/// Pure, server-free coverage of `MailBodyText.plainText(from:)` — the reduction
+/// of raw MIME bodies to readable text for voice profiling and drafting.
+final class MailBodyTextTests: XCTestCase {
+
+    func testSinglePartPlainTextIsReturnedTrimmed() {
+        let raw = "\r\nHi Alice,\r\n\r\nThanks for the note.\r\n\r\n— Me\r\n\r\n"
+        XCTAssertEqual(
+            MailBodyText.plainText(from: raw),
+            "Hi Alice,\n\nThanks for the note.\n\n— Me"
+        )
+    }
+
+    func testSinglePartHTMLIsStrippedWhenBodyTextOmitsContentType() {
+        let raw = """
+        <html>
+        <head><style>.hidden { display: none; }</style></head>
+        <body><p>Hello&nbsp;there</p><p>Second line</p></body>
+        </html>
+        """
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello there\nSecond line")
+    }
+
+    func testMultipartAlternativePrefersPlainText() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "Plain version here.",
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>HTML version here.</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Plain version here.")
+    }
+
+    func testMultipartAlternativeFallsBackToHTMLWhenPlainPartIsBlank() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "   ",
+            "",
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>HTML version here.</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "HTML version here.")
+    }
+
+    func testMultipartWithOnlyBlankPlainPartReturnsEmptyText() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "   ",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "")
+    }
+
+    func testMultipartPreambleIsSkippedBeforeBoundaryDetection() {
+        let raw = [
+            "This is a multi-part message in MIME format.",
+            "",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            "Readable body here.",
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>HTML version here.</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Readable body here.")
+    }
+
+    func testDecodesQuotedPrintablePart() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain",
+            "Content-Transfer-Encoding: quoted-printable",
+            "",
+            "Caf=C3=A9 pric=\r\ning is =E2=82=AC5.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is €5.")
+    }
+
+    func testDecodesQuotedPrintablePartUsingDeclaredCharset() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: quoted-printable",
+            "",
+            "Caf=E9 pricing is =A35.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is £5.")
+    }
+
+    func testDecodesQuotedPrintablePartUsingCharsetWithSpacedParameter() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset = iso-8859-1",
+            "Content-Transfer-Encoding: quoted-printable",
+            "",
+            "Caf=E9 pricing is =A35.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is £5.")
+    }
+
+    func testDecodesBase64Part() {
+        let encoded = Data("Hello from base64.".utf8).base64EncodedString()
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain",
+            "Content-Transfer-Encoding: base64",
+            "",
+            encoded,
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello from base64.")
+    }
+
+    func testDecodesBase64PartUsingDeclaredCharset() {
+        let encoded = Data([0x43, 0x61, 0x66, 0xE9]).base64EncodedString()
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: base64",
+            "",
+            encoded,
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café")
+    }
+
+    func testDecodesEightBitPartUsingDeclaredCharset() {
+        var raw = Data()
+        raw.append(contentsOf: [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: 8bit",
+            "",
+            ""
+        ].joined(separator: "\r\n").utf8)
+        raw.append(contentsOf: [0x43, 0x61, 0x66, 0xE9])
+        raw.append(contentsOf: "\r\n--BOUND--".utf8)
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café")
+    }
+
+    func testFallsBackToStrippedHTMLWhenNoPlainPart() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><head><style>p{color:red}</style></head>"
+                + "<body><p>Hello&nbsp;there</p><p>Second line</p></body></html>",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello there\nSecond line")
+    }
+
+    func testSkipsTextAttachmentWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Disposition: attachment; filename=\"notes.txt\"",
+            "",
+            "Attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
+    func testSkipsInlineTextAttachmentWithFilenameWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8",
+            "Content-Disposition: inline; filename=\"notes.txt\"",
+            "",
+            "Inline attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
+    func testSkipsNamedTextAttachmentWithoutDispositionWhenChoosingReadableBody() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/html; charset=utf-8",
+            "",
+            "<html><body><p>Message body.</p></body></html>",
+            "--BOUND",
+            "Content-Type: text/plain; charset=utf-8; name=\"notes.txt\"",
+            "",
+            "Named attachment text should not become the message body.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Message body.")
+    }
+
+    func testStripsMultilineScriptAndStyleBlocksFromHTML() {
+        let raw = """
+        <html>
+        <head>
+        <style>
+        .hidden {
+            display: none;
+        }
+        </style>
+        <script>
+        window.trackingPixel = true;
+        </script>
+        </head>
+        <body><p>Visible body.</p></body>
+        </html>
+        """
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Visible body.")
+    }
+
+    func testRecursesIntoNestedMultipart() {
+        let raw = [
+            "--OUTER",
+            "Content-Type: multipart/alternative; boundary=\"INNER\"",
+            "",
+            "--INNER",
+            "Content-Type: text/plain",
+            "",
+            "Nested plain body.",
+            "--INNER--",
+            "--OUTER--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested plain body.")
+    }
+
+    func testRecursesIntoNestedMultipartWithFoldedBoundaryParameter() {
+        let raw = [
+            "--OUTER",
+            "Content-Type: multipart/alternative;",
+            " boundary=\"INNER\"",
+            "",
+            "--INNER",
+            "Content-Type: text/plain",
+            "",
+            "Nested folded plain body.",
+            "--INNER--",
+            "--OUTER--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested folded plain body.")
+    }
+
+    func testRecursesIntoNestedMultipartWithSpacedBoundaryParameter() {
+        let raw = [
+            "--OUTER",
+            "Content-Type: multipart/alternative; boundary = \"INNER\"",
+            "",
+            "--INNER",
+            "Content-Type: text/plain",
+            "",
+            "Nested spaced-boundary body.",
+            "--INNER--",
+            "--OUTER--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested spaced-boundary body.")
+    }
+
+    func testPlainBodyWithSignatureDashesIsNotTreatedAsMultipart() {
+        // A "-- " signature delimiter must not be mistaken for a MIME boundary.
+        let raw = "See you then.\r\n\r\n-- \r\nMichael"
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "See you then.\n\n-- \nMichael")
+    }
+
+    func testRepeatedMarkdownSeparatorsAreNotTreatedAsMultipart() {
+        let raw = [
+            "Agenda",
+            "",
+            "---",
+            "",
+            "Notes",
+            "",
+            "---",
+            "",
+            "Thanks"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Agenda\n\n---\n\nNotes\n\n---\n\nThanks")
+    }
+}
+// swiftlint:enable type_body_length

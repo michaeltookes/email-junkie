@@ -5,15 +5,16 @@ import NIOPosix
 import NIOSSL
 
 extension IMAPMailProvider {
-    public func fetchRecentMessages(
+    public func fetchBodyText(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
+        uid: UInt32,
+        expectedUIDValidity: UInt32? = nil
+    ) async throws -> Data {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
-        guard limit > 0 else { return [] }
+        guard uid > 0 else { throw MailError.commandFailed("A message UID is required to fetch a body.") }
 
-        let attempts = IMAPFetchAttempts()
+        let attempts = IMAPBodyFetchAttempts()
         let sslContext = try NIOSSLContext(configuration: TLSConfiguration.makeClientConfiguration())
         let host = credentials.host
         let email = credentials.email
@@ -26,11 +27,12 @@ extension IMAPMailProvider {
                 do {
                     let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
                     let promise = attempts.makePromise(for: channel)
-                    let handler = IMAPFetchHandler(
+                    let handler = IMAPBodyFetchHandler(
                         email: email,
                         password: password,
                         mailboxName: mailboxName,
-                        limit: limit,
+                        uid: uid,
+                        expectedUIDValidity: expectedUIDValidity,
                         promise: promise
                     )
                     return channel.pipeline.addHandlers([ssl, IMAPClientHandler(), handler])
@@ -45,7 +47,7 @@ extension IMAPMailProvider {
         } catch {
             throw MailError.connectionFailed(String(describing: error))
         }
-        guard let fetchFuture = attempts.future(for: channel) else {
+        guard let bodyFuture = attempts.future(for: channel) else {
             try? await channel.close().get()
             throw MailError.connectionFailed("The mail connection could not start fetching.")
         }
@@ -56,9 +58,9 @@ extension IMAPMailProvider {
         defer { timeoutTask.cancel() }
 
         do {
-            let messages = try await fetchFuture.get()
+            let body = try await bodyFuture.get()
             try? await channel.close().get()
-            return messages
+            return body
         } catch {
             try? await channel.close().get()
             throw error
@@ -66,49 +68,42 @@ extension IMAPMailProvider {
     }
 }
 
-/// Tracks fetch futures per channel (mirrors the verify tracker) so Happy
-/// Eyeballs attempts can't settle the winning channel's result.
-final class IMAPFetchAttempts: @unchecked Sendable {
+/// Tracks body-fetch futures per channel (mirrors the recent-message tracker) so
+/// Happy Eyeballs attempts can't settle the winning channel's result.
+final class IMAPBodyFetchAttempts: @unchecked Sendable {
     private let lock = NSLock()
-    private var futures: [ObjectIdentifier: EventLoopFuture<[MailMessage]>] = [:]
+    private var futures: [ObjectIdentifier: EventLoopFuture<Data>] = [:]
 
-    func makePromise(for channel: Channel) -> EventLoopPromise<[MailMessage]> {
-        let promise = channel.eventLoop.makePromise(of: [MailMessage].self)
+    func makePromise(for channel: Channel) -> EventLoopPromise<Data> {
+        let promise = channel.eventLoop.makePromise(of: Data.self)
         lock.lock()
         futures[ObjectIdentifier(channel)] = promise.futureResult
         lock.unlock()
         return promise
     }
 
-    func future(for channel: Channel) -> EventLoopFuture<[MailMessage]>? {
+    func future(for channel: Channel) -> EventLoopFuture<Data>? {
         lock.lock()
         defer { lock.unlock() }
         return futures.removeValue(forKey: ObjectIdentifier(channel))
     }
 }
 
-/// Drives LOGIN → SELECT → FETCH (envelope) → LOGOUT and completes `promise`
-/// with the parsed messages, newest first.
-final class IMAPFetchHandler: ChannelInboundHandler {
+/// Drives LOGIN → SELECT → UID FETCH (BODY.PEEK[TEXT]) → LOGOUT and completes
+/// `promise` with the assembled raw text body.
+final class IMAPBodyFetchHandler: ChannelInboundHandler {
     typealias InboundIn = Response
 
     private enum Step {
         case greeting, login, select, fetch, done
     }
 
-    private struct PartialMessage {
-        var uid: UInt32?
-        var from: MailAddress?
-        var hasEnvelope = false
-        var subject = ""
-        var date = ""
-    }
-
     private let email: String
     private let password: String
     private let mailboxName: String
-    private let limit: Int
-    private let promise: EventLoopPromise<[MailMessage]>
+    private let uid: UInt32
+    private let expectedUIDValidity: UInt32?
+    private let promise: EventLoopPromise<Data>
 
     private let loginTag = "A1"
     private let selectTag = "A2"
@@ -117,22 +112,24 @@ final class IMAPFetchHandler: ChannelInboundHandler {
 
     private var step: Step = .greeting
     private var settled = false
-    private var messageCount = 0
+    private var body = ByteBuffer()
+    private var receivedBody = false
+    private var didReceiveBodySection = false
     private var selectedUIDValidity: UInt32?
-    private var messages: [MailMessage] = []
-    private var current: PartialMessage?
 
     init(
         email: String,
         password: String,
         mailboxName: String,
-        limit: Int,
-        promise: EventLoopPromise<[MailMessage]>
+        uid: UInt32,
+        expectedUIDValidity: UInt32? = nil,
+        promise: EventLoopPromise<Data>
     ) {
         self.email = email
         self.password = password
         self.mailboxName = mailboxName
-        self.limit = limit
+        self.uid = uid
+        self.expectedUIDValidity = expectedUIDValidity
         self.promise = promise
     }
 
@@ -167,17 +164,11 @@ final class IMAPFetchHandler: ChannelInboundHandler {
     private func handleUntagged(_ payload: ResponsePayload, context: ChannelHandlerContext) {
         captureUIDValidity(from: payload)
 
-        switch step {
-        case .greeting:
-            // First untagged response is the server greeting → authenticate.
+        // Only the greeting matters here; SELECT's untagged data (EXISTS etc.)
+        // is irrelevant because we address the message by UID.
+        if step == .greeting {
             send(.login(username: email, password: password), tag: loginTag, context: context)
             step = .login
-        case .select:
-            if case .mailboxData(.exists(let count)) = payload {
-                messageCount = count
-            }
-        default:
-            break
         }
     }
 
@@ -190,10 +181,27 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             captureUIDValidity(from: tagged.state)
-            sendFetchOrFinish(context: context)
+            guard verifySelectedUIDValidity() else {
+                step = .done
+                send(.logout, tag: logoutTag, context: context)
+                context.close(promise: nil)
+                return
+            }
+            let range = MessageIdentifierRange<UID>(UID(rawValue: uid))
+            let set = MessageIdentifierSetNonEmpty(range: range)
+            send(.uidFetch(.set(set), [.bodySection(peek: true, .text, nil)], []), tag: fetchTag, context: context)
+            step = .fetch
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
-            settle(.success(messages.sorted { $0.id > $1.id }))
+            guard didReceiveBodySection else {
+                settle(.failure(MailError.commandFailed("No body was returned for the selected message.")))
+                step = .done
+                send(.logout, tag: logoutTag, context: context)
+                context.close(promise: nil)
+                return
+            }
+            settle(.success(bodyData()))
+            step = .done
             send(.logout, tag: logoutTag, context: context)
             context.close(promise: nil)
         default:
@@ -203,71 +211,22 @@ final class IMAPFetchHandler: ChannelInboundHandler {
 
     private func handleFetch(_ response: FetchResponse) {
         switch response {
-        case .start:
-            current = PartialMessage()
-        case .simpleAttribute(let attribute):
-            apply(attribute)
-        case .finish:
-            if let message = current, let uid = message.uid, message.hasEnvelope {
-                messages.append(
-                    MailMessage(
-                        id: uid,
-                        uidValidity: selectedUIDValidity,
-                        from: message.from,
-                        subject: message.subject,
-                        date: message.date
-                    )
-                )
+        case .streamingBegin(let kind, _):
+            // Only accumulate the BODY[TEXT] stream — ignore any other section.
+            if case .body = kind {
+                receivedBody = true
+                didReceiveBodySection = true
             }
-            current = nil
+        case .streamingBytes(var chunk):
+            if receivedBody { body.writeBuffer(&chunk) }
+        case .streamingEnd:
+            receivedBody = false
         default:
             break
-        }
-    }
-
-    private func apply(_ attribute: MessageAttribute) {
-        switch attribute {
-        case .uid(let uid):
-            current?.uid = uid.rawValue
-        case .envelope(let envelope):
-            applyEnvelope(envelope)
-        default:
-            break
-        }
-    }
-
-    private func applyEnvelope(_ envelope: Envelope) {
-        guard current != nil else { return }
-        current?.hasEnvelope = true
-        if let subject = envelope.subject {
-            current?.subject = String(buffer: subject)
-        }
-        if let date = envelope.date {
-            current?.date = String(date)
-        }
-        if let sender = envelope.from.first, let address = Self.address(from: sender) {
-            current?.from = address
         }
     }
 
     // MARK: - Commands
-
-    private func sendFetchOrFinish(context: ChannelHandlerContext) {
-        guard messageCount > 0 else {
-            settle(.success([]))
-            send(.logout, tag: logoutTag, context: context)
-            context.close(promise: nil)
-            return
-        }
-        let upper = UInt32(messageCount)
-        let lower = messageCount > limit ? UInt32(messageCount - limit + 1) : 1
-        let range = MessageIdentifierRange<SequenceNumber>(
-            SequenceNumber(rawValue: lower)...SequenceNumber(rawValue: upper)
-        )
-        let set = MessageIdentifierSetNonEmpty(range: range)
-        send(.fetch(.set(set), [.uid, .envelope], []), tag: fetchTag, context: context)
-        step = .fetch
-    }
 
     private func send(_ command: Command, tag: String, context: ChannelHandlerContext) {
         let part = CommandStreamPart.tagged(TaggedCommand(tag: tag, command: command))
@@ -309,17 +268,27 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         selectedUIDValidity = UInt32(value)
     }
 
-    private func settle(_ result: Result<[MailMessage], Error>) {
+    private func verifySelectedUIDValidity() -> Bool {
+        guard let expectedUIDValidity else { return true }
+        guard let selectedUIDValidity else {
+            settle(.failure(MailError.commandFailed("The mailbox UIDVALIDITY could not be verified.")))
+            return false
+        }
+        guard selectedUIDValidity == expectedUIDValidity else {
+            settle(.failure(MailError.commandFailed("The mailbox changed before the message body was fetched.")))
+            return false
+        }
+        return true
+    }
+
+    private func bodyData() -> Data {
+        var buffer = body
+        return Data(buffer.readBytes(length: buffer.readableBytes) ?? [])
+    }
+
+    private func settle(_ result: Result<Data, Error>) {
         guard !settled else { return }
         settled = true
         promise.completeWith(result)
-    }
-
-    private static func address(from element: EmailAddressListElement) -> MailAddress? {
-        guard case .singleAddress(let address) = element else { return nil }
-        guard let mailbox = address.mailbox, let host = address.host else { return nil }
-        let email = "\(String(buffer: mailbox))@\(String(buffer: host))"
-        let name = address.personName.map { String(buffer: $0) }
-        return MailAddress(name: name, email: email)
     }
 }

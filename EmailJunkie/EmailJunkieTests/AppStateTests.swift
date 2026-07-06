@@ -196,6 +196,112 @@ final class AppStateTests: XCTestCase {
         XCTAssertNotNil(appState.fetchError)
     }
 
+    func testPreviewBodyPopulatesReadableText() async {
+        let raw = "--BOUND\r\nContent-Type: text/plain\r\n\r\nHello there.\r\n--BOUND--"
+        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .success(Data(raw.utf8)))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+        let message = MailMessage(id: 42, uidValidity: 99, from: MailAddress(email: "a@x.com"), subject: "Hi", date: "")
+
+        await appState.previewBody(for: message)
+
+        XCTAssertEqual(provider.lastBodyUID, 42)
+        XCTAssertEqual(provider.lastExpectedUIDValidity, 99)
+        XCTAssertEqual(appState.openedBody?.id, 42)
+        XCTAssertEqual(appState.openedBody?.subject, "Hi")
+        XCTAssertEqual(appState.openedBody?.text, "Hello there.")
+        XCTAssertNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
+    func testPreviewBodySurfacesError() async {
+        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .failure(.commandFailed("FETCH failed")))
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+        let message = MailMessage(id: 7, from: nil, subject: "X", date: "")
+
+        await appState.previewBody(for: message)
+
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNotNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
+    func testPreviewBodyIgnoresResultAfterAccountChanges() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "old@gmail.com"
+        appState.mailAppPassword = "old-pw"
+        let message = MailMessage(id: 7, from: nil, subject: "Old body", date: "")
+
+        let previewTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        await appState.testConnection()
+
+        provider.completeBodyFetch(with: .success(Data("Body from old account".utf8)))
+        await previewTask.value
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
+    func testPreviewBodyIgnoresErrorAfterDisconnect() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "old@gmail.com"
+        appState.mailAppPassword = "old-pw"
+        let message = MailMessage(id: 8, from: nil, subject: "Old body", date: "")
+
+        let previewTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        appState.disconnectMail()
+
+        provider.completeBodyFetch(with: .failure(MailError.commandFailed("FETCH failed")))
+        await previewTask.value
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
+    func testPreviewBodyIgnoresResultAfterMessageListRefresh() async {
+        let provider = SuspendedFetchMailProvider()
+        let appState = makeAppState(provider: provider)
+        appState.mailEmail = "me@gmail.com"
+        appState.mailAppPassword = "pw"
+        let message = MailMessage(id: 9, from: nil, subject: "Stale body", date: "")
+
+        let bodyTask = Task { await appState.previewBody(for: message) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        let refreshTask = Task { await appState.previewRecentMessages() }
+        await fulfillment(of: [provider.didStartFetch], timeout: 1)
+
+        provider.completeBodyFetch(with: .success(Data("Body from refreshed-away row".utf8)))
+        await bodyTask.value
+
+        XCTAssertNil(appState.openedBody)
+        XCTAssertNil(appState.bodyError)
+        XCTAssertTrue(appState.isFetching)
+
+        provider.completeFetch(with: .success([]))
+        await refreshTask.value
+
+        XCTAssertTrue(appState.recentMessages.isEmpty)
+        XCTAssertNil(appState.fetchError)
+        XCTAssertFalse(appState.isFetching)
+        XCTAssertFalse(appState.isFetchingBody)
+    }
+
     func testPreviewRecentMessagesIgnoresResultAfterAccountChanges() async {
         let provider = SuspendedFetchMailProvider()
         let appState = makeAppState(provider: provider)
@@ -366,128 +472,5 @@ final class AppStateTests: XCTestCase {
             appState.connectionError,
             "Couldn't remove the legacy Gmail OAuth credentials from Keychain. Keychain returned status -25308."
         )
-    }
-}
-
-private final class AppStateMemoryPersistence: PersistenceProvider {
-    private var settings: Settings
-    var syncSaveError: Error?
-
-    init(settings: Settings = .default) {
-        self.settings = settings
-    }
-
-    func loadSettings() -> Settings { settings }
-    func saveSettings(_ settings: Settings) { self.settings = settings }
-    func saveSettingsSync(_ settings: Settings) throws {
-        if let syncSaveError {
-            throw syncSaveError
-        }
-        self.settings = settings
-    }
-}
-
-private enum AppStatePersistenceError: LocalizedError {
-    case writeDenied
-
-    var errorDescription: String? {
-        switch self {
-        case .writeDenied:
-            return "settings write denied"
-        }
-    }
-}
-
-private final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
-    private let result: Result<Void, MailError>
-    private let fetchResult: Result<[MailMessage], MailError>
-    private(set) var lastCredentials: MailAccountCredentials?
-
-    init(
-        result: Result<Void, MailError>,
-        fetchResult: Result<[MailMessage], MailError> = .success([])
-    ) {
-        self.result = result
-        self.fetchResult = fetchResult
-    }
-
-    func verifyConnection(_ credentials: MailAccountCredentials) async throws {
-        lastCredentials = credentials
-        try result.get()
-    }
-
-    func fetchRecentMessages(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
-        try fetchResult.get()
-    }
-}
-
-private final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
-    let didStartVerification = XCTestExpectation(description: "mail verification started")
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Error>?
-    private(set) var lastCredentials: MailAccountCredentials?
-
-    func verifyConnection(_ credentials: MailAccountCredentials) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            lastCredentials = credentials
-            self.continuation = continuation
-            lock.unlock()
-            didStartVerification.fulfill()
-        }
-    }
-
-    func complete(with result: Result<Void, Error>) {
-        lock.lock()
-        let continuation = continuation
-        self.continuation = nil
-        lock.unlock()
-        continuation?.resume(with: result)
-    }
-
-    func fetchRecentMessages(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
-        []
-    }
-}
-
-private final class AppStateFailingSecretStore: SecretStore {
-    var failOnSet: SecretKey?
-    var failOnRemove: SecretKey?
-    private var storage: [String: String]
-
-    init(seed: [SecretKey: String] = [:]) {
-        storage = seed.reduce(into: [:]) { result, item in
-            result[item.key.rawValue] = item.value
-        }
-    }
-
-    func set(_ value: String, for key: SecretKey) throws {
-        if failOnSet == key {
-            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
-        }
-        storage[key.rawValue] = value
-    }
-
-    func value(for key: SecretKey) throws -> String? {
-        storage[key.rawValue]
-    }
-
-    func remove(_ key: SecretKey) throws {
-        if failOnRemove == key {
-            throw KeychainError.unexpectedStatus(errSecInteractionNotAllowed)
-        }
-        storage[key.rawValue] = nil
-    }
-
-    func removeAll() throws {
-        storage.removeAll()
     }
 }

@@ -111,6 +111,7 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
     private var settled = false
     private var body = ByteBuffer()
     private var receivedBody = false
+    private var didReceiveBodySection = false
 
     init(
         email: String,
@@ -177,6 +178,13 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
             step = .fetch
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
+            guard didReceiveBodySection else {
+                settle(.failure(MailError.commandFailed("No body was returned for the selected message.")))
+                step = .done
+                send(.logout, tag: logoutTag, context: context)
+                context.close(promise: nil)
+                return
+            }
             settle(.success(bodyData()))
             step = .done
             send(.logout, tag: logoutTag, context: context)
@@ -190,7 +198,10 @@ final class IMAPBodyFetchHandler: ChannelInboundHandler {
         switch response {
         case .streamingBegin(let kind, _):
             // Only accumulate the BODY[TEXT] stream — ignore any other section.
-            if case .body = kind { receivedBody = true }
+            if case .body = kind {
+                receivedBody = true
+                didReceiveBodySection = true
+            }
         case .streamingBytes(var chunk):
             if receivedBody { body.writeBuffer(&chunk) }
         case .streamingEnd:

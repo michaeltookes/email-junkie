@@ -87,6 +87,23 @@ final class IMAPBodyFetchTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testFetchOKWithoutBodySurfacesCommandError() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "A2 OK SELECT completed\r\n")
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            XCTAssertEqual(
+                error as? MailError,
+                .commandFailed("No body was returned for the selected message.")
+            )
+        }
+        _ = try? channel.finish()
+    }
+
     func testLoginFailureSurfacesAuthenticationError() throws {
         let (channel, future) = try makeChannel()
 

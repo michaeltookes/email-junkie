@@ -113,6 +113,19 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is £5.")
     }
 
+    func testDecodesQuotedPrintablePartUsingCharsetWithSpacedParameter() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset = iso-8859-1",
+            "Content-Transfer-Encoding: quoted-printable",
+            "",
+            "Caf=E9 pricing is =A35.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is £5.")
+    }
+
     func testDecodesBase64Part() {
         let encoded = Data("Hello from base64.".utf8).base64EncodedString()
         let raw = [
@@ -237,6 +250,22 @@ final class MailBodyTextTests: XCTestCase {
         ].joined(separator: "\r\n")
 
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested folded plain body.")
+    }
+
+    func testRecursesIntoNestedMultipartWithSpacedBoundaryParameter() {
+        let raw = [
+            "--OUTER",
+            "Content-Type: multipart/alternative; boundary = \"INNER\"",
+            "",
+            "--INNER",
+            "Content-Type: text/plain",
+            "",
+            "Nested spaced-boundary body.",
+            "--INNER--",
+            "--OUTER--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Nested spaced-boundary body.")
     }
 
     func testPlainBodyWithSignatureDashesIsNotTreatedAsMultipart() {

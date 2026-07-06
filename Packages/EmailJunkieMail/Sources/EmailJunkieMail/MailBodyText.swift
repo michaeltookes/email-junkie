@@ -219,19 +219,43 @@ public enum MailBodyText {
             return nil
         }
 
-        let prefix = name + "="
-        guard let range = contentType.range(of: prefix, options: .caseInsensitive) else {
-            return nil
-        }
+        let target = name.lowercased()
+        let parameters = headerParameters(contentType).dropFirst()
+        for parameter in parameters {
+            let trimmed = parameter.trimmingCharacters(in: .whitespaces)
+            guard let equals = trimmed.firstIndex(of: "=") else { continue }
+            let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces).lowercased()
+            guard key == target else { continue }
 
-        var value = String(contentType[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-        if value.hasPrefix("\"") {
-            value.removeFirst()
-            if let end = value.firstIndex(of: "\"") { value = String(value[..<end]) }
-        } else if let end = value.firstIndex(of: ";") {
-            value = String(value[..<end]).trimmingCharacters(in: .whitespaces)
+            var value = String(trimmed[trimmed.index(after: equals)...])
+                .trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("\"") {
+                value.removeFirst()
+                if let end = value.firstIndex(of: "\"") { value = String(value[..<end]) }
+            }
+            return value.isEmpty ? nil : value
         }
-        return value.isEmpty ? nil : value
+        return nil
+    }
+
+    private static func headerParameters(_ header: String) -> [String] {
+        var parameters: [String] = []
+        var current = ""
+        var isQuoted = false
+
+        for character in header {
+            if character == "\"" {
+                isQuoted.toggle()
+            }
+            if character == ";", !isQuoted {
+                parameters.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        parameters.append(current)
+        return parameters
     }
 
     // MARK: - Transfer encodings

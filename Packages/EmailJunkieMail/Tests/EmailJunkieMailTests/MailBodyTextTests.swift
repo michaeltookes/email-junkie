@@ -100,6 +100,19 @@ final class MailBodyTextTests: XCTestCase {
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is €5.")
     }
 
+    func testDecodesQuotedPrintablePartUsingDeclaredCharset() {
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: quoted-printable",
+            "",
+            "Caf=E9 pricing is =A35.",
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café pricing is £5.")
+    }
+
     func testDecodesBase64Part() {
         let encoded = Data("Hello from base64.".utf8).base64EncodedString()
         let raw = [
@@ -112,6 +125,20 @@ final class MailBodyTextTests: XCTestCase {
         ].joined(separator: "\r\n")
 
         XCTAssertEqual(MailBodyText.plainText(from: raw), "Hello from base64.")
+    }
+
+    func testDecodesBase64PartUsingDeclaredCharset() {
+        let encoded = Data([0x43, 0x61, 0x66, 0xE9]).base64EncodedString()
+        let raw = [
+            "--BOUND",
+            "Content-Type: text/plain; charset=iso-8859-1",
+            "Content-Transfer-Encoding: base64",
+            "",
+            encoded,
+            "--BOUND--"
+        ].joined(separator: "\r\n")
+
+        XCTAssertEqual(MailBodyText.plainText(from: raw), "Café")
     }
 
     func testFallsBackToStrippedHTMLWhenNoPlainPart() {

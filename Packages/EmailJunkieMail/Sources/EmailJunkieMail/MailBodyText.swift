@@ -109,7 +109,11 @@ public enum MailBodyText {
             return nestedText
         }
 
-        let decoded = decode(content, encoding: headers["content-transfer-encoding"]?.lowercased())
+        let decoded = decode(
+            content,
+            encoding: headers["content-transfer-encoding"]?.lowercased(),
+            charset: charsetParameter(headers["content-type"])
+        )
         if contentType.hasPrefix("text/plain") {
             if decoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 hasBlankPlainPart = true
@@ -160,9 +164,43 @@ public enum MailBodyText {
 
     /// Extracts the `boundary=` parameter from a `Content-Type` value.
     private static func boundaryParameter(_ contentType: String?) -> String? {
-        guard let contentType, let range = contentType.range(of: "boundary=", options: .caseInsensitive) else {
+        contentTypeParameter("boundary", from: contentType)
+    }
+
+    private static func charsetParameter(_ contentType: String?) -> String.Encoding {
+        guard let charset = contentTypeParameter("charset", from: contentType)?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        else {
+            return .utf8
+        }
+
+        switch charset {
+        case "utf-8", "utf8":
+            return .utf8
+        case "us-ascii", "ascii":
+            return .ascii
+        case "iso-8859-1", "latin1", "latin-1":
+            return .isoLatin1
+        case "iso-8859-2", "latin2", "latin-2":
+            return .isoLatin2
+        case "windows-1252", "cp1252":
+            return .windowsCP1252
+        default:
+            return .utf8
+        }
+    }
+
+    private static func contentTypeParameter(_ name: String, from contentType: String?) -> String? {
+        guard let contentType else {
             return nil
         }
+
+        let prefix = name + "="
+        guard let range = contentType.range(of: prefix, options: .caseInsensitive) else {
+            return nil
+        }
+
         var value = String(contentType[range.upperBound...]).trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("\"") {
             value.removeFirst()
@@ -175,13 +213,13 @@ public enum MailBodyText {
 
     // MARK: - Transfer encodings
 
-    private static func decode(_ content: String, encoding: String?) -> String {
+    private static func decode(_ content: String, encoding: String?, charset: String.Encoding) -> String {
         switch encoding {
         case "quoted-printable":
-            return decodeQuotedPrintable(content)
+            return decodeQuotedPrintable(content, charset: charset)
         case "base64":
             let stripped = content.components(separatedBy: .whitespacesAndNewlines).joined()
-            if let data = Data(base64Encoded: stripped), let text = String(data: data, encoding: .utf8) {
+            if let data = Data(base64Encoded: stripped), let text = String(data: data, encoding: charset) {
                 return text
             }
             return content
@@ -190,7 +228,7 @@ public enum MailBodyText {
         }
     }
 
-    private static func decodeQuotedPrintable(_ content: String) -> String {
+    private static func decodeQuotedPrintable(_ content: String, charset: String.Encoding) -> String {
         // Join soft line breaks ("=" at end of line), then decode "=XX" bytes.
         let joined = content.replacingOccurrences(of: "=\n", with: "")
         let chars = Array(joined.utf8)
@@ -208,7 +246,7 @@ public enum MailBodyText {
             bytes.append(chars[index])
             index += 1
         }
-        return String(bytes: bytes, encoding: .utf8) ?? joined
+        return String(bytes: bytes, encoding: charset) ?? joined
     }
 
     // MARK: - HTML

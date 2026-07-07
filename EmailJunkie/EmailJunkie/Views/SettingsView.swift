@@ -145,7 +145,7 @@ struct SettingsView: View {
 
                 TextField(
                     "Model",
-                    text: $appState.llmModel,
+                    text: llmModelBinding,
                     prompt: Text(appState.llmProviderKind.defaultModel)
                 )
 
@@ -192,6 +192,16 @@ struct SettingsView: View {
         .sheet(item: $appState.openedBody) { preview in
             MessageBodyView(preview: preview)
         }
+    }
+
+    private var llmModelBinding: Binding<String> {
+        Binding(
+            get: { appState.llmModel },
+            set: {
+                appState.llmModel = $0
+                appState.refreshLLMConnectionStatus()
+            }
+        )
     }
 }
 

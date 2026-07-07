@@ -2,8 +2,8 @@ import Foundation
 
 /// Resolves the selected provider + API key into a concrete `LLMClient` and
 /// exposes the operations the app needs. Production entry point for the LLM
-/// layer; `AppState` talks to it through `LLMConnectionTesting`.
-struct LLMService: LLMConnectionTesting {
+/// layer; `AppState` talks to it through `LLMProviding`.
+struct LLMService: LLMProviding {
     let transport: LLMHTTPTransport
 
     init(transport: LLMHTTPTransport = URLSessionTransport()) {

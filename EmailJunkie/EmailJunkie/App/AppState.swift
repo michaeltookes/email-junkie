@@ -97,7 +97,7 @@ final class AppState: ObservableObject {
     /// Internal (not private) so the `AppState+LLM` extension can reach it.
     let secrets: SecretStore
     private let mailProvider: MailProvider
-    let llm: LLMConnectionTesting
+    let llm: LLMProviding
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     private var previewGeneration = 0
@@ -114,7 +114,7 @@ final class AppState: ObservableObject {
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
-        llm: LLMConnectionTesting = LLMService()
+        llm: LLMProviding = LLMService()
     ) {
         self.persistence = persistence
         self.secrets = secrets

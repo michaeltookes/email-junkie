@@ -94,10 +94,18 @@ protocol LLMClient: Sendable {
     func complete(_ request: LLMRequest) async throws -> LLMResponse
 }
 
-/// The app-facing seam for verifying a provider's credentials. `AppState`
-/// depends on this (not a concrete client) so connection tests are injectable.
-protocol LLMConnectionTesting: Sendable {
+/// The app-facing seam for the LLM layer: verify credentials and run
+/// completions. `AppState` depends on this (not a concrete client) so both are
+/// injectable in tests without hitting the network.
+protocol LLMProviding: Sendable {
     /// Sends a minimal request to confirm the key/model/endpoint work. Throws
     /// `LLMError` on any failure.
     func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws
+
+    /// Runs a completion against the given provider with the supplied key.
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String
+    ) async throws -> LLMResponse
 }

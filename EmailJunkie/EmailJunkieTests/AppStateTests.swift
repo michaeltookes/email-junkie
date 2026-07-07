@@ -10,7 +10,7 @@ final class AppStateTests: XCTestCase {
         provider: MailProvider,
         secrets: SecretStore = InMemorySecretStore(),
         persistence: AppStateMemoryPersistence = AppStateMemoryPersistence(),
-        llm: LLMConnectionTesting = FakeLLMConnectionTester(result: .success(()))
+        llm: LLMProviding = FakeLLMProvider(result: .success(()))
     ) -> AppState {
         AppState(
             persistence: persistence,

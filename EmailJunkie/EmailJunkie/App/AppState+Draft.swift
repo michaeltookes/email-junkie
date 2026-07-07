@@ -18,8 +18,7 @@ extension AppState {
         generatedDraft = nil
         isGeneratingDraft = false
 
-        guard let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil), !key.isEmpty,
-              isLLMConnected else {
+        guard let llmConfiguration = currentDraftLLMConfiguration else {
             draftError = "Connect an AI provider first (Test Connection above)."
             return
         }
@@ -43,15 +42,15 @@ extension AppState {
                 uid: message.id,
                 expectedUIDValidity: message.uidValidity
             )
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
             let context = ReplyContext(
                 senderName: message.from?.name,
                 senderEmail: message.from?.email,
                 subject: message.subject,
                 body: MailBodyText.plainText(from: data)
             )
-            let body = try await makeReplyBody(context: context, key: key)
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
+            let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
             generatedDraft = Draft(
                 id: message.id,
                 sourceUIDValidity: message.uidValidity,
@@ -59,11 +58,11 @@ extension AppState {
                 sourceFrom: message.from,
                 replySubject: Self.replySubject(for: message.subject),
                 body: body,
-                model: resolvedLLMModel,
+                model: llmConfiguration.model,
                 generatedAt: Date()
             )
         } catch {
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
             draftError = Self.draftMessage(for: error)
         }
     }
@@ -80,27 +79,54 @@ extension AppState {
         draftError = nil
     }
 
-    func isCurrentDraftRequest(
+    func resetDraftPreviewForLLMChange() {
+        _ = nextDraftGeneration()
+        clearDraftPreview()
+        isGeneratingDraft = false
+    }
+
+    private var currentDraftLLMConfiguration: DraftLLMConfiguration? {
+        guard isLLMConnected,
+              let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil),
+              !key.isEmpty else {
+            return nil
+        }
+        return DraftLLMConfiguration(
+            provider: llmProviderKind,
+            model: resolvedLLMModel,
+            apiKey: key
+        )
+    }
+
+    private func isCurrentDraftRequest(
         _ requestGeneration: Int,
-        credentials: MailAccountCredentials
+        credentials: MailAccountCredentials,
+        llmConfiguration: DraftLLMConfiguration
     ) -> Bool {
-        draftGeneration == requestGeneration && mailCredentials == credentials
+        draftGeneration == requestGeneration
+            && mailCredentials == credentials
+            && currentDraftLLMConfiguration == llmConfiguration
     }
 
     func isLatestDraftRequest(_ requestGeneration: Int) -> Bool {
         draftGeneration == requestGeneration
     }
 
-    private func makeReplyBody(context: ReplyContext, key: String) async throws -> String {
-        let provider = llmProviderKind
-        let model = resolvedLLMModel
+    private func makeReplyBody(
+        context: ReplyContext,
+        llmConfiguration: DraftLLMConfiguration
+    ) async throws -> String {
         let profile = voiceProfile
         return try await DraftGenerator().makeDraft(
             replyingTo: context,
             voiceProfile: profile,
-            model: model
+            model: llmConfiguration.model
         ) { [llm] request in
-            try await llm.complete(request, provider: provider, apiKey: key)
+            try await llm.complete(
+                request,
+                provider: llmConfiguration.provider,
+                apiKey: llmConfiguration.apiKey
+            )
         }
     }
 
@@ -119,4 +145,10 @@ extension AppState {
             return message(for: error)
         }
     }
+}
+
+private struct DraftLLMConfiguration: Equatable {
+    let provider: LLMProviderKind
+    let model: String
+    let apiKey: String
 }

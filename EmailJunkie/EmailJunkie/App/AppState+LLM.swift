@@ -30,6 +30,7 @@ extension AppState {
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
+        resetDraftPreviewForLLMChange()
         llmError = nil
         saveSettings()
     }
@@ -73,6 +74,7 @@ extension AppState {
         }
 
         verifiedLLMModel = testedModel
+        resetDraftPreviewForLLMChange()
         saveSettings()
         isLLMConnected = true
     }
@@ -89,6 +91,7 @@ extension AppState {
         llmAPIKey = ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
+        resetDraftPreviewForLLMChange()
         saveSettings()
     }
 

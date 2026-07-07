@@ -401,6 +401,7 @@ final class AppState: ObservableObject {
         $llmModel
             .dropFirst()
             .sink { [weak self] model in
+                self?.resetDraftPreviewForLLMChange()
                 self?.refreshLLMConnectionStatus(llmModel: model)
                 self?.saveSettings(llmModel: model)
             }

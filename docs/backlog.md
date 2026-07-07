@@ -67,12 +67,13 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ A "Test Connection" action verifies the key/model with a live call; on success the key is stored in the Keychain (item 10). "AI provider" Settings section is a working provider picker + model + API key + Test.
    - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy); live-verify against a real Anthropic key. (Local-model adapter is item 16.)
 
-7. **Draft generation engine**
+7. **Draft generation engine** — *in progress*
    Produce a reply draft from the incoming message, thread context, and voice profile.
    *As Priya, I want a draft reply generated from the incoming message, its thread, and my voice profile, so that I usually only need to approve it.*
-   - Drafts incorporate thread/quote context and the voice profile.
-   - Provider errors, timeouts, and rate limits are handled gracefully and surfaced (no silent failures).
-   - Each draft is associated with its source message and thread for correct sending later.
+   - ✅ `DraftGenerator` builds a reply prompt from the incoming message and injects the voice profile via `VoiceProfile.promptBlock()` (neutral fallback when none); output cleaned (strips stray `Subject:` lines). Pure core + injected completion, unit-tested.
+   - ✅ Provider errors/rate limits surfaced via `AppState.draftMessage(for:)` — no silent failures.
+   - ✅ Draft tied to its source message (UID + UIDVALIDITY, subject, sender, `Re:` subject) for correct send later. On-demand "Draft reply" action + preview sheet in Settings.
+   - ⬜ **Remaining:** incorporate full **thread/quote context** (currently the single incoming message body); capture the source **Message-ID** for `In-Reply-To`/`References` threading (needed by item 9 send); live-verify against a real inbox message; inline editing is item 19; low-confidence "needs info" handling is item 13.
 
 8. **Native macOS notification approval UX**
    Surface a ready draft via native notification + preview, with approve/deny.

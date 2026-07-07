@@ -117,9 +117,24 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(appState.isFetchingBody)
+
+                        Button {
+                            Task { await appState.generateDraft(for: message) }
+                        } label: {
+                            Label("Draft reply", systemImage: "arrowshape.turn.up.left")
+                                .font(.caption)
+                        }
+                        .disabled(appState.isGeneratingDraft || !appState.canGenerateDraft)
                     }
 
-                    if let error = appState.bodyError {
+                    if appState.isGeneratingDraft {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Drafting a reply…").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let error = appState.bodyError ?? appState.draftError {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(.red)
@@ -241,6 +256,9 @@ struct SettingsView: View {
         .sheet(item: $appState.openedBody) { preview in
             MessageBodyView(preview: preview)
         }
+        .sheet(item: $appState.generatedDraft) { draft in
+            DraftView(draft: draft)
+        }
     }
 
     private var llmModelBinding: Binding<String> {
@@ -272,6 +290,41 @@ private struct MessageBodyView: View {
             Divider()
             ScrollView {
                 Text(preview.text.isEmpty ? "(no text content)" : preview.text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+        }
+        .frame(width: 480, height: 420)
+    }
+}
+
+/// A sheet showing a generated reply draft.
+private struct DraftView: View {
+    let draft: Draft
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(draft.replySubject)
+                        .font(.headline)
+                        .lineLimit(2)
+                    if let sender = draft.sourceFrom?.email {
+                        Text("To: \(sender)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                Text(draft.body)
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -94,6 +94,15 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last voice-learning error, if any.
     @Published var voiceError: String?
 
+    // MARK: - Draft (preview)
+
+    /// The most recently generated reply draft, if any.
+    @Published var generatedDraft: Draft?
+    /// Whether a draft is being generated.
+    @Published var isGeneratingDraft: Bool = false
+    /// A user-facing message describing the last draft error, if any.
+    @Published var draftError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).

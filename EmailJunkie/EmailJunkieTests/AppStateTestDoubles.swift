@@ -161,6 +161,44 @@ final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
     }
 }
 
+final class SuspendedLLMProvider: LLMProviding, @unchecked Sendable {
+    let didStartCompletion = XCTestExpectation(description: "LLM completion started")
+    private let lock = NSLock()
+    private var completionContinuation: CheckedContinuation<LLMResponse, Error>?
+    private(set) var lastProvider: LLMProviderKind?
+    private(set) var lastAPIKey: String?
+    private(set) var lastRequest: LLMRequest?
+
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {}
+
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String
+    ) async throws -> LLMResponse {
+        lock.lock()
+        lastProvider = provider
+        lastAPIKey = apiKey
+        lastRequest = request
+        lock.unlock()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            completionContinuation = continuation
+            lock.unlock()
+            didStartCompletion.fulfill()
+        }
+    }
+
+    func completeDraft(with result: Result<LLMResponse, Error>) {
+        lock.lock()
+        let continuation = completionContinuation
+        completionContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
 final class SuspendedLLMConnectionTester: LLMProviding, @unchecked Sendable {
     let didStartConnectionTest = XCTestExpectation(description: "LLM connection test started")
     private let lock = NSLock()

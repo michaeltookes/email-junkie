@@ -43,6 +43,79 @@ final class AppStateDraftTests: XCTestCase {
         XCTAssertEqual(llm.lastAPIKey, "sk-live")
     }
 
+    func testGenerateDraftIgnoresResultAfterAccountChanges() async {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "old@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .success(Data("Old body".utf8)))
+        let llm = SuspendedLLMProvider()
+        let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+        appState.mailAppPassword = "old-pw"
+
+        let draftTask = Task { await appState.generateDraft(for: inboxMessage()) }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        await appState.testConnection()
+
+        llm.completeDraft(with: .success(LLMResponse(text: "Stale reply")))
+        await draftTask.value
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertNil(appState.generatedDraft)
+        XCTAssertNil(appState.draftError)
+        XCTAssertFalse(appState.isGeneratingDraft)
+    }
+
+    func testGenerateDraftIgnoresErrorAfterDisconnect() async {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "old-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "old@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let provider = FakeAppMailProvider(result: .success(()), bodyResult: .success(Data("Old body".utf8)))
+        let llm = SuspendedLLMProvider()
+        let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+
+        let draftTask = Task { await appState.generateDraft(for: inboxMessage()) }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+
+        appState.disconnectMail()
+
+        llm.completeDraft(with: .failure(LLMError.http(status: 429, message: "slow down")))
+        await draftTask.value
+
+        XCTAssertFalse(appState.isAccountConnected)
+        XCTAssertNil(appState.generatedDraft)
+        XCTAssertNil(appState.draftError)
+        XCTAssertFalse(appState.isGeneratingDraft)
+    }
+
+    func testGenerateDraftClearsStaleBodyError() async {
+        let (appState, _) = makeConnectedAppState(
+            completion: .failure(.http(status: 429, message: "slow down"))
+        )
+        appState.bodyError = "Previous body preview failed."
+
+        await appState.generateDraft(for: inboxMessage())
+
+        XCTAssertNil(appState.bodyError)
+        XCTAssertNil(appState.generatedDraft)
+        XCTAssertEqual(appState.draftError, "The provider rejected the request (HTTP 429). slow down")
+    }
+
     func testGenerateDraftInjectsVoiceProfile() async {
         let profile = VoiceProfile(
             greeting: "Hey,", signOff: "M", formality: "casual", tone: "warm",

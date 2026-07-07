@@ -134,7 +134,13 @@ struct SettingsView: View {
                         }
                     }
 
-                    if let error = appState.bodyError ?? appState.draftError {
+                    if let error = appState.bodyError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    if let error = appState.draftError {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(.red)

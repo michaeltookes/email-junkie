@@ -12,8 +12,11 @@ extension AppState {
 
     /// Fetches a message's body and generates a reply draft in the user's voice.
     func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+        let requestGeneration = nextDraftGeneration()
+        bodyError = nil
         draftError = nil
         generatedDraft = nil
+        isGeneratingDraft = false
 
         guard let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil), !key.isEmpty,
               isLLMConnected else {
@@ -27,7 +30,11 @@ extension AppState {
         }
 
         isGeneratingDraft = true
-        defer { isGeneratingDraft = false }
+        defer {
+            if isLatestDraftRequest(requestGeneration) {
+                isGeneratingDraft = false
+            }
+        }
 
         do {
             let data = try await mailProvider.fetchBodyText(
@@ -36,6 +43,7 @@ extension AppState {
                 uid: message.id,
                 expectedUIDValidity: message.uidValidity
             )
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
             let context = ReplyContext(
                 senderName: message.from?.name,
                 senderEmail: message.from?.email,
@@ -43,6 +51,7 @@ extension AppState {
                 body: MailBodyText.plainText(from: data)
             )
             let body = try await makeReplyBody(context: context, key: key)
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
             generatedDraft = Draft(
                 id: message.id,
                 sourceUIDValidity: message.uidValidity,
@@ -54,11 +63,33 @@ extension AppState {
                 generatedAt: Date()
             )
         } catch {
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials) else { return }
             draftError = Self.draftMessage(for: error)
         }
     }
 
     // MARK: - Helpers
+
+    func nextDraftGeneration() -> Int {
+        draftGeneration += 1
+        return draftGeneration
+    }
+
+    func clearDraftPreview() {
+        generatedDraft = nil
+        draftError = nil
+    }
+
+    func isCurrentDraftRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        draftGeneration == requestGeneration && mailCredentials == credentials
+    }
+
+    func isLatestDraftRequest(_ requestGeneration: Int) -> Bool {
+        draftGeneration == requestGeneration
+    }
 
     private func makeReplyBody(context: ReplyContext, key: String) async throws -> String {
         let provider = llmProviderKind

@@ -124,6 +124,7 @@ final class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var previewGeneration = 0
     private var bodyPreviewGeneration = 0
+    var draftGeneration = 0
     private static let legacyOAuthKeys: [SecretKey] = [
         .gmailToken,
         .googleClientID,
@@ -227,7 +228,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
-        resetRecentMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange()
         logger.info("Mailbox connected")
     }
 
@@ -249,7 +250,7 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
-        resetRecentMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
     }
 
@@ -338,12 +339,15 @@ final class AppState: ObservableObject {
         return bodyPreviewGeneration
     }
 
-    private func resetRecentMessagePreviewForAccountChange() {
+    private func resetMessagePreviewForAccountChange() {
         _ = nextPreviewGeneration()
         _ = nextBodyPreviewGeneration()
+        _ = nextDraftGeneration()
         clearRecentMessagePreview()
+        clearDraftPreview()
         isFetching = false
         isFetchingBody = false
+        isGeneratingDraft = false
     }
 
     private func clearRecentMessagePreview() {

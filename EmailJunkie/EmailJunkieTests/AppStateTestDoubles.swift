@@ -8,10 +8,12 @@ import XCTest
 
 final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
+    private(set) var voiceProfile: VoiceProfile?
     var syncSaveError: Error?
 
-    init(settings: Settings = .default) {
+    init(settings: Settings = .default, voiceProfile: VoiceProfile? = nil) {
         self.settings = settings
+        self.voiceProfile = voiceProfile
     }
 
     func loadSettings() -> Settings { settings }
@@ -22,6 +24,10 @@ final class AppStateMemoryPersistence: PersistenceProvider {
         }
         self.settings = settings
     }
+
+    func loadVoiceProfile() -> VoiceProfile? { voiceProfile }
+    func saveVoiceProfile(_ profile: VoiceProfile) { voiceProfile = profile }
+    func removeVoiceProfile() { voiceProfile = nil }
 }
 
 enum AppStatePersistenceError: LocalizedError {

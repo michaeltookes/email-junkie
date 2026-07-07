@@ -83,6 +83,17 @@ final class AppState: ObservableObject {
     /// The resolved model id that last passed a connection test.
     var verifiedLLMModel: String
 
+    // MARK: - Voice Profile
+
+    /// The learned voice profile, or `nil` if none has been learned yet.
+    @Published var voiceProfile: VoiceProfile?
+    /// Whether voice learning is in progress.
+    @Published var isLearningVoice: Bool = false
+    /// A short progress message shown while learning.
+    @Published var voiceProgress: String?
+    /// A user-facing message describing the last voice-learning error, if any.
+    @Published var voiceError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -93,10 +104,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Private
 
-    private let persistence: PersistenceProvider
-    /// Internal (not private) so the `AppState+LLM` extension can reach it.
+    /// Internal (not private) so the `AppState+Voice` extension can reach it.
+    let persistence: PersistenceProvider
+    /// Internal (not private) so the `AppState+LLM`/`+Voice` extensions can reach it.
     let secrets: SecretStore
-    private let mailProvider: MailProvider
+    /// Internal (not private) so the `AppState+Voice` extension can reach it.
+    let mailProvider: MailProvider
     let llm: LLMProviding
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
@@ -135,6 +148,8 @@ final class AppState: ObservableObject {
         self.verifiedLLMModel = settings.llmVerifiedModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
 
+        self.voiceProfile = persistence.loadVoiceProfile()
+
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
         refreshLLMConnectionStatus()
@@ -145,7 +160,7 @@ final class AppState: ObservableObject {
     // MARK: - Mail Account
 
     /// Builds credentials from the current inputs.
-    private var mailCredentials: MailAccountCredentials {
+    var mailCredentials: MailAccountCredentials {
         MailAccountCredentials(
             email: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
             appPassword: mailAppPassword.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -341,38 +356,6 @@ final class AppState: ObservableObject {
         credentials: MailAccountCredentials
     ) -> Bool {
         bodyPreviewGeneration == requestGeneration && mailCredentials == credentials
-    }
-
-    /// Maps an error to a concise, user-facing message.
-    private static func message(for error: Error) -> String {
-        switch error {
-        case MailError.incompleteCredentials:
-            return "Enter your email address and app password first."
-        case MailError.authenticationFailed(let detail):
-            return "Sign-in failed — check your email and app password. (\(detail))"
-        case MailError.connectionFailed(let detail):
-            return "Couldn't reach the mail server. (\(detail))"
-        case MailError.commandFailed(let detail):
-            return "The mail server rejected a request. (\(detail))"
-        case KeychainError.unexpectedStatus(let status):
-            return "Keychain returned status \(status)."
-        case KeychainError.dataEncodingFailed:
-            return "Keychain could not encode the app password."
-        default:
-            return error.localizedDescription
-        }
-    }
-
-    private static func keychainMessage(action: String, error: Error) -> String {
-        "Couldn't \(action) the app password in Keychain. \(message(for: error))"
-    }
-
-    private static func legacyOAuthCleanupMessage(error: Error) -> String {
-        "Couldn't remove the legacy Gmail OAuth credentials from Keychain. \(message(for: error))"
-    }
-
-    private static func settingsMessage(action: String, error: Error) -> String {
-        "Couldn't \(action) mailbox settings. \(message(for: error))"
     }
 
     private func cleanupLegacyOAuthCredentials() {

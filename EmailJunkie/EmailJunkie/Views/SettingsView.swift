@@ -178,6 +178,55 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Voice") {
+                if let profile = appState.voiceProfile {
+                    Text(profile.summary.isEmpty
+                         ? "Learned from \(profile.sampleCount) sent message\(profile.sampleCount == 1 ? "" : "s")."
+                         : profile.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Learn your writing voice from your Sent mail so drafts sound like you.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    Task { await appState.learnVoiceProfile() }
+                } label: {
+                    if appState.isLearningVoice {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            if let progress = appState.voiceProgress {
+                                Text(progress).foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Text(appState.voiceProfile == nil ? "Learn my voice" : "Re-learn")
+                    }
+                }
+                .disabled(appState.isLearningVoice || !appState.canLearnVoice)
+
+                if appState.voiceProfile != nil {
+                    Button("Forget voice profile", role: .destructive) {
+                        appState.forgetVoiceProfile()
+                    }
+                    .disabled(appState.isLearningVoice)
+                }
+
+                if !appState.canLearnVoice && appState.voiceProfile == nil {
+                    Text("Connect an email account and an AI provider first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = appState.voiceError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section("Privacy") {
                 Text("Email Junkie is local-first. Your mail and settings stay on this "
                      + "Mac, and secrets like API keys and OAuth tokens are stored in the "

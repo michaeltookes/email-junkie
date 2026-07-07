@@ -58,13 +58,13 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Already-processed messages are tracked and never drafted twice.
    - No claim of 24/7 coverage; sleep/wake behavior is well-defined.
 
-6. **Pluggable LLM provider layer**
+6. **Pluggable LLM provider layer** — *in progress*
    Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 16) drops in cleanly.
    *As Sam, I want to choose which LLM provider drafts my replies, so that I'm not locked to one vendor and can keep data where I want.*
-   - Common interface with adapters for cloud providers (Claude, OpenAI, etc.) via BYO key/endpoint.
-   - Switching providers in Settings takes effect immediately with no code changes.
-   - A "test connection" action verifies the key/endpoint.
-   - Keys stored in Keychain (item 10).
+   - ✅ Common `LLMClient` interface + DTOs (`LLMRequest`/`LLMResponse`) and an injectable JSON transport; **Anthropic (Claude)** adapter implementing the Messages API. Adapter + coordinator covered by fake-transport unit tests.
+   - ✅ `LLMService` resolves the selected provider + key into a client; `LLMConnectionTesting` seam so AppState is tested without the network. Provider/model and last verified model persisted in Settings (schema v4).
+   - ✅ A "Test Connection" action verifies the key/model with a live call; on success the key is stored in the Keychain (item 10). "AI provider" Settings section is a working provider picker + model + API key + Test.
+   - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy); live-verify against a real Anthropic key. (Local-model adapter is item 16.)
 
 7. **Draft generation engine**
    Produce a reply draft from the incoming message, thread context, and voice profile.

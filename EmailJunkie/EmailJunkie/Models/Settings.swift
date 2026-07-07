@@ -8,7 +8,7 @@ import Foundation
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 4
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -25,18 +25,34 @@ struct Settings: Codable, Equatable {
     /// The IMAP port.
     var mailPort: Int
 
+    /// The selected LLM provider (raw value of `LLMProviderKind`). Stored as a
+    /// string so an unknown/future provider decodes gracefully to the default.
+    var llmProvider: String
+
+    /// The chosen model id, or empty to use the provider's default model.
+    var llmModel: String
+
+    /// The resolved model id that last passed a connection test.
+    var llmVerifiedModel: String
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
         mailEmail: String = "",
         mailHost: String = "imap.gmail.com",
-        mailPort: Int = 993
+        mailPort: Int = 993,
+        llmProvider: String = "anthropic",
+        llmModel: String = "",
+        llmVerifiedModel: String = ""
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
         self.mailEmail = mailEmail
         self.mailHost = mailHost
         self.mailPort = mailPort
+        self.llmProvider = llmProvider
+        self.llmModel = llmModel
+        self.llmVerifiedModel = llmVerifiedModel
     }
 
     /// Default settings for a fresh install.
@@ -46,7 +62,7 @@ struct Settings: Codable, Equatable {
     )
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort
+        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort, llmProvider, llmModel, llmVerifiedModel
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +72,9 @@ struct Settings: Codable, Equatable {
         mailEmail = try container.decodeIfPresent(String.self, forKey: .mailEmail) ?? ""
         mailHost = try container.decodeIfPresent(String.self, forKey: .mailHost) ?? "imap.gmail.com"
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
+        llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
+        llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
+        llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
     }
 
     /// Returns a copy with values clamped to sane ranges.

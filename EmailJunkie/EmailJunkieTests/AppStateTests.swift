@@ -9,12 +9,14 @@ final class AppStateTests: XCTestCase {
     private func makeAppState(
         provider: MailProvider,
         secrets: SecretStore = InMemorySecretStore(),
-        persistence: AppStateMemoryPersistence = AppStateMemoryPersistence()
+        persistence: AppStateMemoryPersistence = AppStateMemoryPersistence(),
+        llm: LLMConnectionTesting = FakeLLMConnectionTester(result: .success(()))
     ) -> AppState {
         AppState(
             persistence: persistence,
             secrets: secrets,
-            mailProvider: provider
+            mailProvider: provider,
+            llm: llm
         )
     }
 

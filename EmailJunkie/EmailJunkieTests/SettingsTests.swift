@@ -32,9 +32,24 @@ final class SettingsTests: XCTestCase {
     }
 
     func testSettingsRoundTripsThroughCodable() throws {
-        let original = Settings(schemaVersion: 1, pollIntervalSeconds: 240)
+        let original = Settings(
+            schemaVersion: 1,
+            pollIntervalSeconds: 240,
+            llmProvider: "anthropic",
+            llmModel: "claude-sonnet-4-6",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(Settings.self, from: data)
         XCTAssertEqual(original, decoded)
+    }
+
+    func testLegacyFileWithoutLLMKeysDecodesToDefaults() throws {
+        // A pre-v3 settings file has no llm keys; they must decode to defaults.
+        let legacy = #"{"schemaVersion":2,"pollIntervalSeconds":300,"mailEmail":"me@x.com"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.llmProvider, "anthropic")
+        XCTAssertEqual(decoded.llmModel, "")
+        XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 }

@@ -12,6 +12,13 @@ protocol PersistenceProvider {
     func loadSettings() -> Settings
     func saveSettings(_ settings: Settings)
     func saveSettingsSync(_ settings: Settings) throws
+
+    /// The stored voice profile, or `nil` if the user hasn't learned one yet.
+    func loadVoiceProfile() -> VoiceProfile?
+    /// Persists the voice profile (replaces any existing one).
+    func saveVoiceProfile(_ profile: VoiceProfile)
+    /// Removes the stored voice profile.
+    func removeVoiceProfile()
 }
 
 /// File-based persistence for non-secret application settings.
@@ -27,6 +34,7 @@ final class PersistenceService: PersistenceProvider {
     // MARK: - Properties
 
     private let settingsURL: URL
+    private let voiceProfileURL: URL
     private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
@@ -51,6 +59,7 @@ final class PersistenceService: PersistenceProvider {
         let directory = appSupport.appendingPathComponent("EmailJunkie", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         settingsURL = directory.appendingPathComponent("Settings.json")
+        voiceProfileURL = directory.appendingPathComponent("VoiceProfile.json")
     }
 
     // MARK: - Settings
@@ -92,6 +101,36 @@ final class PersistenceService: PersistenceProvider {
         } catch {
             logger.error("Failed to save settings (sync): \(error.localizedDescription)")
             throw error
+        }
+    }
+
+    // MARK: - Voice Profile
+
+    func loadVoiceProfile() -> VoiceProfile? {
+        guard FileManager.default.fileExists(atPath: voiceProfileURL.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: voiceProfileURL)
+            return try decoder.decode(VoiceProfile.self, from: data)
+        } catch {
+            logger.error("Failed to load voice profile: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func saveVoiceProfile(_ profile: VoiceProfile) {
+        ioQueue.async { [encoder, voiceProfileURL] in
+            do {
+                let data = try encoder.encode(profile)
+                try data.write(to: voiceProfileURL, options: .atomic)
+            } catch {
+                logger.error("Failed to save voice profile: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func removeVoiceProfile() {
+        ioQueue.async { [voiceProfileURL] in
+            try? FileManager.default.removeItem(at: voiceProfileURL)
         }
     }
 }

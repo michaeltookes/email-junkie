@@ -8,7 +8,7 @@ final class AppStateLLMTests: XCTestCase {
     private func makeAppState(
         secrets: SecretStore = InMemorySecretStore(),
         persistence: AppStateMemoryPersistence = AppStateMemoryPersistence(),
-        llm: LLMConnectionTesting = FakeLLMConnectionTester(result: .success(()))
+        llm: LLMProviding = FakeLLMProvider(result: .success(()))
     ) -> AppState {
         AppState(
             persistence: persistence,
@@ -35,7 +35,7 @@ final class AppStateLLMTests: XCTestCase {
 
     func testTestLLMConnectionSuccessStoresKeyAndConnects() async {
         let secrets = InMemorySecretStore()
-        let tester = FakeLLMConnectionTester(result: .success(()))
+        let tester = FakeLLMProvider(result: .success(()))
         let appState = makeAppState(secrets: secrets, llm: tester)
         appState.llmAPIKey = "  sk-live  "
 
@@ -52,7 +52,7 @@ final class AppStateLLMTests: XCTestCase {
 
     func testTestLLMConnectionFailureDoesNotStoreKey() async {
         let secrets = InMemorySecretStore()
-        let tester = FakeLLMConnectionTester(result: .failure(.http(status: 401, message: "bad key")))
+        let tester = FakeLLMProvider(result: .failure(.http(status: 401, message: "bad key")))
         let appState = makeAppState(secrets: secrets, llm: tester)
         appState.llmAPIKey = "sk-wrong"
 
@@ -107,7 +107,7 @@ final class AppStateLLMTests: XCTestCase {
     }
 
     func testTestLLMConnectionRequiresKey() async {
-        let tester = FakeLLMConnectionTester(result: .success(()))
+        let tester = FakeLLMProvider(result: .success(()))
         let appState = makeAppState(llm: tester)
         appState.llmAPIKey = "   "
 

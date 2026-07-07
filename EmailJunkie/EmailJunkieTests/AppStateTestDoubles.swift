@@ -8,10 +8,12 @@ import XCTest
 
 final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
+    private(set) var voiceProfile: VoiceProfile?
     var syncSaveError: Error?
 
-    init(settings: Settings = .default) {
+    init(settings: Settings = .default, voiceProfile: VoiceProfile? = nil) {
         self.settings = settings
+        self.voiceProfile = voiceProfile
     }
 
     func loadSettings() -> Settings { settings }
@@ -22,6 +24,10 @@ final class AppStateMemoryPersistence: PersistenceProvider {
         }
         self.settings = settings
     }
+
+    func loadVoiceProfile() -> VoiceProfile? { voiceProfile }
+    func saveVoiceProfile(_ profile: VoiceProfile) { voiceProfile = profile }
+    func removeVoiceProfile() { voiceProfile = nil }
 }
 
 enum AppStatePersistenceError: LocalizedError {
@@ -120,14 +126,20 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     }
 }
 
-final class FakeLLMConnectionTester: LLMConnectionTesting, @unchecked Sendable {
+final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
     private let result: Result<Void, LLMError>
+    private let completion: Result<LLMResponse, LLMError>
     private(set) var lastProvider: LLMProviderKind?
     private(set) var lastAPIKey: String?
     private(set) var lastModel: String?
+    private(set) var lastRequest: LLMRequest?
 
-    init(result: Result<Void, LLMError>) {
+    init(
+        result: Result<Void, LLMError>,
+        completion: Result<LLMResponse, LLMError> = .success(LLMResponse(text: ""))
+    ) {
         self.result = result
+        self.completion = completion
     }
 
     func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {
@@ -136,9 +148,20 @@ final class FakeLLMConnectionTester: LLMConnectionTesting, @unchecked Sendable {
         lastModel = model
         try result.get()
     }
+
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String
+    ) async throws -> LLMResponse {
+        lastProvider = provider
+        lastAPIKey = apiKey
+        lastRequest = request
+        return try completion.get()
+    }
 }
 
-final class SuspendedLLMConnectionTester: LLMConnectionTesting, @unchecked Sendable {
+final class SuspendedLLMConnectionTester: LLMProviding, @unchecked Sendable {
     let didStartConnectionTest = XCTestExpectation(description: "LLM connection test started")
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Error>?
@@ -152,6 +175,14 @@ final class SuspendedLLMConnectionTester: LLMConnectionTesting, @unchecked Senda
             store(continuation)
             didStartConnectionTest.fulfill()
         }
+    }
+
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String
+    ) async throws -> LLMResponse {
+        LLMResponse(text: "")
     }
 
     func complete(with result: Result<Void, Error>) {

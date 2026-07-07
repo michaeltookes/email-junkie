@@ -63,6 +63,28 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "anthropic"))) ?? nil)
     }
 
+    func testTestLLMConnectionRequiresRetestWhenModelChangesDuringRequest() async {
+        let secrets = InMemorySecretStore()
+        let tester = SuspendedLLMConnectionTester()
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.llmAPIKey = "sk-live"
+        appState.llmModel = "claude-sonnet-4-6"
+
+        let connectionTask = Task { await appState.testLLMConnection() }
+        await fulfillment(of: [tester.didStartConnectionTest], timeout: 1)
+
+        appState.llmModel = "claude-sonnet-5"
+        tester.complete(with: .success(()))
+        await connectionTask.value
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertFalse(appState.isTestingLLM)
+        XCTAssertEqual(appState.llmError, "Connection settings changed. Test again.")
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(tester.lastModel, "claude-sonnet-4-6")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "anthropic"))) ?? nil)
+    }
+
     func testTestLLMConnectionRequiresKey() async {
         let tester = FakeLLMConnectionTester(result: .success(()))
         let appState = makeAppState(llm: tester)

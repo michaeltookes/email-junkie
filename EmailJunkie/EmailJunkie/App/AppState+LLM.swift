@@ -43,21 +43,30 @@ extension AppState {
         isTestingLLM = true
         defer { isTestingLLM = false }
 
+        let testedProvider = llmProviderKind
+        let testedModel = resolvedLLMModel
+
         do {
-            try await llm.testConnection(provider: llmProviderKind, apiKey: key, model: resolvedLLMModel)
+            try await llm.testConnection(provider: testedProvider, apiKey: key, model: testedModel)
         } catch {
             llmError = Self.llmMessage(for: error)
             return
         }
 
+        guard llmProviderKind == testedProvider, resolvedLLMModel == testedModel else {
+            llmError = "Connection settings changed. Test again."
+            refreshLLMConnectionStatus()
+            return
+        }
+
         do {
-            try secrets.set(key, for: llmProviderKind.apiKeySecret)
+            try secrets.set(key, for: testedProvider.apiKeySecret)
         } catch {
             llmError = Self.keychainLLMMessage(action: "save", error: error)
             return
         }
 
-        verifiedLLMModel = resolvedLLMModel
+        verifiedLLMModel = testedModel
         saveSettings()
         isLLMConnected = true
     }

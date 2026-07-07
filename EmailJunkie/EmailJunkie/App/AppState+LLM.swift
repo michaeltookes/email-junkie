@@ -53,7 +53,9 @@ extension AppState {
             return
         }
 
-        guard llmProviderKind == testedProvider, resolvedLLMModel == testedModel else {
+        guard llmProviderKind == testedProvider,
+              resolvedLLMModel == testedModel,
+              llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) == key else {
             llmError = "Connection settings changed. Test again."
             refreshLLMConnectionStatus()
             return

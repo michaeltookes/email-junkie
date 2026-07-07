@@ -49,7 +49,9 @@ final class AnthropicClientTests: XCTestCase {
             "claude-sonnet-5",
             "claude-sonnet-5-20260707",
             "claude-opus-4-7",
+            "claude-opus-4-7-20260707",
             "claude-opus-4-8",
+            "claude-opus-4-8-20260707",
             "claude-opus-4-10",
             "claude-opus-5",
             "claude-haiku-5"
@@ -73,18 +75,25 @@ final class AnthropicClientTests: XCTestCase {
 
     func testKeepsTemperatureForOpusFourModelsBeforeFourSeven() async throws {
         let (client, transport) = client(json(#"{"content":[{"type":"text","text":"Hello"}]}"#))
-        let request = LLMRequest(
-            messages: [LLMMessage(role: .user, content: "Hi")],
-            model: "claude-opus-4-6",
-            maxTokens: 32,
-            temperature: 0.5
-        )
+        let models = [
+            "claude-opus-4-6",
+            "claude-opus-4-6-20260707"
+        ]
 
-        _ = try await client.complete(request)
+        for model in models {
+            let request = LLMRequest(
+                messages: [LLMMessage(role: .user, content: "Hi")],
+                model: model,
+                maxTokens: 32,
+                temperature: 0.5
+            )
 
-        let body = try XCTUnwrap(transport.lastBody)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(object["temperature"] as? Double, 0.5)
+            _ = try await client.complete(request)
+
+            let body = try XCTUnwrap(transport.lastBody)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["temperature"] as? Double, 0.5, "expected \(model) to keep temperature")
+        }
     }
 
     func testParsesTextAndUsage() async throws {

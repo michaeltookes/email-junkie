@@ -91,23 +91,22 @@ struct AnthropicClient: LLMClient {
 
     private static func allowsSamplingParameters(model: String) -> Bool {
         let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return !normalized.hasPrefix("claude-sonnet-5")
-            && !normalized.hasPrefix("claude-opus-5")
-            && !normalized.hasPrefix("claude-haiku-5")
-            && !isClaudeOpus47OrLater(normalized)
+        return !rejectsSamplingParameters(model: normalized)
+    }
+
+    private static func rejectsSamplingParameters(model: String) -> Bool {
+        model.hasPrefix("claude-sonnet-5")
+            || model.hasPrefix("claude-opus-5")
+            || model.hasPrefix("claude-haiku-5")
+            || isClaudeOpus47OrLater(model)
     }
 
     private static func isClaudeOpus47OrLater(_ model: String) -> Bool {
-        let prefix = "claude-opus-"
+        let prefix = "claude-opus-4-"
         guard model.hasPrefix(prefix) else { return false }
 
-        let versionParts = model.dropFirst(prefix.count).split(separator: "-")
-        guard let majorPart = versionParts.first, Int(majorPart) == 4 else { return false }
-        guard versionParts.count > 1,
-              versionParts[1].count <= 2,
-              let minor = Int(versionParts[1]) else {
-            return false
-        }
+        let minorText = model.dropFirst(prefix.count).prefix { $0.isNumber }
+        guard let minor = Int(minorText) else { return false }
         return minor >= 7
     }
 }

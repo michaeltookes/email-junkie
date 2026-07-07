@@ -43,20 +43,48 @@ final class AnthropicClientTests: XCTestCase {
         XCTAssertEqual(messages.first?["content"] as? String, "Hi")
     }
 
-    func testOmitsTemperatureForClaudeFiveModels() async throws {
+    func testOmitsTemperatureForModelsThatRejectSamplingParameters() async throws {
+        let (client, transport) = client(json(#"{"content":[{"type":"text","text":"Hello"}]}"#))
+        let models = [
+            "claude-sonnet-5",
+            "claude-sonnet-5-20260707",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-4-10",
+            "claude-opus-5",
+            "claude-haiku-5"
+        ]
+
+        for model in models {
+            let request = LLMRequest(
+                messages: [LLMMessage(role: .user, content: "Hi")],
+                model: model,
+                maxTokens: 32,
+                temperature: 0
+            )
+
+            _ = try await client.complete(request)
+
+            let body = try XCTUnwrap(transport.lastBody)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertNil(object["temperature"], "expected \(model) to omit temperature")
+        }
+    }
+
+    func testKeepsTemperatureForOpusFourModelsBeforeFourSeven() async throws {
         let (client, transport) = client(json(#"{"content":[{"type":"text","text":"Hello"}]}"#))
         let request = LLMRequest(
             messages: [LLMMessage(role: .user, content: "Hi")],
-            model: "claude-sonnet-5",
+            model: "claude-opus-4-6",
             maxTokens: 32,
-            temperature: 0
+            temperature: 0.5
         )
 
         _ = try await client.complete(request)
 
         let body = try XCTUnwrap(transport.lastBody)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertNil(object["temperature"])
+        XCTAssertEqual(object["temperature"] as? Double, 0.5)
     }
 
     func testParsesTextAndUsage() async throws {

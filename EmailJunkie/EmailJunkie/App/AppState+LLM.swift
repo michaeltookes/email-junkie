@@ -6,15 +6,19 @@ extension AppState {
 
     /// The model to use: the user's choice, or the provider default if blank.
     var resolvedLLMModel: String {
-        let trimmed = llmModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        resolvedLLMModel(for: llmModel)
+    }
+
+    func resolvedLLMModel(for model: String) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? llmProviderKind.defaultModel : trimmed
     }
 
     /// Recomputes whether the current key is verified for the currently
     /// selected provider/model pair.
-    func refreshLLMConnectionStatus() {
+    func refreshLLMConnectionStatus(llmModel model: String? = nil) {
         isLLMConnected = secrets.hasValue(for: llmProviderKind.apiKeySecret)
-            && resolvedLLMModel == verifiedLLMModel
+            && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
     }
 
     /// Switches the selected provider, reloading its stored key and status.

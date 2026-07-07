@@ -404,9 +404,9 @@ final class AppState: ObservableObject {
 
         $llmModel
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.refreshLLMConnectionStatus()
-                self?.saveSettings()
+            .sink { [weak self] model in
+                self?.refreshLLMConnectionStatus(llmModel: model)
+                self?.saveSettings(llmModel: model)
             }
             .store(in: &cancellables)
     }
@@ -462,7 +462,8 @@ final class AppState: ObservableObject {
     private func buildSettings(
         mailEmail: String? = nil,
         mailHost: String? = nil,
-        mailPort: Int? = nil
+        mailPort: Int? = nil,
+        llmModelOverride: String? = nil
     ) -> Settings {
         Settings(
             schemaVersion: Settings.currentSchemaVersion,
@@ -471,14 +472,14 @@ final class AppState: ObservableObject {
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
-            llmModel: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
             llmVerifiedModel: verifiedLLMModel
         )
     }
 
     /// Saves settings to disk (debounced).
-    func saveSettings() {
-        let settings = buildSettings()
+    func saveSettings(llmModel: String? = nil) {
+        let settings = buildSettings(llmModelOverride: llmModel)
         settingsDebouncer.debounce { [weak self] in
             self?.persistence.saveSettings(settings)
         }

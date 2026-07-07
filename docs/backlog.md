@@ -42,13 +42,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
-4. **Voice profile from Sent folder**
+4. **Voice profile from Sent folder** — *in progress*
    Derive a reusable voice profile from Sent mail and inject it into every draft prompt.
    *As Priya, I want the assistant to study my Sent folder, so that drafts sound like me and not a generic bot.*
-   - On setup (and on demand), samples recent Sent messages to derive tone, greeting/sign-off, formality, typical length, recurring phrasings.
-   - Profile stored locally and injected into every draft-generation prompt.
-   - User can view a human-readable summary of what was learned.
-   - Learning runs without blocking the UI and reports progress.
+   - ✅ On-demand "Learn my voice" samples recent `[Gmail]/Sent Mail` messages (bodies via IMAP + `MailBodyText`, quoted-reply stripped, truncated) and derives greeting/sign-off, formality, tone, typical length, recurring phrasings via the LLM (`VoiceProfiler`, tolerant JSON parsing). Covered by pure + AppState tests.
+   - ✅ Profile stored locally (`VoiceProfile.json`) and loaded on launch; `VoiceProfile.promptBlock()` renders it for prompt injection (consumed by the draft engine, item 7).
+   - ✅ Human-readable summary shown in the Settings "Voice" section; Learn / Re-learn / Forget actions.
+   - ✅ Learning runs off the main path with per-message progress; errors surfaced (no-samples, bad model reply, provider/mail errors).
+   - ⬜ **Remaining:** live-verify against a real Sent folder + Anthropic key; wire the profile into actual draft prompts when item 7 lands; "on setup" step is part of onboarding (item 2); scheduled re-learn is item 20; empty/sparse Sent cold-start is item 25.
 
 5. **Inbox watcher**
    Poll the inbox on a timer while the Mac is awake and enqueue replyable messages for drafting.

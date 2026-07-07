@@ -50,7 +50,7 @@ struct AnthropicClient: LLMClient {
         let body = RequestBody(
             model: request.model,
             maxTokens: request.maxTokens,
-            temperature: request.temperature,
+            temperature: Self.allowsSamplingParameters(model: request.model) ? request.temperature : nil,
             system: request.system,
             messages: request.messages.map { RequestBody.Message(role: $0.role.rawValue, content: $0.content) }
         )
@@ -88,6 +88,13 @@ struct AnthropicClient: LLMClient {
         }
         return "The provider returned an error."
     }
+
+    private static func allowsSamplingParameters(model: String) -> Bool {
+        let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !normalized.hasPrefix("claude-sonnet-5")
+            && !normalized.hasPrefix("claude-opus-5")
+            && !normalized.hasPrefix("claude-haiku-5")
+    }
 }
 
 // MARK: - Wire-format DTOs (file-private to keep type nesting shallow)
@@ -95,7 +102,7 @@ struct AnthropicClient: LLMClient {
 private struct RequestBody: Encodable {
     let model: String
     let maxTokens: Int
-    let temperature: Double
+    let temperature: Double?
     let system: String?
     let messages: [Message]
 

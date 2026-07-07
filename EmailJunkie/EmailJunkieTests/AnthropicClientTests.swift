@@ -43,6 +43,22 @@ final class AnthropicClientTests: XCTestCase {
         XCTAssertEqual(messages.first?["content"] as? String, "Hi")
     }
 
+    func testOmitsTemperatureForClaudeFiveModels() async throws {
+        let (client, transport) = client(json(#"{"content":[{"type":"text","text":"Hello"}]}"#))
+        let request = LLMRequest(
+            messages: [LLMMessage(role: .user, content: "Hi")],
+            model: "claude-sonnet-5",
+            maxTokens: 32,
+            temperature: 0
+        )
+
+        _ = try await client.complete(request)
+
+        let body = try XCTUnwrap(transport.lastBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertNil(object["temperature"])
+    }
+
     func testParsesTextAndUsage() async throws {
         let (client, _) = client(json(#"""
         {"content":[{"type":"text","text":"Hello "},{"type":"text","text":"there"}],

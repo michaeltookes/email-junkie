@@ -46,6 +46,7 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertFalse(appState.isTestingLLM)
         XCTAssertEqual(tester.lastAPIKey, "sk-live", "key must be trimmed before use")
         XCTAssertEqual(tester.lastModel, "claude-sonnet-4-6")
+        XCTAssertEqual(appState.verifiedLLMModel, "claude-sonnet-4-6")
         XCTAssertEqual(try? secrets.value(for: .llmAPIKey(provider: "anthropic")), "sk-live")
     }
 
@@ -93,7 +94,8 @@ final class AppStateLLMTests: XCTestCase {
             schemaVersion: Settings.currentSchemaVersion,
             pollIntervalSeconds: 300,
             llmProvider: "anthropic",
-            llmModel: "claude-opus-4-8"
+            llmModel: "claude-opus-4-8",
+            llmVerifiedModel: "claude-opus-4-8"
         ))
         let appState = makeAppState(secrets: secrets, persistence: persistence)
 
@@ -101,5 +103,41 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertEqual(appState.llmAPIKey, "sk-stored")
         XCTAssertEqual(appState.llmModel, "claude-opus-4-8")
         XCTAssertEqual(appState.resolvedLLMModel, "claude-opus-4-8")
+    }
+
+    func testLLMKeyWithoutVerifiedModelRestoresDisconnected() {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-stored"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "anthropic",
+            llmModel: "claude-opus-4-8"
+        ))
+        let appState = makeAppState(secrets: secrets, persistence: persistence)
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.llmAPIKey, "sk-stored")
+    }
+
+    func testChangingConnectedLLMModelRequiresRetest() {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-stored"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "anthropic",
+            llmModel: "claude-sonnet-4-6",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let appState = makeAppState(secrets: secrets, persistence: persistence)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        appState.llmModel = "claude-sonnet-5"
+        appState.saveSettingsSync()
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.llmAPIKey, "sk-stored")
+        let settings = persistence.loadSettings()
+        XCTAssertEqual(settings.llmModel, "claude-sonnet-5")
+        XCTAssertEqual(settings.llmVerifiedModel, "claude-sonnet-4-6")
     }
 }

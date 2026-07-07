@@ -10,6 +10,13 @@ extension AppState {
         return trimmed.isEmpty ? llmProviderKind.defaultModel : trimmed
     }
 
+    /// Recomputes whether the current key is verified for the currently
+    /// selected provider/model pair.
+    func refreshLLMConnectionStatus() {
+        isLLMConnected = secrets.hasValue(for: llmProviderKind.apiKeySecret)
+            && resolvedLLMModel == verifiedLLMModel
+    }
+
     /// Switches the selected provider, reloading its stored key and status.
     /// (With a single provider today this is a no-op path; it's the seam for
     /// when a second adapter lands.)
@@ -17,7 +24,8 @@ extension AppState {
         guard provider != llmProviderKind else { return }
         llmProviderKind = provider
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
-        isLLMConnected = secrets.hasValue(for: provider.apiKeySecret)
+        verifiedLLMModel = ""
+        refreshLLMConnectionStatus()
         llmError = nil
         saveSettings()
     }
@@ -49,6 +57,7 @@ extension AppState {
             return
         }
 
+        verifiedLLMModel = resolvedLLMModel
         saveSettings()
         isLLMConnected = true
     }
@@ -63,7 +72,9 @@ extension AppState {
             return
         }
         llmAPIKey = ""
-        isLLMConnected = false
+        verifiedLLMModel = ""
+        refreshLLMConnectionStatus()
+        saveSettings()
     }
 
     // MARK: - Error messages

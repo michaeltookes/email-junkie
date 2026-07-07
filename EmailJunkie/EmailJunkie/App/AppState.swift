@@ -80,6 +80,9 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last LLM error, if any.
     @Published var llmError: String?
 
+    /// The resolved model id that last passed a connection test.
+    var verifiedLLMModel: String
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -129,11 +132,12 @@ final class AppState: ObservableObject {
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
         self.llmProviderKind = provider
         self.llmModel = settings.llmModel
+        self.verifiedLLMModel = settings.llmVerifiedModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
 
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
-        self.isLLMConnected = secrets.hasValue(for: provider.apiKeySecret)
+        refreshLLMConnectionStatus()
 
         setupAutoSave()
     }
@@ -400,7 +404,10 @@ final class AppState: ObservableObject {
 
         $llmModel
             .dropFirst()
-            .sink { [weak self] _ in self?.saveSettings() }
+            .sink { [weak self] _ in
+                self?.refreshLLMConnectionStatus()
+                self?.saveSettings()
+            }
             .store(in: &cancellables)
     }
 
@@ -464,7 +471,8 @@ final class AppState: ObservableObject {
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
-            llmModel: llmModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            llmModel: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            llmVerifiedModel: verifiedLLMModel
         )
     }
 

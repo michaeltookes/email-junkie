@@ -8,7 +8,7 @@ import Foundation
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -32,6 +32,9 @@ struct Settings: Codable, Equatable {
     /// The chosen model id, or empty to use the provider's default model.
     var llmModel: String
 
+    /// The resolved model id that last passed a connection test.
+    var llmVerifiedModel: String
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -39,7 +42,8 @@ struct Settings: Codable, Equatable {
         mailHost: String = "imap.gmail.com",
         mailPort: Int = 993,
         llmProvider: String = "anthropic",
-        llmModel: String = ""
+        llmModel: String = "",
+        llmVerifiedModel: String = ""
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -48,6 +52,7 @@ struct Settings: Codable, Equatable {
         self.mailPort = mailPort
         self.llmProvider = llmProvider
         self.llmModel = llmModel
+        self.llmVerifiedModel = llmVerifiedModel
     }
 
     /// Default settings for a fresh install.
@@ -57,7 +62,7 @@ struct Settings: Codable, Equatable {
     )
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort, llmProvider, llmModel
+        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort, llmProvider, llmModel, llmVerifiedModel
     }
 
     init(from decoder: Decoder) throws {
@@ -69,6 +74,7 @@ struct Settings: Codable, Equatable {
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
+        llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
     }
 
     /// Returns a copy with values clamped to sane ranges.

@@ -162,6 +162,40 @@ final class AppStateDraftTests: XCTestCase {
         XCTAssertFalse(appState.isGeneratingDraft)
     }
 
+    func testGenerateDraftIgnoresResultAfterMessageListRefresh() async {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let refreshedMessage = inboxMessage(id: 9)
+        let provider = FakeAppMailProvider(
+            result: .success(()),
+            fetchResult: .success([refreshedMessage]),
+            bodyResult: .success(Data("Old body".utf8))
+        )
+        let llm = SuspendedLLMProvider()
+        let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+
+        let draftTask = Task { await appState.generateDraft(for: inboxMessage()) }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+
+        await appState.previewRecentMessages()
+        llm.completeDraft(with: .success(LLMResponse(text: "Stale reply")))
+        await draftTask.value
+
+        XCTAssertEqual(appState.recentMessages.map(\.id), [9])
+        XCTAssertNil(appState.generatedDraft)
+        XCTAssertNil(appState.draftError)
+        XCTAssertFalse(appState.isGeneratingDraft)
+    }
+
     func testGenerateDraftClearsStaleBodyError() async {
         let (appState, _) = makeConnectedAppState(
             completion: .failure(.http(status: 429, message: "slow down"))

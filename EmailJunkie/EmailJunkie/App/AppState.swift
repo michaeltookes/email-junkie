@@ -258,9 +258,12 @@ final class AppState: ObservableObject {
     func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
         let requestGeneration = nextPreviewGeneration()
         _ = nextBodyPreviewGeneration()
+        _ = nextDraftGeneration()
         clearRecentMessagePreview()
+        clearDraftPreview()
         isFetching = false
         isFetchingBody = false
+        isGeneratingDraft = false
 
         let credentials = mailCredentials
         guard credentials.isComplete else {

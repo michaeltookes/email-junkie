@@ -126,6 +126,49 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     }
 }
 
+final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
+    let didStartBodyFetch = XCTestExpectation(description: "body fetch started")
+    private let lock = NSLock()
+    private var bodyContinuation: CheckedContinuation<Data, Error>?
+    private(set) var lastCredentials: MailAccountCredentials?
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
+    }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data {
+        lock.lock()
+        lastCredentials = credentials
+        lock.unlock()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            bodyContinuation = continuation
+            lock.unlock()
+            didStartBodyFetch.fulfill()
+        }
+    }
+
+    func completeBody(with result: Result<Data, Error>) {
+        lock.lock()
+        let continuation = bodyContinuation
+        bodyContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
 final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
     private let result: Result<Void, LLMError>
     private let completion: Result<LLMResponse, LLMError>
@@ -158,6 +201,44 @@ final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
         lastAPIKey = apiKey
         lastRequest = request
         return try completion.get()
+    }
+}
+
+final class SuspendedLLMProvider: LLMProviding, @unchecked Sendable {
+    let didStartCompletion = XCTestExpectation(description: "LLM completion started")
+    private let lock = NSLock()
+    private var completionContinuation: CheckedContinuation<LLMResponse, Error>?
+    private(set) var lastProvider: LLMProviderKind?
+    private(set) var lastAPIKey: String?
+    private(set) var lastRequest: LLMRequest?
+
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {}
+
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String
+    ) async throws -> LLMResponse {
+        lock.lock()
+        lastProvider = provider
+        lastAPIKey = apiKey
+        lastRequest = request
+        lock.unlock()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            completionContinuation = continuation
+            lock.unlock()
+            didStartCompletion.fulfill()
+        }
+    }
+
+    func completeDraft(with result: Result<LLMResponse, Error>) {
+        lock.lock()
+        let continuation = completionContinuation
+        completionContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
     }
 }
 

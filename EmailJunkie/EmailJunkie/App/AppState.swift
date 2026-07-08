@@ -94,6 +94,15 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last voice-learning error, if any.
     @Published var voiceError: String?
 
+    // MARK: - Draft (preview)
+
+    /// The most recently generated reply draft, if any.
+    @Published var generatedDraft: Draft?
+    /// Whether a draft is being generated.
+    @Published var isGeneratingDraft: Bool = false
+    /// A user-facing message describing the last draft error, if any.
+    @Published var draftError: String?
+
     // MARK: - Preferences
 
     /// Whether the app launches at login (mirrors `SMAppService` state).
@@ -115,6 +124,7 @@ final class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var previewGeneration = 0
     private var bodyPreviewGeneration = 0
+    var draftGeneration = 0
     private static let legacyOAuthKeys: [SecretKey] = [
         .gmailToken,
         .googleClientID,
@@ -218,7 +228,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
-        resetRecentMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange()
         logger.info("Mailbox connected")
     }
 
@@ -240,7 +250,7 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
-        resetRecentMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
     }
 
@@ -248,9 +258,12 @@ final class AppState: ObservableObject {
     func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
         let requestGeneration = nextPreviewGeneration()
         _ = nextBodyPreviewGeneration()
+        _ = nextDraftGeneration()
         clearRecentMessagePreview()
+        clearDraftPreview()
         isFetching = false
         isFetchingBody = false
+        isGeneratingDraft = false
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
@@ -329,12 +342,15 @@ final class AppState: ObservableObject {
         return bodyPreviewGeneration
     }
 
-    private func resetRecentMessagePreviewForAccountChange() {
+    private func resetMessagePreviewForAccountChange() {
         _ = nextPreviewGeneration()
         _ = nextBodyPreviewGeneration()
+        _ = nextDraftGeneration()
         clearRecentMessagePreview()
+        clearDraftPreview()
         isFetching = false
         isFetchingBody = false
+        isGeneratingDraft = false
     }
 
     private func clearRecentMessagePreview() {
@@ -388,6 +404,7 @@ final class AppState: ObservableObject {
         $llmModel
             .dropFirst()
             .sink { [weak self] model in
+                self?.resetDraftPreviewForLLMChange()
                 self?.refreshLLMConnectionStatus(llmModel: model)
                 self?.saveSettings(llmModel: model)
             }

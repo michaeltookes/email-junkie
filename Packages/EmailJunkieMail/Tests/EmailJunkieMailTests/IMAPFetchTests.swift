@@ -40,7 +40,8 @@ final class IMAPFetchTests: XCTestCase {
         try feed(channel, "* OK [UIDVALIDITY 123456] UIDs valid\r\n")
         try feed(channel, "A2 OK [READ-WRITE] SELECT completed\r\n")
         try feed(channel, "* 2 FETCH (UID 102 ENVELOPE (\"Thu, 2 Jan 2026 10:00:00 +0000\" "
-            + "\"World\" ((\"Bob\" NIL \"bob\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
+            + "\"World\" ((\"Bob\" NIL \"bob\" \"example.com\")) NIL NIL NIL NIL NIL NIL "
+            + "\"<world@example.com>\"))\r\n")
         try feed(channel, "* 1 FETCH (UID 101 ENVELOPE (\"Wed, 1 Jan 2026 10:00:00 +0000\" "
             + "\"Hello\" ((\"Alice\" NIL \"alice\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n")
         try feed(channel, "A3 OK FETCH completed\r\n")
@@ -51,6 +52,8 @@ final class IMAPFetchTests: XCTestCase {
         XCTAssertEqual(messages[0].uidValidity, 123456)
         XCTAssertEqual(messages[0].subject, "World")
         XCTAssertEqual(messages[0].from, MailAddress(name: "Bob", email: "bob@example.com"))
+        XCTAssertEqual(messages[0].messageID, "<world@example.com>")
+        XCTAssertNil(messages[1].messageID)
         XCTAssertEqual(messages[1].id, 101)
         XCTAssertEqual(messages[1].uidValidity, 123456)
         XCTAssertEqual(messages[1].subject, "Hello")

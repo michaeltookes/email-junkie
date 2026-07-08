@@ -21,13 +21,24 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
     public var from: MailAddress?
     public var subject: String
     public var date: String
+    /// The RFC 5322 `Message-ID` (with angle brackets), when the server provides
+    /// it. Used to thread replies via `In-Reply-To`/`References`.
+    public var messageID: String?
 
-    public init(id: UInt32, uidValidity: UInt32? = nil, from: MailAddress?, subject: String, date: String) {
+    public init(
+        id: UInt32,
+        uidValidity: UInt32? = nil,
+        from: MailAddress?,
+        subject: String,
+        date: String,
+        messageID: String? = nil
+    ) {
         self.id = id
         self.uidValidity = uidValidity
         self.from = from
         self.subject = subject
         self.date = date
+        self.messageID = messageID
     }
 }
 
@@ -35,14 +46,16 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
 public enum Mailbox: Sendable, Equatable {
     case inbox
     case sent
+    case drafts
     /// A provider-specific mailbox path (e.g. a custom IMAP folder).
     case named(String)
 
-    /// The IMAP mailbox name. Sent defaults to Gmail's path.
+    /// The IMAP mailbox name. Sent/Drafts default to Gmail's paths.
     public var imapName: String {
         switch self {
         case .inbox: return "INBOX"
         case .sent: return "[Gmail]/Sent Mail"
+        case .drafts: return "[Gmail]/Drafts"
         case .named(let name): return name
         }
     }

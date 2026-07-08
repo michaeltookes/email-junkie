@@ -102,6 +102,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         var hasEnvelope = false
         var subject = ""
         var date = ""
+        var messageID: String?
     }
 
     private let email: String
@@ -215,7 +216,8 @@ final class IMAPFetchHandler: ChannelInboundHandler {
                         uidValidity: selectedUIDValidity,
                         from: message.from,
                         subject: message.subject,
-                        date: message.date
+                        date: message.date,
+                        messageID: message.messageID
                     )
                 )
             }
@@ -247,6 +249,9 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         }
         if let sender = envelope.from.first, let address = Self.address(from: sender) {
             current?.from = address
+        }
+        if let messageID = envelope.messageID {
+            current?.messageID = String(messageID)
         }
     }
 

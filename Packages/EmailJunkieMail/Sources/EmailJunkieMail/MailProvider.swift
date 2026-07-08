@@ -39,6 +39,22 @@ public protocol MailProvider: Sendable {
         uid: UInt32,
         expectedUIDValidity: UInt32?
     ) async throws -> Data
+
+    /// Appends a full RFC 822 message to `mailbox` via IMAP `APPEND`, tagging it
+    /// with the given flags (e.g. `\Draft`). Used to save a reply as a draft
+    /// without sending it. Throws `MailError` on failure.
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws
+}
+
+/// IMAP message flags supported when appending.
+public enum MailFlag: Sendable, Equatable {
+    case draft
+    case seen
 }
 
 public extension MailProvider {

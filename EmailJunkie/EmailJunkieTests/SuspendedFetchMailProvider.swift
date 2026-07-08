@@ -52,4 +52,11 @@ final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {
         lock.unlock()
         continuation?.resume(with: result)
     }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
 }

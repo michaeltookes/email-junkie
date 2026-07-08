@@ -263,7 +263,7 @@ struct SettingsView: View {
             MessageBodyView(preview: preview)
         }
         .sheet(item: $appState.generatedDraft) { draft in
-            DraftView(draft: draft)
+            DraftView(draft: draft).environmentObject(appState)
         }
     }
 
@@ -306,9 +306,10 @@ private struct MessageBodyView: View {
     }
 }
 
-/// A sheet showing a generated reply draft.
+/// A sheet showing a generated reply draft, with a "Save to Drafts" action.
 private struct DraftView: View {
     let draft: Draft
+    @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -336,7 +337,31 @@ private struct DraftView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
             }
+            Divider()
+            HStack {
+                if let saved = appState.draftSavedMessage {
+                    Label(saved, systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else if let error = appState.draftError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                Button {
+                    Task { await appState.saveGeneratedDraftToDrafts() }
+                } label: {
+                    if appState.isSavingDraft {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Save to Drafts")
+                    }
+                }
+                .disabled(appState.isSavingDraft || appState.draftSavedMessage != nil)
+            }
+            .padding()
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 460)
     }
 }

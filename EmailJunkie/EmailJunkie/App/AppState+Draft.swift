@@ -15,6 +15,7 @@ extension AppState {
         let requestGeneration = nextDraftGeneration()
         bodyError = nil
         draftError = nil
+        draftSavedMessage = nil
         generatedDraft = nil
         isGeneratingDraft = false
 
@@ -56,6 +57,8 @@ extension AppState {
                 sourceUIDValidity: message.uidValidity,
                 sourceSubject: message.subject,
                 sourceFrom: message.from,
+                sourceReplyTo: message.replyTo,
+                sourceMessageID: message.messageID,
                 replySubject: Self.replySubject(for: message.subject),
                 body: body,
                 model: llmConfiguration.model,
@@ -128,6 +131,58 @@ extension AppState {
                 apiKey: llmConfiguration.apiKey
             )
         }
+    }
+
+    /// Saves the current generated draft to the Drafts mailbox via IMAP APPEND.
+    func saveGeneratedDraftToDrafts() async {
+        draftError = nil
+        draftSavedMessage = nil
+
+        guard let draft = generatedDraft else { return }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            draftError = "Connect an email account first."
+            return
+        }
+
+        isSavingDraft = true
+        defer { isSavingDraft = false }
+
+        let outgoing = Self.outgoingMessage(
+            for: draft,
+            from: credentials.email,
+            date: Date(),
+            messageID: Self.generateMessageID(forEmail: credentials.email)
+        )
+        do {
+            try await mailProvider.appendMessage(
+                credentials,
+                mailbox: .drafts,
+                rfc822: outgoing.rfc822(),
+                flags: [.draft]
+            )
+            draftSavedMessage = "Saved to your Drafts."
+        } catch {
+            draftError = Self.draftMessage(for: error)
+        }
+    }
+
+    static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {
+        OutgoingMessage(
+            from: from,
+            to: [draft.sourceReplyTo?.email ?? draft.sourceFrom?.email].compactMap { $0 },
+            subject: draft.replySubject,
+            body: draft.body,
+            date: date,
+            messageID: messageID,
+            inReplyTo: draft.sourceMessageID,
+            references: [draft.sourceMessageID].compactMap { $0 }
+        )
+    }
+
+    static func generateMessageID(forEmail email: String) -> String {
+        let host = email.split(separator: "@").last.map(String.init) ?? "emailjunkie.local"
+        return "<\(UUID().uuidString)@\(host)>"
     }
 
     static func replySubject(for subject: String) -> String {

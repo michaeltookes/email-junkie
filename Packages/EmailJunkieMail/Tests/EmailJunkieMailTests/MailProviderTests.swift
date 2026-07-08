@@ -81,4 +81,11 @@ final class FakeMailProvider: MailProvider, @unchecked Sendable {
     ) async throws -> Data {
         Data()
     }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
 }

@@ -83,13 +83,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Approve and Deny actions available; Deny discards.
    - Multiple pending drafts are queued and individually actionable.
 
-9. **Send / save-as-draft (user-configurable)**
+9. **Send / save-as-draft (user-configurable)** — *in progress (save-as-draft done)*
    On approval, either send immediately or create a Gmail draft, per a setting.
    *As Priya, I want to choose whether approval sends immediately or just saves a Gmail draft, so that I can match my own comfort/trust level.*
-   - Setting toggles "auto-send on approve" vs "save as draft."
-   - Auto-send: reply sent via Gmail, correctly threaded (In-Reply-To/References, recipients, subject).
-   - Draft-only: a native Gmail draft is created in the right thread; nothing is sent.
-   - The approval UI clearly indicates what "Approve" will do in the current mode.
+   - ✅ **Draft-only:** a native Gmail draft is created via IMAP `APPEND` to `[Gmail]/Drafts` (`\Draft` flag), addressed to `Reply-To` when present, and threaded via `In-Reply-To`/`References` from the captured source Message-ID. RFC 822 builder (base64 body, RFC 2047 subject) + APPEND state machine covered by unit + EmbeddedChannel tests. "Save to Drafts" action in the draft preview.
+   - ⬜ **Auto-send:** reply sent via Gmail — needs a hand-rolled **SMTP** client over NIO (correct recipients/subject/threading).
+   - ⬜ Setting to toggle "auto-send on approve" vs "save as draft" (only save-as-draft is functional today).
+   - ⬜ The approval UI indicates what "Approve" will do — lands with the approval UX (item 8).
+   - ⬜ Live-verify a real draft appears + threads correctly in Gmail.
 
 11. **Distribution: signed DMG + Sparkle + Homebrew cask**
     Reuse the Prompter shipping pipeline.

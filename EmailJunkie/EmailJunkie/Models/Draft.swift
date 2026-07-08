@@ -12,6 +12,10 @@ struct Draft: Identifiable, Equatable {
     var sourceSubject: String
     /// The source message's sender.
     var sourceFrom: MailAddress?
+    /// The address replies should be sent to, when the source specified one.
+    var sourceReplyTo: MailAddress?
+    /// The source message's RFC 5322 `Message-ID`, for reply threading.
+    var sourceMessageID: String?
     /// The reply subject (`Re: …`).
     var replySubject: String
     /// The generated reply body.

@@ -45,18 +45,24 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let result: Result<Void, MailError>
     private let fetchResult: Result<[MailMessage], MailError>
     private let bodyResult: Result<Data, MailError>
+    private let appendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var lastBodyUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
+    private(set) var appendedMailbox: Mailbox?
+    private(set) var appendedRFC822: Data?
+    private(set) var appendedFlags: [MailFlag]?
 
     init(
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
-        bodyResult: Result<Data, MailError> = .success(Data())
+        bodyResult: Result<Data, MailError> = .success(Data()),
+        appendResult: Result<Void, MailError> = .success(())
     ) {
         self.result = result
         self.fetchResult = fetchResult
         self.bodyResult = bodyResult
+        self.appendResult = appendResult
     }
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {
@@ -81,6 +87,18 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         lastBodyUID = uid
         lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()
+    }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {
+        appendedMailbox = mailbox
+        appendedRFC822 = rfc822
+        appendedFlags = flags
+        try appendResult.get()
     }
 }
 
@@ -124,6 +142,13 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     ) async throws -> Data {
         Data()
     }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
 }
 
 final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
@@ -167,6 +192,13 @@ final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
         lock.unlock()
         continuation?.resume(with: result)
     }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
 }
 
 final class FakeLLMProvider: LLMProviding, @unchecked Sendable {

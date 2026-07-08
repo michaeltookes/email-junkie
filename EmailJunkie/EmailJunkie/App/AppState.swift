@@ -102,6 +102,10 @@ final class AppState: ObservableObject {
     @Published var isGeneratingDraft: Bool = false
     /// A user-facing message describing the last draft error, if any.
     @Published var draftError: String?
+    /// Whether the current draft is being saved to the Drafts mailbox.
+    @Published var isSavingDraft: Bool = false
+    /// A confirmation message shown after a successful save, if any.
+    @Published var draftSavedMessage: String?
 
     // MARK: - Preferences
 
@@ -125,11 +129,6 @@ final class AppState: ObservableObject {
     private var previewGeneration = 0
     private var bodyPreviewGeneration = 0
     var draftGeneration = 0
-    private static let legacyOAuthKeys: [SecretKey] = [
-        .gmailToken,
-        .googleClientID,
-        .googleClientSecret
-    ]
 
     // MARK: - Initialization
 
@@ -372,26 +371,6 @@ final class AppState: ObservableObject {
         credentials: MailAccountCredentials
     ) -> Bool {
         bodyPreviewGeneration == requestGeneration && mailCredentials == credentials
-    }
-
-    private func cleanupLegacyOAuthCredentials() {
-        do {
-            try removeLegacyOAuthCredentialsIfPresent()
-        } catch {
-            connectionError = Self.legacyOAuthCleanupMessage(error: error)
-        }
-    }
-
-    private func removeLegacyOAuthCredentialsIfPresent() throws {
-        var removedAnyCredential = false
-        for key in Self.legacyOAuthKeys where try secrets.value(for: key) != nil {
-            try secrets.remove(key)
-            removedAnyCredential = true
-        }
-
-        if removedAnyCredential {
-            logger.info("Legacy Gmail OAuth credentials removed")
-        }
     }
 
     /// Persists settings automatically when a tracked preference changes.

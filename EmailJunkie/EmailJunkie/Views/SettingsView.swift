@@ -319,8 +319,8 @@ private struct DraftView: View {
                     Text(draft.replySubject)
                         .font(.headline)
                         .lineLimit(2)
-                    if let sender = draft.sourceFrom?.email {
-                        Text("To: \(sender)")
+                    if let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
+                        Text("To: \(recipient)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

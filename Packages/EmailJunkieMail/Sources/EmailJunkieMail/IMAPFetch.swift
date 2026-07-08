@@ -99,6 +99,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
     private struct PartialMessage {
         var uid: UInt32?
         var from: MailAddress?
+        var replyTo: MailAddress?
         var hasEnvelope = false
         var subject = ""
         var date = ""
@@ -215,6 +216,7 @@ final class IMAPFetchHandler: ChannelInboundHandler {
                         id: uid,
                         uidValidity: selectedUIDValidity,
                         from: message.from,
+                        replyTo: message.replyTo,
                         subject: message.subject,
                         date: message.date,
                         messageID: message.messageID
@@ -249,6 +251,9 @@ final class IMAPFetchHandler: ChannelInboundHandler {
         }
         if let sender = envelope.from.first, let address = Self.address(from: sender) {
             current?.from = address
+        }
+        if let replyTo = envelope.reply.first, let address = Self.address(from: replyTo) {
+            current?.replyTo = address
         }
         if let messageID = envelope.messageID {
             current?.messageID = String(messageID)

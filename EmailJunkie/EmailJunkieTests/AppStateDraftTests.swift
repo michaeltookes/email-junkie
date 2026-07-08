@@ -6,7 +6,13 @@ import XCTest
 final class AppStateDraftTests: XCTestCase {
 
     private func inboxMessage(id: UInt32 = 5) -> MailMessage {
-        MailMessage(id: id, from: MailAddress(name: "Alice", email: "alice@x.com"), subject: "Lunch?", date: "")
+        MailMessage(
+            id: id,
+            from: MailAddress(name: "Alice", email: "alice@x.com"),
+            replyTo: MailAddress(name: "Team", email: "team@x.com"),
+            subject: "Lunch?",
+            date: ""
+        )
     }
 
     private func makeConnectedAppState(
@@ -38,6 +44,7 @@ final class AppStateDraftTests: XCTestCase {
         XCTAssertEqual(appState.generatedDraft?.body, "Sure, Thursday works!")
         XCTAssertEqual(appState.generatedDraft?.replySubject, "Re: Lunch?")
         XCTAssertEqual(appState.generatedDraft?.sourceFrom?.email, "alice@x.com")
+        XCTAssertEqual(appState.generatedDraft?.sourceReplyTo?.email, "team@x.com")
         XCTAssertNil(appState.draftError)
         XCTAssertFalse(appState.isGeneratingDraft)
         XCTAssertEqual(llm.lastAPIKey, "sk-live")

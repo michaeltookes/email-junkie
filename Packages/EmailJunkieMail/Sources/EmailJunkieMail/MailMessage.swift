@@ -19,6 +19,8 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
     /// The mailbox UIDVALIDITY captured with this UID, when the server provides it.
     public var uidValidity: UInt32?
     public var from: MailAddress?
+    /// The address replies should be sent to, when it differs from `From`.
+    public var replyTo: MailAddress?
     public var subject: String
     public var date: String
     /// The RFC 5322 `Message-ID` (with angle brackets), when the server provides
@@ -29,6 +31,7 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
         id: UInt32,
         uidValidity: UInt32? = nil,
         from: MailAddress?,
+        replyTo: MailAddress? = nil,
         subject: String,
         date: String,
         messageID: String? = nil
@@ -36,6 +39,7 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
         self.id = id
         self.uidValidity = uidValidity
         self.from = from
+        self.replyTo = replyTo
         self.subject = subject
         self.date = date
         self.messageID = messageID

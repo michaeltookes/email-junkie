@@ -11,6 +11,7 @@ final class AppStateSaveDraftTests: XCTestCase {
             sourceUIDValidity: 1,
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
+            sourceReplyTo: nil,
             sourceMessageID: "<orig@example.com>",
             replySubject: "Re: Lunch?",
             body: "Sounds good!",
@@ -91,6 +92,20 @@ final class AppStateSaveDraftTests: XCTestCase {
         XCTAssertEqual(message.subject, "Re: Lunch?")
         XCTAssertEqual(message.inReplyTo, "<orig@example.com>")
         XCTAssertEqual(message.references, ["<orig@example.com>"])
+    }
+
+    func testOutgoingMessagePrefersReplyToAddress() {
+        var draft = draft()
+        draft.sourceReplyTo = MailAddress(name: "Team Inbox", email: "team@example.com")
+
+        let message = AppState.outgoingMessage(
+            for: draft,
+            from: "me@gmail.com",
+            date: Date(timeIntervalSince1970: 1_700_000_000),
+            messageID: "<new@gmail.com>"
+        )
+
+        XCTAssertEqual(message.to, ["team@example.com"])
     }
 
     func testGeneratedMessageIDUsesSenderDomain() {

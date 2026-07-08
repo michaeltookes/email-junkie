@@ -57,6 +57,7 @@ extension AppState {
                 sourceUIDValidity: message.uidValidity,
                 sourceSubject: message.subject,
                 sourceFrom: message.from,
+                sourceReplyTo: message.replyTo,
                 sourceMessageID: message.messageID,
                 replySubject: Self.replySubject(for: message.subject),
                 body: body,
@@ -169,7 +170,7 @@ extension AppState {
     static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {
         OutgoingMessage(
             from: from,
-            to: [draft.sourceFrom?.email].compactMap { $0 },
+            to: [draft.sourceReplyTo?.email ?? draft.sourceFrom?.email].compactMap { $0 },
             subject: draft.replySubject,
             body: draft.body,
             date: date,

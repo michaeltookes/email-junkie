@@ -86,6 +86,7 @@ extension AppState {
             uid: message.id,
             expectedUIDValidity: message.uidValidity
         )
+        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return }
         let context = ReplyContext(
             senderName: message.from?.name,
             senderEmail: message.from?.email,
@@ -93,6 +94,7 @@ extension AppState {
             body: MailBodyText.plainText(from: data)
         )
         let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return }
         let draft = Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
@@ -148,6 +150,15 @@ extension AppState {
         llmConfiguration: DraftLLMConfiguration
     ) -> Bool {
         draftGeneration == requestGeneration
+            && mailCredentials == credentials
+            && currentDraftLLMConfiguration == llmConfiguration
+    }
+
+    private func isCurrentWatcherDraftRequest(
+        credentials: MailAccountCredentials,
+        llmConfiguration: DraftLLMConfiguration
+    ) -> Bool {
+        watchStatus == .watching
             && mailCredentials == credentials
             && currentDraftLLMConfiguration == llmConfiguration
     }

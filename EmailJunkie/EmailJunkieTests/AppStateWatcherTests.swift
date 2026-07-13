@@ -44,6 +44,21 @@ final class AppStateWatcherTests: XCTestCase {
         return (appState, provider, persistence)
     }
 
+    private func makeConnectedAppState(mailProvider: MailProvider, llm: LLMProviding) -> AppState {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        return AppState(persistence: persistence, secrets: secrets, mailProvider: mailProvider, llm: llm)
+    }
+
     // MARK: - Lifecycle
 
     func testStartWatchingRequiresConnection() {
@@ -108,14 +123,14 @@ final class AppStateWatcherTests: XCTestCase {
 
         XCTAssertEqual(appState.pendingDrafts.map(\.id), [1, 2])
         XCTAssertEqual(appState.pendingDraftCount, 2)
-        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1)))
-        XCTAssertTrue(persistence.processedMessages.contains(message(id: 2)))
+        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(message(id: 2), account: "me@gmail.com", mailbox: .inbox))
         XCTAssertNil(appState.watchError)
     }
 
     func testPollSkipsAlreadyProcessed() async {
         var processed = ProcessedMessages()
-        processed.insert(message(id: 1))
+        processed.insert(message(id: 1), account: "me@gmail.com", mailbox: .inbox)
         let (appState, _, _) = makeAppState(
             fetch: .success([message(id: 2), message(id: 1)]),
             processed: processed
@@ -172,6 +187,46 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(appState.watchError)
         // Processed so a persistent failure doesn't re-draft every poll.
-        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1)))
+        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testDraftAndEnqueueDoesNotCallLLMAfterWatcherStopsDuringBodyFetch() async {
+        let provider = SuspendedBodyMailProvider()
+        let llm = SuspendedLLMProvider()
+        let appState = makeConnectedAppState(mailProvider: provider, llm: llm)
+        appState.watchStatus = .watching
+
+        let draftTask = Task { try? await appState.draftAndEnqueue(message(id: 1)) }
+        await fulfillment(of: [provider.didStartBodyFetch], timeout: 1)
+
+        appState.pauseWatching()
+        provider.completeBody(with: .success(Data("Stale body".utf8)))
+        await draftTask.value
+
+        XCTAssertEqual(appState.watchStatus, .paused)
+        XCTAssertNil(llm.lastRequest)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(appState.pendingDraftCount, 0)
+    }
+
+    func testDraftAndEnqueueDropsResultAfterAccountChangesDuringLLM() async {
+        let provider = FakeAppMailProvider(
+            result: .success(()),
+            bodyResult: .success(Data("Please advise.".utf8))
+        )
+        let llm = SuspendedLLMProvider()
+        let appState = makeConnectedAppState(mailProvider: provider, llm: llm)
+        appState.watchStatus = .watching
+
+        let draftTask = Task { try? await appState.draftAndEnqueue(message(id: 1)) }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+
+        appState.mailEmail = "new@gmail.com"
+        appState.mailAppPassword = "new-pw"
+        llm.completeDraft(with: .success(LLMResponse(text: "Stale reply")))
+        await draftTask.value
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(appState.pendingDraftCount, 0)
     }
 }

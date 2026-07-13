@@ -6,8 +6,9 @@ import Foundation
 ///
 /// Each message is identified by its RFC 5322 `Message-ID` when available (stable
 /// and globally unique), falling back to `UIDVALIDITY:UID` (stable within a
-/// mailbox). Oldest keys are evicted first once `limit` is exceeded, so the store
-/// stays small while still covering any realistic poll window.
+/// mailbox) scoped to the current account and mailbox. Oldest keys are evicted
+/// first once `limit` is exceeded, so the store stays small while still covering
+/// any realistic poll window.
 struct ProcessedMessages: Codable, Equatable {
 
     /// Maximum number of remembered keys before the oldest are evicted.
@@ -30,14 +31,14 @@ struct ProcessedMessages: Codable, Equatable {
     }
 
     /// Whether `message` has already been processed.
-    func contains(_ message: MailMessage) -> Bool {
-        keys.contains(Self.key(for: message))
+    func contains(_ message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
+        keys.contains(Self.key(for: message, account: account, mailbox: mailbox))
     }
 
     /// Records `message` as processed, evicting the oldest keys past `limit`.
     /// No-op if already present (its position is left unchanged).
-    mutating func insert(_ message: MailMessage) {
-        let key = Self.key(for: message)
+    mutating func insert(_ message: MailMessage, account: String, mailbox: Mailbox) {
+        let key = Self.key(for: message, account: account, mailbox: mailbox)
         guard !keys.contains(key) else { return }
         keys.append(key)
         if keys.count > Self.limit {
@@ -46,12 +47,14 @@ struct ProcessedMessages: Codable, Equatable {
     }
 
     /// A stable identity for a message: its Message-ID when present, else a
-    /// `UIDVALIDITY:UID` composite (which is stable within a mailbox).
-    static func key(for message: MailMessage) -> String {
+    /// scoped `UIDVALIDITY:UID` composite (stable within one account/mailbox).
+    static func key(for message: MailMessage, account: String, mailbox: Mailbox) -> String {
         if let messageID = message.messageID, !messageID.isEmpty {
             return "mid:\(messageID)"
         }
+        let account = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let mailbox = mailbox.imapName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let validity = message.uidValidity.map(String.init) ?? "?"
-        return "uid:\(validity):\(message.id)"
+        return "uid:acct=\(account)|mailbox=\(mailbox)|validity=\(validity)|uid=\(message.id)"
     }
 }

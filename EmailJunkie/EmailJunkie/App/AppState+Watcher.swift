@@ -89,9 +89,12 @@ extension AppState {
         // Oldest first so enqueued drafts read in chronological order.
         for message in messages.reversed() {
             guard watchStatus == .watching, mailCredentials == credentials else { break }
-            guard isReplyable(message), !processedMessages.contains(message) else { continue }
+            guard isReplyable(message),
+                  !processedMessages.contains(message, account: credentials.email, mailbox: .inbox) else {
+                continue
+            }
 
-            markProcessed(message)
+            markProcessed(message, account: credentials.email, mailbox: .inbox)
             do {
                 try await draftAndEnqueue(message)
             } catch {
@@ -114,8 +117,8 @@ extension AppState {
     }
 
     /// Records a message as processed and persists the updated set.
-    private func markProcessed(_ message: MailMessage) {
-        processedMessages.insert(message)
+    private func markProcessed(_ message: MailMessage, account: String, mailbox: Mailbox) {
+        processedMessages.insert(message, account: account, mailbox: mailbox)
         persistence.saveProcessedMessages(processedMessages)
     }
 }

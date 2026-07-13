@@ -166,6 +166,75 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     ) async throws {}
 }
 
+final class SuspendedSendMailProvider: MailProvider, @unchecked Sendable {
+    let didStartSend = XCTestExpectation(description: "mail send started")
+    private let lock = NSLock()
+    private var sendContinuation: CheckedContinuation<Void, Error>?
+    private var sendCount = 0
+    private var capturedEnvelope: SMTPEnvelope?
+
+    var sentMessageCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return sendCount
+    }
+
+    var sentEnvelope: SMTPEnvelope? {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedEnvelope
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
+    }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data {
+        Data()
+    }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            sendCount += 1
+            capturedEnvelope = envelope
+            sendContinuation = continuation
+            lock.unlock()
+            didStartSend.fulfill()
+        }
+    }
+
+    func completeSend(with result: Result<Void, Error>) {
+        lock.lock()
+        let continuation = sendContinuation
+        sendContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
+}
+
 final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
     let didStartBodyFetch = XCTestExpectation(description: "body fetch started")
     private let lock = NSLock()

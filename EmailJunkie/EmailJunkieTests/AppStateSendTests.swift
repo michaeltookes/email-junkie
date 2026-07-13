@@ -74,6 +74,44 @@ final class AppStateSendTests: XCTestCase {
         XCTAssertTrue(rfc822.contains("In-Reply-To: <orig@example.com>"))
     }
 
+    func testApproveWithAutoSendIgnoresSecondApprovalWhileSendInFlight() async {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: SendBehavior.autoSend.rawValue
+        ))
+        let provider = SuspendedSendMailProvider()
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()))
+        )
+        appState.mailAppPassword = "app-pw"
+        appState.generatedDraft = draft()
+
+        let firstApproval = Task { await appState.approveGeneratedDraft() }
+        await fulfillment(of: [provider.didStartSend], timeout: 1)
+        XCTAssertTrue(appState.isSendingDraft)
+
+        await appState.approveGeneratedDraft()
+
+        XCTAssertEqual(provider.sentMessageCount, 1)
+        XCTAssertEqual(provider.sentEnvelope?.recipients, ["alice@example.com"])
+
+        provider.completeSend(with: .success(()))
+        await firstApproval.value
+
+        XCTAssertEqual(provider.sentMessageCount, 1)
+        XCTAssertEqual(appState.draftSentMessage, "Sent.")
+        XCTAssertFalse(appState.isSendingDraft)
+        XCTAssertNil(appState.generatedDraft)
+    }
+
     func testApproveWithSaveAsDraftAppendsInsteadOfSending() async {
         let (appState, provider) = makeAppState(sendBehavior: .saveAsDraft)
 

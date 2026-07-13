@@ -149,6 +149,8 @@ extension AppState {
 
     /// Sends the current generated draft immediately over SMTP.
     func sendGeneratedDraft() async {
+        guard !isSendingDraft, !isSavingDraft else { return }
+
         draftError = nil
         draftSentMessage = nil
         draftSavedMessage = nil
@@ -189,6 +191,8 @@ extension AppState {
 
     /// Saves the current generated draft to the Drafts mailbox via IMAP APPEND.
     func saveGeneratedDraftToDrafts() async {
+        guard !isSavingDraft, !isSendingDraft else { return }
+
         draftError = nil
         draftSavedMessage = nil
 

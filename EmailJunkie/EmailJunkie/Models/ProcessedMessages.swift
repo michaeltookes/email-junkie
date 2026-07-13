@@ -18,21 +18,26 @@ struct ProcessedMessages: Codable, Equatable {
     private(set) var keys: [String]
     /// Account/mailbox scopes that have had their initial watcher baseline seeded.
     private(set) var baselines: [String]
+    /// Account/mailbox scopes and local times when initial baseline capture began.
+    private(set) var baselineStarts: [String: Date]
 
-    init(keys: [String] = [], baselines: [String] = []) {
+    init(keys: [String] = [], baselines: [String] = [], baselineStarts: [String: Date] = [:]) {
         self.keys = keys
         self.baselines = baselines
+        self.baselineStarts = baselineStarts
     }
 
     enum CodingKeys: String, CodingKey {
         case keys
         case baselines
+        case baselineStarts
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         keys = try container.decodeIfPresent([String].self, forKey: .keys) ?? []
         baselines = try container.decodeIfPresent([String].self, forKey: .baselines) ?? []
+        baselineStarts = try container.decodeIfPresent([String: Date].self, forKey: .baselineStarts) ?? [:]
     }
 
     /// Whether `message` has already been processed.
@@ -61,6 +66,22 @@ struct ProcessedMessages: Codable, Equatable {
         let key = Self.baselineKey(account: account, mailbox: mailbox)
         guard !baselines.contains(key) else { return }
         baselines.append(key)
+        baselineStarts.removeValue(forKey: key)
+    }
+
+    /// Records when initial baseline capture began for this watcher scope.
+    mutating func setBaselineStart(account: String, mailbox: Mailbox, date: Date) {
+        baselineStarts[Self.baselineKey(account: account, mailbox: mailbox)] = date
+    }
+
+    /// Whether the watcher has started initial baseline capture for this scope.
+    func hasBaselineStart(account: String, mailbox: Mailbox) -> Bool {
+        baselineStartDate(account: account, mailbox: mailbox) != nil
+    }
+
+    /// The local time when initial baseline capture began for this scope, if any.
+    func baselineStartDate(account: String, mailbox: Mailbox) -> Date? {
+        baselineStarts[Self.baselineKey(account: account, mailbox: mailbox)]
     }
 
     /// A stable identity for a message: its Message-ID when present, else a

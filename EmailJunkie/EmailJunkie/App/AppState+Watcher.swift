@@ -26,6 +26,7 @@ extension AppState {
             return
         }
         watchError = nil
+        recordWatcherBaselineStartIfNeeded(account: mailCredentials.email, mailbox: .inbox)
         watchStatus = .watching
         inboxWatcher.start()
         logger.info("Inbox watching started")
@@ -88,12 +89,17 @@ extension AppState {
         guard watchStatus == .watching, mailCredentials == credentials else { return }
         watchError = nil
 
-        if seedWatcherBaselineIfNeeded(messages: messages, account: credentials.email, mailbox: mailbox) {
+        let messagesToProcess = messagesAfterSeedingWatcherBaselineIfNeeded(
+            messages: messages,
+            account: credentials.email,
+            mailbox: mailbox
+        )
+        if messagesToProcess.isEmpty {
             return
         }
 
         // Oldest first so enqueued drafts read in chronological order.
-        for message in messages.reversed() {
+        for message in messagesToProcess.reversed() {
             guard watchStatus == .watching, mailCredentials == credentials else { break }
             await draftMessageIfNeeded(message, credentials: credentials, mailbox: mailbox)
         }
@@ -114,6 +120,12 @@ extension AppState {
     /// Records a message as processed and persists the updated set.
     private func markProcessed(_ message: MailMessage, account: String, mailbox: Mailbox) {
         processedMessages.insert(message, account: account, mailbox: mailbox)
+        persistence.saveProcessedMessages(processedMessages)
+    }
+
+    private func recordWatcherBaselineStartIfNeeded(account: String, mailbox: Mailbox, date: Date = Date()) {
+        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return }
+        processedMessages.setBaselineStart(account: account, mailbox: mailbox, date: date)
         persistence.saveProcessedMessages(processedMessages)
     }
 
@@ -138,19 +150,33 @@ extension AppState {
         }
     }
 
-    private func seedWatcherBaselineIfNeeded(
+    private func messagesAfterSeedingWatcherBaselineIfNeeded(
         messages: [MailMessage],
         account: String,
         mailbox: Mailbox
-    ) -> Bool {
-        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return false }
+    ) -> [MailMessage] {
+        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return messages }
+
+        let baselineStartDate = processedMessages.baselineStartDate(account: account, mailbox: mailbox)
+        var baselineMessages: [MailMessage] = []
+        var messagesToProcess: [MailMessage] = []
+
         for message in messages {
+            if let baselineStartDate,
+               Self.isMessageDate(message.date, onOrAfter: baselineStartDate) {
+                messagesToProcess.append(message)
+            } else {
+                baselineMessages.append(message)
+            }
+        }
+
+        for message in baselineMessages {
             processedMessages.insert(message, account: account, mailbox: mailbox)
         }
         processedMessages.insertBaseline(account: account, mailbox: mailbox)
         persistence.saveProcessedMessages(processedMessages)
-        logger.info("Inbox watcher baseline seeded with \(messages.count) messages")
-        return true
+        logger.info("Inbox watcher baseline seeded: \(baselineMessages.count) historical, \(messagesToProcess.count) post-start eligible")
+        return messagesToProcess
     }
 
     private func hasPendingDraft(for message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
@@ -168,5 +194,32 @@ extension AppState {
             let matchesUID = draft.sourceUIDValidity == message.uidValidity && draft.id == message.id
             return matchesMessageID || matchesUID
         }
+    }
+
+    private static func isMessageDate(_ value: String, onOrAfter startDate: Date) -> Bool {
+        guard let date = parsedMessageDate(value) else { return false }
+        return date >= startDate
+    }
+
+    private static func parsedMessageDate(_ value: String) -> Date? {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        for format in [
+            "EEE, d MMM yyyy HH:mm:ss Z",
+            "d MMM yyyy HH:mm:ss Z",
+            "EEE, d MMM yyyy HH:mm Z",
+            "d MMM yyyy HH:mm Z"
+        ] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
     }
 }

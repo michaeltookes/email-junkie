@@ -5,12 +5,17 @@ import XCTest
 @MainActor
 final class AppStateWatcherTests: XCTestCase {
 
-    private func message(id: UInt32, from: String = "alice@x.com", messageID: String? = nil) -> MailMessage {
+    private func message(
+        id: UInt32,
+        from: String = "alice@x.com",
+        messageID: String? = nil,
+        date: String = ""
+    ) -> MailMessage {
         MailMessage(
             id: id,
             from: MailAddress(name: "Alice", email: from),
             subject: "Subject \(id)",
-            date: "",
+            date: date,
             messageID: messageID ?? "<\(id)@x.com>"
         )
     }
@@ -18,6 +23,12 @@ final class AppStateWatcherTests: XCTestCase {
     private func baselineProcessed() -> ProcessedMessages {
         var processed = ProcessedMessages()
         processed.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
+        return processed
+    }
+
+    private func baselineStartProcessed(_ date: Date) -> ProcessedMessages {
+        var processed = ProcessedMessages()
+        processed.setBaselineStart(account: "me@gmail.com", mailbox: .inbox, date: date)
         return processed
     }
 
@@ -165,6 +176,26 @@ final class AppStateWatcherTests: XCTestCase {
 
         XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertEqual(persistence.processedSaveCount, 1)
+    }
+
+    func testFirstSuccessfulPollAfterBaselineStartDraftsOnlyPostStartMessages() async {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let historical = message(id: 1, date: "Tue, 14 Nov 2023 22:13:19 +0000")
+        let postStart = message(id: 2, date: "Tue, 14 Nov 2023 22:13:21 +0000")
+        let (appState, provider, persistence) = makeAppState(
+            fetch: .success([postStart, historical]),
+            processed: baselineStartProcessed(start)
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [2])
+        XCTAssertEqual(provider.bodyFetchCallCount, 1)
+        XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(historical, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(persistence.processedMessages.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
     }
 
     func testPollEnqueuesDraftsOldestFirst() async {

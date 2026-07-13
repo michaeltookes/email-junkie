@@ -16,6 +16,7 @@ extension AppState {
         bodyError = nil
         draftError = nil
         draftSavedMessage = nil
+        draftSentMessage = nil
         generatedDraft = nil
         isGeneratingDraft = false
 
@@ -80,6 +81,8 @@ extension AppState {
     func clearDraftPreview() {
         generatedDraft = nil
         draftError = nil
+        draftSavedMessage = nil
+        draftSentMessage = nil
     }
 
     func resetDraftPreviewForLLMChange() {
@@ -130,6 +133,57 @@ extension AppState {
                 provider: llmConfiguration.provider,
                 apiKey: llmConfiguration.apiKey
             )
+        }
+    }
+
+    /// Approves the current draft, dispatching on the user's send-behavior
+    /// setting: send immediately over SMTP, or save a Gmail draft.
+    func approveGeneratedDraft() async {
+        switch sendBehavior {
+        case .autoSend:
+            await sendGeneratedDraft()
+        case .saveAsDraft:
+            await saveGeneratedDraftToDrafts()
+        }
+    }
+
+    /// Sends the current generated draft immediately over SMTP.
+    func sendGeneratedDraft() async {
+        draftError = nil
+        draftSentMessage = nil
+        draftSavedMessage = nil
+
+        guard let draft = generatedDraft else { return }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            draftError = "Connect an email account first."
+            return
+        }
+
+        let outgoing = Self.outgoingMessage(
+            for: draft,
+            from: credentials.email,
+            date: Date(),
+            messageID: Self.generateMessageID(forEmail: credentials.email)
+        )
+        guard !outgoing.to.isEmpty else {
+            draftError = "This draft has no recipient address to send to."
+            return
+        }
+
+        isSendingDraft = true
+        defer { isSendingDraft = false }
+
+        do {
+            try await mailProvider.sendMessage(
+                credentials,
+                rfc822: outgoing.rfc822(),
+                envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
+            )
+            draftSentMessage = "Sent."
+            generatedDraft = nil
+        } catch {
+            draftError = Self.draftMessage(for: error)
         }
     }
 

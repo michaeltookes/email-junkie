@@ -46,23 +46,28 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let fetchResult: Result<[MailMessage], MailError>
     private let bodyResult: Result<Data, MailError>
     private let appendResult: Result<Void, MailError>
+    private let sendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var lastBodyUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var appendedMailbox: Mailbox?
     private(set) var appendedRFC822: Data?
     private(set) var appendedFlags: [MailFlag]?
+    private(set) var sentRFC822: Data?
+    private(set) var sentEnvelope: SMTPEnvelope?
 
     init(
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
         bodyResult: Result<Data, MailError> = .success(Data()),
-        appendResult: Result<Void, MailError> = .success(())
+        appendResult: Result<Void, MailError> = .success(()),
+        sendResult: Result<Void, MailError> = .success(())
     ) {
         self.result = result
         self.fetchResult = fetchResult
         self.bodyResult = bodyResult
         self.appendResult = appendResult
+        self.sendResult = sendResult
     }
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {
@@ -99,6 +104,16 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         appendedRFC822 = rfc822
         appendedFlags = flags
         try appendResult.get()
+    }
+
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws {
+        sentRFC822 = rfc822
+        sentEnvelope = envelope
+        try sendResult.get()
     }
 }
 

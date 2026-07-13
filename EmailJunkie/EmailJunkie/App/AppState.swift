@@ -106,6 +106,10 @@ final class AppState: ObservableObject {
     @Published var isSavingDraft: Bool = false
     /// A confirmation message shown after a successful save, if any.
     @Published var draftSavedMessage: String?
+    /// Whether the current draft is being sent over SMTP.
+    @Published var isSendingDraft: Bool = false
+    /// A confirmation message shown after a successful send, if any.
+    @Published var draftSentMessage: String?
 
     // MARK: - Preferences
 
@@ -114,6 +118,9 @@ final class AppState: ObservableObject {
 
     /// How often (in seconds) the inbox is polled while the Mac is awake.
     @Published var pollIntervalSeconds: Int
+
+    /// What approving a draft does: save a Gmail draft or send immediately.
+    @Published var sendBehavior: SendBehavior
 
     // MARK: - Private
 
@@ -145,6 +152,7 @@ final class AppState: ObservableObject {
 
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
+        self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
@@ -380,6 +388,11 @@ final class AppState: ObservableObject {
             .sink { [weak self] _ in self?.saveSettings() }
             .store(in: &cancellables)
 
+        $sendBehavior
+            .dropFirst()
+            .sink { [weak self] _ in self?.saveSettings() }
+            .store(in: &cancellables)
+
         $llmModel
             .dropFirst()
             .sink { [weak self] model in
@@ -452,7 +465,8 @@ final class AppState: ObservableObject {
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
-            llmVerifiedModel: verifiedLLMModel
+            llmVerifiedModel: verifiedLLMModel,
+            sendBehavior: sendBehavior.rawValue
         )
     }
 

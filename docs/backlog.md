@@ -83,14 +83,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - Approve and Deny actions available; Deny discards.
    - Multiple pending drafts are queued and individually actionable.
 
-9. **Send / save-as-draft (user-configurable)** — *in progress (save-as-draft done)*
+9. **Send / save-as-draft (user-configurable)** — *in progress (send + save-as-draft + toggle done; live-verify remaining)*
    On approval, either send immediately or create a Gmail draft, per a setting.
    *As Priya, I want to choose whether approval sends immediately or just saves a Gmail draft, so that I can match my own comfort/trust level.*
-   - ✅ **Draft-only:** a native Gmail draft is created via IMAP `APPEND` to `[Gmail]/Drafts` (`\Draft` flag), addressed to `Reply-To` when present, and threaded via `In-Reply-To`/`References` from the captured source Message-ID. RFC 822 builder (base64 body, RFC 2047 subject) + APPEND state machine covered by unit + EmbeddedChannel tests. "Save to Drafts" action in the draft preview.
-   - ⬜ **Auto-send:** reply sent via Gmail — needs a hand-rolled **SMTP** client over NIO (correct recipients/subject/threading).
-   - ⬜ Setting to toggle "auto-send on approve" vs "save as draft" (only save-as-draft is functional today).
-   - ⬜ The approval UI indicates what "Approve" will do — lands with the approval UX (item 8).
-   - ⬜ Live-verify a real draft appears + threads correctly in Gmail.
+   - ✅ **Draft-only:** a native Gmail draft is created via IMAP `APPEND` to `[Gmail]/Drafts` (`\Draft` flag), addressed to `Reply-To` when present, and threaded via `In-Reply-To`/`References` from the captured source Message-ID. RFC 822 builder (base64 body, RFC 2047 subject) + APPEND state machine covered by unit + EmbeddedChannel tests.
+   - ✅ **Auto-send:** reply submitted over a hand-rolled **SMTP** client on NIO (implicit TLS on 465, `AUTH LOGIN`, `MAIL FROM`/`RCPT TO`/`DATA` with dot-stuffing). Reuses the same RFC 822 builder for correct subject/threading; SMTP host derived from the IMAP host (`imap.` → `smtp.`). Response decoder + send state machine covered by EmbeddedChannel tests.
+   - ✅ **Toggle:** `SendBehavior` setting (save-as-draft vs auto-send, schema v5) with a "On approve" picker in Settings; `approveGeneratedDraft()` dispatches to send or save. The draft preview's action reflects the choice ("Send now" vs "Save to Drafts").
+   - ⬜ The approval UI indicates what "Approve" will do — lands with the approval UX (item 8); the Settings preview already reflects it.
+   - ⬜ Live-verify a real send + a real draft appear and thread correctly in Gmail (against a real account + app password).
 
 11. **Distribution: signed DMG + Sparkle + Homebrew cask**
     Reuse the Prompter shipping pipeline.

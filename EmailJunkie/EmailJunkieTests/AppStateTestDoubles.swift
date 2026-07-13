@@ -46,23 +46,28 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let fetchResult: Result<[MailMessage], MailError>
     private let bodyResult: Result<Data, MailError>
     private let appendResult: Result<Void, MailError>
+    private let sendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var lastBodyUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var appendedMailbox: Mailbox?
     private(set) var appendedRFC822: Data?
     private(set) var appendedFlags: [MailFlag]?
+    private(set) var sentRFC822: Data?
+    private(set) var sentEnvelope: SMTPEnvelope?
 
     init(
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
         bodyResult: Result<Data, MailError> = .success(Data()),
-        appendResult: Result<Void, MailError> = .success(())
+        appendResult: Result<Void, MailError> = .success(()),
+        sendResult: Result<Void, MailError> = .success(())
     ) {
         self.result = result
         self.fetchResult = fetchResult
         self.bodyResult = bodyResult
         self.appendResult = appendResult
+        self.sendResult = sendResult
     }
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {
@@ -99,6 +104,16 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         appendedRFC822 = rfc822
         appendedFlags = flags
         try appendResult.get()
+    }
+
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws {
+        sentRFC822 = rfc822
+        sentEnvelope = envelope
+        try sendResult.get()
     }
 }
 
@@ -149,6 +164,75 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
         rfc822: Data,
         flags: [MailFlag]
     ) async throws {}
+}
+
+final class SuspendedSendMailProvider: MailProvider, @unchecked Sendable {
+    let didStartSend = XCTestExpectation(description: "mail send started")
+    private let lock = NSLock()
+    private var sendContinuation: CheckedContinuation<Void, Error>?
+    private var sendCount = 0
+    private var capturedEnvelope: SMTPEnvelope?
+
+    var sentMessageCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return sendCount
+    }
+
+    var sentEnvelope: SMTPEnvelope? {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedEnvelope
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        []
+    }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data {
+        Data()
+    }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            sendCount += 1
+            capturedEnvelope = envelope
+            sendContinuation = continuation
+            lock.unlock()
+            didStartSend.fulfill()
+        }
+    }
+
+    func completeSend(with result: Result<Void, Error>) {
+        lock.lock()
+        let continuation = sendContinuation
+        sendContinuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
 }
 
 final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {

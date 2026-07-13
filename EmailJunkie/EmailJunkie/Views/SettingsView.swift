@@ -22,6 +22,16 @@ struct SettingsView: View {
                     in: 30...3600,
                     step: 30
                 )
+
+                Picker("On approve", selection: $appState.sendBehavior) {
+                    Text("Save as draft").tag(SendBehavior.saveAsDraft)
+                    Text("Send immediately").tag(SendBehavior.autoSend)
+                }
+                Text(appState.sendBehavior == .autoSend
+                     ? "Approving a draft sends it right away over SMTP."
+                     : "Approving a draft saves it to your Gmail Drafts to send yourself.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Email account") {
@@ -339,8 +349,8 @@ private struct DraftView: View {
             }
             Divider()
             HStack {
-                if let saved = appState.draftSavedMessage {
-                    Label(saved, systemImage: "checkmark.circle")
+                if let confirmation = appState.draftSentMessage ?? appState.draftSavedMessage {
+                    Label(confirmation, systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundStyle(.green)
                 } else if let error = appState.draftError {
@@ -350,18 +360,26 @@ private struct DraftView: View {
                 }
                 Spacer()
                 Button {
-                    Task { await appState.saveGeneratedDraftToDrafts() }
+                    Task { await appState.approveGeneratedDraft() }
                 } label: {
-                    if appState.isSavingDraft {
+                    if isBusy {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Save to Drafts")
+                        Text(appState.sendBehavior == .autoSend ? "Send now" : "Save to Drafts")
                     }
                 }
-                .disabled(appState.isSavingDraft || appState.draftSavedMessage != nil)
+                .disabled(isBusy || isDone)
             }
             .padding()
         }
         .frame(width: 480, height: 460)
+    }
+
+    private var isBusy: Bool {
+        appState.isSavingDraft || appState.isSendingDraft
+    }
+
+    private var isDone: Bool {
+        appState.draftSavedMessage != nil || appState.draftSentMessage != nil
     }
 }

@@ -1,5 +1,16 @@
 import Foundation
 
+/// What happens when the user approves a generated draft.
+enum SendBehavior: String, CaseIterable, Equatable {
+    /// Create a Gmail draft via IMAP `APPEND` (nothing is sent).
+    case saveAsDraft
+    /// Send the reply immediately over SMTP.
+    case autoSend
+
+    /// The safer default: save a draft rather than send automatically.
+    static let `default`: SendBehavior = .saveAsDraft
+}
+
 /// Non-secret application settings, persisted as JSON.
 ///
 /// `schemaVersion` lets future versions migrate older files, and unknown/missing
@@ -8,7 +19,7 @@ import Foundation
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -35,6 +46,10 @@ struct Settings: Codable, Equatable {
     /// The resolved model id that last passed a connection test.
     var llmVerifiedModel: String
 
+    /// What approving a draft does (raw value of `SendBehavior`). Stored as a
+    /// string so an unknown/future value decodes gracefully to the default.
+    var sendBehavior: String
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -43,7 +58,8 @@ struct Settings: Codable, Equatable {
         mailPort: Int = 993,
         llmProvider: String = "anthropic",
         llmModel: String = "",
-        llmVerifiedModel: String = ""
+        llmVerifiedModel: String = "",
+        sendBehavior: String = SendBehavior.default.rawValue
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -53,6 +69,7 @@ struct Settings: Codable, Equatable {
         self.llmProvider = llmProvider
         self.llmModel = llmModel
         self.llmVerifiedModel = llmVerifiedModel
+        self.sendBehavior = sendBehavior
     }
 
     /// Default settings for a fresh install.
@@ -62,7 +79,8 @@ struct Settings: Codable, Equatable {
     )
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort, llmProvider, llmModel, llmVerifiedModel
+        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort
+        case llmProvider, llmModel, llmVerifiedModel, sendBehavior
     }
 
     init(from decoder: Decoder) throws {
@@ -75,6 +93,7 @@ struct Settings: Codable, Equatable {
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
+        sendBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior) ?? SendBehavior.default.rawValue
     }
 
     /// Returns a copy with values clamped to sane ranges.

@@ -49,6 +49,31 @@ public protocol MailProvider: Sendable {
         rfc822: Data,
         flags: [MailFlag]
     ) async throws
+
+    /// Submits a full RFC 822 message for delivery over SMTP (implicit TLS),
+    /// authenticating with the app password. `envelope` carries the SMTP-level
+    /// sender and recipients (`MAIL FROM` / `RCPT TO`), which need not match the
+    /// message's display headers. Throws `MailError` on failure.
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws
+}
+
+/// The SMTP-level addressing for a message: the return-path sender and the
+/// recipients the server should deliver to. Distinct from the display `From:`/
+/// `To:` headers in the message body.
+public struct SMTPEnvelope: Sendable, Equatable {
+    /// The `MAIL FROM` return-path address (bare, no display name).
+    public var sender: String
+    /// The `RCPT TO` recipient addresses (bare, no display names).
+    public var recipients: [String]
+
+    public init(sender: String, recipients: [String]) {
+        self.sender = sender
+        self.recipients = recipients
+    }
 }
 
 /// IMAP message flags supported when appending.
@@ -69,5 +94,16 @@ public extension MailProvider {
             uid: uid,
             expectedUIDValidity: nil
         )
+    }
+
+    /// Default: sending is unsupported. Providers that can submit mail (e.g.
+    /// `IMAPMailProvider` via SMTP) override this; other conformers inherit a
+    /// clear failure rather than a compile-time requirement.
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws {
+        throw MailError.commandFailed("This provider does not support sending mail.")
     }
 }

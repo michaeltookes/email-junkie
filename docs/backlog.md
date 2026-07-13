@@ -51,14 +51,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ Learning runs off the main path with per-message progress; errors surfaced (no-samples, bad model reply, provider/mail errors).
    - ⬜ **Remaining:** live-verify against a real Sent folder + Anthropic key; wire the profile into actual draft prompts when item 7 lands; "on setup" step is part of onboarding (item 2); scheduled re-learn is item 20; empty/sparse Sent cold-start is item 25.
 
-5. **Inbox watcher**
-   Poll the inbox on a timer while the Mac is awake and enqueue replyable messages for drafting.
-   *As Priya, I want the app to notice new emails that need a reply while my Mac is on, so that drafts are ready when I check.*
-   - Inbox polled on a configurable interval while the Mac is awake; resumes cleanly on wake.
-   - Newly-arrived, plausibly-replyable messages are enqueued for drafting.
-   - Already-processed messages are tracked and never drafted twice.
-   - No claim of 24/7 coverage; sleep/wake behavior is well-defined.
-
 6. **Pluggable LLM provider layer** — *in progress*
    Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 16) drops in cleanly.
    *As Sam, I want to choose which LLM provider drafts my replies, so that I'm not locked to one vendor and can keep data where I want.*

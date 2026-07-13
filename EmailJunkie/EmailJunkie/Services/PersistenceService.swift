@@ -19,6 +19,11 @@ protocol PersistenceProvider {
     func saveVoiceProfile(_ profile: VoiceProfile)
     /// Removes the stored voice profile.
     func removeVoiceProfile()
+
+    /// The set of inbox messages the watcher has already processed.
+    func loadProcessedMessages() -> ProcessedMessages
+    /// Persists the processed-message set (replaces the previous one).
+    func saveProcessedMessages(_ processed: ProcessedMessages)
 }
 
 /// File-based persistence for non-secret application settings.
@@ -35,6 +40,7 @@ final class PersistenceService: PersistenceProvider {
 
     private let settingsURL: URL
     private let voiceProfileURL: URL
+    private let processedMessagesURL: URL
     private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
@@ -60,6 +66,7 @@ final class PersistenceService: PersistenceProvider {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         settingsURL = directory.appendingPathComponent("Settings.json")
         voiceProfileURL = directory.appendingPathComponent("VoiceProfile.json")
+        processedMessagesURL = directory.appendingPathComponent("ProcessedMessages.json")
     }
 
     // MARK: - Settings
@@ -131,6 +138,32 @@ final class PersistenceService: PersistenceProvider {
     func removeVoiceProfile() {
         ioQueue.async { [voiceProfileURL] in
             try? FileManager.default.removeItem(at: voiceProfileURL)
+        }
+    }
+
+    // MARK: - Processed Messages
+
+    func loadProcessedMessages() -> ProcessedMessages {
+        guard FileManager.default.fileExists(atPath: processedMessagesURL.path) else {
+            return ProcessedMessages()
+        }
+        do {
+            let data = try Data(contentsOf: processedMessagesURL)
+            return try decoder.decode(ProcessedMessages.self, from: data)
+        } catch {
+            logger.error("Failed to load processed messages: \(error.localizedDescription)")
+            return ProcessedMessages()
+        }
+    }
+
+    func saveProcessedMessages(_ processed: ProcessedMessages) {
+        ioQueue.async { [encoder, processedMessagesURL] in
+            do {
+                let data = try encoder.encode(processed)
+                try data.write(to: processedMessagesURL, options: .atomic)
+            } catch {
+                logger.error("Failed to save processed messages: \(error.localizedDescription)")
+            }
         }
     }
 }

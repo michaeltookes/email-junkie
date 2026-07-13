@@ -122,6 +122,26 @@ final class AppState: ObservableObject {
     /// What approving a draft does: save a Gmail draft or send immediately.
     @Published var sendBehavior: SendBehavior
 
+    // MARK: - Inbox Watcher
+
+    /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
+    @Published var pendingDrafts: [Draft] = []
+
+    /// A user-facing message describing the last inbox-poll error, if any.
+    @Published var watchError: String?
+
+    /// Messages the watcher has already handled, so none is drafted twice.
+    var processedMessages: ProcessedMessages
+
+    /// Reentrancy guard so overlapping polls can't double-process the inbox.
+    var isPollingInbox = false
+
+    /// The scheduling half of the watcher; the poll policy is `pollInboxOnce`.
+    private(set) var inboxWatcher: InboxWatcher!
+
+    /// How many recent inbox messages each poll inspects.
+    let watchFetchLimit = 20
+
     // MARK: - Private
 
     /// Internal (not private) so the `AppState+Voice` extension can reach it.
@@ -133,8 +153,8 @@ final class AppState: ObservableObject {
     let llm: LLMProviding
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
-    private var previewGeneration = 0
-    private var bodyPreviewGeneration = 0
+    var previewGeneration = 0
+    var bodyPreviewGeneration = 0
     var draftGeneration = 0
 
     // MARK: - Initialization
@@ -153,6 +173,7 @@ final class AppState: ObservableObject {
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
+        self.processedMessages = persistence.loadProcessedMessages()
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
@@ -172,6 +193,11 @@ final class AppState: ObservableObject {
         refreshLLMConnectionStatus()
 
         setupAutoSave()
+
+        self.inboxWatcher = InboxWatcher(
+            interval: { [weak self] in TimeInterval(self?.pollIntervalSeconds ?? 300) },
+            onTick: { [weak self] in await self?.pollInboxOnce() }
+        )
     }
 
     // MARK: - Mail Account
@@ -257,135 +283,19 @@ final class AppState: ObservableObject {
         }
         mailAppPassword = ""
         isAccountConnected = false
+        stopWatching()
         resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
-    }
-
-    /// Fetches recent messages from a mailbox for a quick preview.
-    func previewRecentMessages(mailbox: Mailbox = .inbox, limit: Int = 10) async {
-        let requestGeneration = nextPreviewGeneration()
-        _ = nextBodyPreviewGeneration()
-        _ = nextDraftGeneration()
-        clearRecentMessagePreview()
-        clearDraftPreview()
-        isFetching = false
-        isFetchingBody = false
-        isGeneratingDraft = false
-
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            fetchError = "Connect an account first."
-            return
-        }
-
-        isFetching = true
-        defer {
-            if previewGeneration == requestGeneration {
-                isFetching = false
-            }
-        }
-
-        do {
-            let messages = try await mailProvider.fetchRecentMessages(
-                credentials,
-                mailbox: mailbox,
-                limit: limit
-            )
-            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
-            recentMessages = messages
-        } catch {
-            guard isCurrentPreviewRequest(requestGeneration, credentials: credentials) else { return }
-            recentMessages = []
-            fetchError = Self.message(for: error)
-        }
-    }
-
-    /// Fetches and reduces a single message's body to readable text for preview.
-    func previewBody(for message: MailMessage, mailbox: Mailbox = .inbox) async {
-        let requestGeneration = nextBodyPreviewGeneration()
-        bodyError = nil
-        openedBody = nil
-        isFetchingBody = false
-
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            bodyError = "Connect an account first."
-            return
-        }
-
-        isFetchingBody = true
-        defer {
-            if bodyPreviewGeneration == requestGeneration {
-                isFetchingBody = false
-            }
-        }
-
-        do {
-            let raw = try await mailProvider.fetchBodyText(
-                credentials,
-                mailbox: mailbox,
-                uid: message.id,
-                expectedUIDValidity: message.uidValidity
-            )
-            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
-            openedBody = MailBodyPreview(
-                id: message.id,
-                subject: message.subject,
-                text: MailBodyText.plainText(from: raw)
-            )
-        } catch {
-            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
-            bodyError = Self.message(for: error)
-        }
-    }
-
-    private func nextPreviewGeneration() -> Int {
-        previewGeneration += 1
-        return previewGeneration
-    }
-
-    private func nextBodyPreviewGeneration() -> Int {
-        bodyPreviewGeneration += 1
-        return bodyPreviewGeneration
-    }
-
-    private func resetMessagePreviewForAccountChange() {
-        _ = nextPreviewGeneration()
-        _ = nextBodyPreviewGeneration()
-        _ = nextDraftGeneration()
-        clearRecentMessagePreview()
-        clearDraftPreview()
-        isFetching = false
-        isFetchingBody = false
-        isGeneratingDraft = false
-    }
-
-    private func clearRecentMessagePreview() {
-        recentMessages = []
-        fetchError = nil
-        openedBody = nil
-        bodyError = nil
-    }
-
-    private func isCurrentPreviewRequest(
-        _ requestGeneration: Int,
-        credentials: MailAccountCredentials
-    ) -> Bool {
-        previewGeneration == requestGeneration && mailCredentials == credentials
-    }
-
-    private func isCurrentBodyPreviewRequest(
-        _ requestGeneration: Int,
-        credentials: MailAccountCredentials
-    ) -> Bool {
-        bodyPreviewGeneration == requestGeneration && mailCredentials == credentials
     }
 
     /// Persists settings automatically when a tracked preference changes.
     private func setupAutoSave() {
         $pollIntervalSeconds
             .dropFirst()
-            .sink { [weak self] _ in self?.saveSettings() }
+            .sink { [weak self] _ in
+                self?.saveSettings()
+                self?.inboxWatcher.reschedule()
+            }
             .store(in: &cancellables)
 
         $sendBehavior

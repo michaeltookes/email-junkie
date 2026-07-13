@@ -71,6 +71,44 @@ extension AppState {
         }
     }
 
+    /// Builds a reply draft for a watcher-selected message and appends it to the
+    /// pending queue. Unlike `generateDraft`, this does not touch the Settings
+    /// preview state, so an active preview and the watcher don't clobber each
+    /// other. Throws on missing configuration or provider/LLM errors.
+    func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws {
+        guard let llmConfiguration = currentDraftLLMConfiguration else {
+            throw DraftError.emptyDraft
+        }
+        let credentials = mailCredentials
+        let data = try await mailProvider.fetchBodyText(
+            credentials,
+            mailbox: mailbox,
+            uid: message.id,
+            expectedUIDValidity: message.uidValidity
+        )
+        let context = ReplyContext(
+            senderName: message.from?.name,
+            senderEmail: message.from?.email,
+            subject: message.subject,
+            body: MailBodyText.plainText(from: data)
+        )
+        let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+        let draft = Draft(
+            id: message.id,
+            sourceUIDValidity: message.uidValidity,
+            sourceSubject: message.subject,
+            sourceFrom: message.from,
+            sourceReplyTo: message.replyTo,
+            sourceMessageID: message.messageID,
+            replySubject: Self.replySubject(for: message.subject),
+            body: body,
+            model: llmConfiguration.model,
+            generatedAt: Date()
+        )
+        pendingDrafts.append(draft)
+        pendingDraftCount = pendingDrafts.count
+    }
+
     // MARK: - Helpers
 
     func nextDraftGeneration() -> Int {

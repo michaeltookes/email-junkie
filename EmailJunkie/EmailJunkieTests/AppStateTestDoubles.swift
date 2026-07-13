@@ -9,11 +9,18 @@ import XCTest
 final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
     private(set) var voiceProfile: VoiceProfile?
+    private(set) var processedMessages: ProcessedMessages
+    private(set) var processedSaveCount = 0
     var syncSaveError: Error?
 
-    init(settings: Settings = .default, voiceProfile: VoiceProfile? = nil) {
+    init(
+        settings: Settings = .default,
+        voiceProfile: VoiceProfile? = nil,
+        processedMessages: ProcessedMessages = ProcessedMessages()
+    ) {
         self.settings = settings
         self.voiceProfile = voiceProfile
+        self.processedMessages = processedMessages
     }
 
     func loadSettings() -> Settings { settings }
@@ -28,6 +35,12 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     func loadVoiceProfile() -> VoiceProfile? { voiceProfile }
     func saveVoiceProfile(_ profile: VoiceProfile) { voiceProfile = profile }
     func removeVoiceProfile() { voiceProfile = nil }
+
+    func loadProcessedMessages() -> ProcessedMessages { processedMessages }
+    func saveProcessedMessages(_ processed: ProcessedMessages) {
+        processedMessages = processed
+        processedSaveCount += 1
+    }
 }
 
 enum AppStatePersistenceError: LocalizedError {

@@ -10,17 +10,23 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
     private(set) var voiceProfile: VoiceProfile?
     private(set) var processedMessages: ProcessedMessages
+    private(set) var pendingDrafts: [Draft]
     private(set) var processedSaveCount = 0
+    private(set) var pendingDraftSaveCount = 0
+    private(set) var saveEvents: [String] = []
     var syncSaveError: Error?
+    var pendingDraftSaveError: Error?
 
     init(
         settings: Settings = .default,
         voiceProfile: VoiceProfile? = nil,
-        processedMessages: ProcessedMessages = ProcessedMessages()
+        processedMessages: ProcessedMessages = ProcessedMessages(),
+        pendingDrafts: [Draft] = []
     ) {
         self.settings = settings
         self.voiceProfile = voiceProfile
         self.processedMessages = processedMessages
+        self.pendingDrafts = pendingDrafts
     }
 
     func loadSettings() -> Settings { settings }
@@ -40,6 +46,17 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     func saveProcessedMessages(_ processed: ProcessedMessages) {
         processedMessages = processed
         processedSaveCount += 1
+        saveEvents.append("processed")
+    }
+
+    func loadPendingDrafts() -> [Draft] { pendingDrafts }
+    func savePendingDraftsSync(_ drafts: [Draft]) throws {
+        if let pendingDraftSaveError {
+            throw pendingDraftSaveError
+        }
+        pendingDrafts = drafts
+        pendingDraftSaveCount += 1
+        saveEvents.append("pending")
     }
 }
 
@@ -61,6 +78,8 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let appendResult: Result<Void, MailError>
     private let sendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
+    private(set) var fetchCallCount = 0
+    private(set) var bodyFetchCallCount = 0
     private(set) var lastBodyUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var appendedMailbox: Mailbox?
@@ -93,7 +112,8 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         mailbox: Mailbox,
         limit: Int
     ) async throws -> [MailMessage] {
-        try fetchResult.get()
+        fetchCallCount += 1
+        return try fetchResult.get()
     }
 
     func fetchBodyText(
@@ -102,6 +122,7 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         uid: UInt32,
         expectedUIDValidity: UInt32?
     ) async throws -> Data {
+        bodyFetchCallCount += 1
         lastBodyUID = uid
         lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()

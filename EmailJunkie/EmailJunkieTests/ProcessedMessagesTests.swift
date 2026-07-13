@@ -70,6 +70,26 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertEqual(store.keys.count, 1)
     }
 
+    func testBaselineIsScopedToAccountAndMailbox() {
+        var store = ProcessedMessages()
+        store.insertBaseline(account: " Me@Gmail.com ", mailbox: .inbox)
+
+        XCTAssertTrue(store.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(store.hasBaseline(account: "other@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(store.hasBaseline(account: "me@gmail.com", mailbox: .named("Archive")))
+    }
+
+    func testBaselineIsNotEvictedWithMessageKeys() {
+        var store = ProcessedMessages()
+        store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
+        for index in 0..<(ProcessedMessages.limit + 10) {
+            store.insert(message(id: UInt32(index), messageID: "<\(index)@x.com>"), account: "me@gmail.com", mailbox: .inbox)
+        }
+
+        XCTAssertEqual(store.keys.count, ProcessedMessages.limit)
+        XCTAssertTrue(store.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
+    }
+
     func testEvictsOldestPastLimit() {
         var store = ProcessedMessages()
         for index in 0..<(ProcessedMessages.limit + 10) {
@@ -87,6 +107,7 @@ final class ProcessedMessagesTests: XCTestCase {
 
     func testCodableRoundTrip() throws {
         var store = ProcessedMessages()
+        store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
         store.insert(message(id: 1, messageID: "<1@x.com>"), account: "me@gmail.com", mailbox: .inbox)
         store.insert(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox)
 
@@ -94,11 +115,13 @@ final class ProcessedMessagesTests: XCTestCase {
         let decoded = try JSONDecoder().decode(ProcessedMessages.self, from: data)
 
         XCTAssertEqual(decoded, store)
+        XCTAssertTrue(decoded.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(decoded.contains(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox))
     }
 
     func testDecodesMissingKeysAsEmpty() throws {
         let decoded = try JSONDecoder().decode(ProcessedMessages.self, from: Data("{}".utf8))
         XCTAssertTrue(decoded.keys.isEmpty)
+        XCTAssertTrue(decoded.baselines.isEmpty)
     }
 }

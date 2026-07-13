@@ -58,9 +58,9 @@ extension AppState {
     }
 
     /// One inbox poll: fetch recent messages, and for each new, replyable one,
-    /// generate a draft and enqueue it. Marks a message processed as soon as it
-    /// is selected for drafting so it is never drafted twice (transient-failure
-    /// retry is a later resilience item). Reentrancy-guarded.
+    /// generate a draft and enqueue it. The first poll per account/mailbox seeds
+    /// a baseline so existing mail is not drafted as newly arrived. A message is
+    /// marked processed only after its draft is durably queued.
     func pollInboxOnce() async {
         guard watchStatus == .watching else { return }
         guard canWatch else {
@@ -72,11 +72,12 @@ extension AppState {
         defer { isPollingInbox = false }
 
         let credentials = mailCredentials
+        let mailbox = Mailbox.inbox
         let messages: [MailMessage]
         do {
             messages = try await mailProvider.fetchRecentMessages(
                 credentials,
-                mailbox: .inbox,
+                mailbox: mailbox,
                 limit: watchFetchLimit
             )
         } catch {
@@ -84,23 +85,17 @@ extension AppState {
             logger.error("Inbox poll fetch failed: \(error.localizedDescription)")
             return
         }
+        guard watchStatus == .watching, mailCredentials == credentials else { return }
         watchError = nil
+
+        if seedWatcherBaselineIfNeeded(messages: messages, account: credentials.email, mailbox: mailbox) {
+            return
+        }
 
         // Oldest first so enqueued drafts read in chronological order.
         for message in messages.reversed() {
             guard watchStatus == .watching, mailCredentials == credentials else { break }
-            guard isReplyable(message),
-                  !processedMessages.contains(message, account: credentials.email, mailbox: .inbox) else {
-                continue
-            }
-
-            markProcessed(message, account: credentials.email, mailbox: .inbox)
-            do {
-                try await draftAndEnqueue(message)
-            } catch {
-                watchError = Self.draftMessage(for: error)
-                logger.error("Watcher draft failed: \(error.localizedDescription)")
-            }
+            await draftMessageIfNeeded(message, credentials: credentials, mailbox: mailbox)
         }
     }
 
@@ -120,5 +115,58 @@ extension AppState {
     private func markProcessed(_ message: MailMessage, account: String, mailbox: Mailbox) {
         processedMessages.insert(message, account: account, mailbox: mailbox)
         persistence.saveProcessedMessages(processedMessages)
+    }
+
+    private func draftMessageIfNeeded(
+        _ message: MailMessage,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox
+    ) async {
+        guard isReplyable(message),
+              !processedMessages.contains(message, account: credentials.email, mailbox: mailbox),
+              !hasPendingDraft(for: message, account: credentials.email, mailbox: mailbox) else {
+            return
+        }
+
+        do {
+            if try await draftAndEnqueue(message, mailbox: mailbox) {
+                markProcessed(message, account: credentials.email, mailbox: mailbox)
+            }
+        } catch {
+            watchError = Self.draftMessage(for: error)
+            logger.error("Watcher draft failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func seedWatcherBaselineIfNeeded(
+        messages: [MailMessage],
+        account: String,
+        mailbox: Mailbox
+    ) -> Bool {
+        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return false }
+        for message in messages {
+            processedMessages.insert(message, account: account, mailbox: mailbox)
+        }
+        processedMessages.insertBaseline(account: account, mailbox: mailbox)
+        persistence.saveProcessedMessages(processedMessages)
+        logger.info("Inbox watcher baseline seeded with \(messages.count) messages")
+        return true
+    }
+
+    private func hasPendingDraft(for message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
+        let account = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let mailbox = mailbox.imapName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return pendingDrafts.contains { draft in
+            guard draft.sourceAccountEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == account,
+                  draft.sourceMailbox?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == mailbox else {
+                return false
+            }
+            let matchesMessageID = draft.sourceMessageID.map { sourceMessageID in
+                guard let messageID = message.messageID else { return false }
+                return !sourceMessageID.isEmpty && sourceMessageID == messageID
+            } ?? false
+            let matchesUID = draft.sourceUIDValidity == message.uidValidity && draft.id == message.id
+            return matchesMessageID || matchesUID
+        }
     }
 }

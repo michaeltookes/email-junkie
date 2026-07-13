@@ -16,18 +16,23 @@ struct ProcessedMessages: Codable, Equatable {
 
     /// Remembered message keys, oldest first.
     private(set) var keys: [String]
+    /// Account/mailbox scopes that have had their initial watcher baseline seeded.
+    private(set) var baselines: [String]
 
-    init(keys: [String] = []) {
+    init(keys: [String] = [], baselines: [String] = []) {
         self.keys = keys
+        self.baselines = baselines
     }
 
     enum CodingKeys: String, CodingKey {
         case keys
+        case baselines
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         keys = try container.decodeIfPresent([String].self, forKey: .keys) ?? []
+        baselines = try container.decodeIfPresent([String].self, forKey: .baselines) ?? []
     }
 
     /// Whether `message` has already been processed.
@@ -46,15 +51,35 @@ struct ProcessedMessages: Codable, Equatable {
         }
     }
 
+    /// Whether the watcher has seeded the current-inbox baseline for this scope.
+    func hasBaseline(account: String, mailbox: Mailbox) -> Bool {
+        baselines.contains(Self.baselineKey(account: account, mailbox: mailbox))
+    }
+
+    /// Records that the watcher has seeded the current-inbox baseline for this scope.
+    mutating func insertBaseline(account: String, mailbox: Mailbox) {
+        let key = Self.baselineKey(account: account, mailbox: mailbox)
+        guard !baselines.contains(key) else { return }
+        baselines.append(key)
+    }
+
     /// A stable identity for a message: its Message-ID when present, else a
     /// scoped `UIDVALIDITY:UID` composite (stable within one account/mailbox).
     static func key(for message: MailMessage, account: String, mailbox: Mailbox) -> String {
         if let messageID = message.messageID, !messageID.isEmpty {
             return "mid:\(messageID)"
         }
+        let validity = message.uidValidity.map(String.init) ?? "?"
+        return "uid:\(scopeKey(account: account, mailbox: mailbox))|validity=\(validity)|uid=\(message.id)"
+    }
+
+    static func baselineKey(account: String, mailbox: Mailbox) -> String {
+        "baseline:\(scopeKey(account: account, mailbox: mailbox))"
+    }
+
+    private static func scopeKey(account: String, mailbox: Mailbox) -> String {
         let account = account.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let mailbox = mailbox.imapName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let validity = message.uidValidity.map(String.init) ?? "?"
-        return "uid:acct=\(account)|mailbox=\(mailbox)|validity=\(validity)|uid=\(message.id)"
+        return "acct=\(account)|mailbox=\(mailbox)"
     }
 }

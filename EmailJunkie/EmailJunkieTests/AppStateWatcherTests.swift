@@ -15,6 +15,29 @@ final class AppStateWatcherTests: XCTestCase {
         )
     }
 
+    private func baselineProcessed() -> ProcessedMessages {
+        var processed = ProcessedMessages()
+        processed.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
+        return processed
+    }
+
+    private func pendingDraft(id: UInt32, messageID: String? = nil, uidValidity: UInt32? = nil) -> Draft {
+        Draft(
+            id: id,
+            sourceUIDValidity: uidValidity,
+            sourceAccountEmail: "me@gmail.com",
+            sourceMailbox: Mailbox.inbox.imapName,
+            sourceSubject: "Subject \(id)",
+            sourceFrom: MailAddress(name: "Alice", email: "alice@x.com"),
+            sourceReplyTo: nil,
+            sourceMessageID: messageID ?? "<\(id)@x.com>",
+            replySubject: "Re: Subject \(id)",
+            body: "On it.",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
     /// Builds an AppState that reports connected (account + LLM), with the given
     /// inbox fetch result. `mailAppPassword` is seeded so `isAccountConnected` is
     /// true out of `init`.
@@ -22,7 +45,8 @@ final class AppStateWatcherTests: XCTestCase {
         fetch: Result<[MailMessage], MailError> = .success([]),
         body: Result<Data, MailError> = .success(Data("Please advise.".utf8)),
         completion: Result<LLMResponse, LLMError> = .success(LLMResponse(text: "On it.")),
-        processed: ProcessedMessages = ProcessedMessages()
+        processed: ProcessedMessages? = nil,
+        pendingDrafts: [Draft] = []
     ) -> (AppState, FakeAppMailProvider, AppStateMemoryPersistence) {
         let secrets = InMemorySecretStore(seed: [
             .mailAppPassword: "app-pw",
@@ -36,7 +60,8 @@ final class AppStateWatcherTests: XCTestCase {
                 llmProvider: "anthropic",
                 llmVerifiedModel: "claude-sonnet-4-6"
             ),
-            processedMessages: processed
+            processedMessages: processed ?? baselineProcessed(),
+            pendingDrafts: pendingDrafts
         )
         let provider = FakeAppMailProvider(result: .success(()), fetchResult: fetch, bodyResult: body)
         let llm = FakeLLMProvider(result: .success(()), completion: completion)
@@ -112,6 +137,36 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
+    func testFirstPollSeedsBaselineWithoutDraftingHistoricalMessages() async {
+        let (appState, provider, persistence) = makeAppState(
+            fetch: .success([message(id: 2), message(id: 1)]),
+            processed: ProcessedMessages()
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(provider.bodyFetchCallCount, 0)
+        XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(message(id: 2), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(persistence.processedSaveCount, 1)
+    }
+
+    func testEmptyFirstPollStillSeedsBaseline() async {
+        let (appState, _, persistence) = makeAppState(
+            fetch: .success([]),
+            processed: ProcessedMessages()
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(persistence.processedSaveCount, 1)
+    }
+
     func testPollEnqueuesDraftsOldestFirst() async {
         // Real fetch returns newest-first; drafts should enqueue oldest-first.
         let (appState, _, persistence) = makeAppState(
@@ -129,7 +184,7 @@ final class AppStateWatcherTests: XCTestCase {
     }
 
     func testPollSkipsAlreadyProcessed() async {
-        var processed = ProcessedMessages()
+        var processed = baselineProcessed()
         processed.insert(message(id: 1), account: "me@gmail.com", mailbox: .inbox)
         let (appState, _, _) = makeAppState(
             fetch: .success([message(id: 2), message(id: 1)]),
@@ -150,6 +205,20 @@ final class AppStateWatcherTests: XCTestCase {
         await appState.pollInboxOnce()
 
         XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+    }
+
+    func testPollSkipsMessageThatAlreadyHasPendingDraft() async {
+        let (appState, provider, persistence) = makeAppState(
+            fetch: .success([message(id: 1)]),
+            pendingDrafts: [pendingDraft(id: 1)]
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+        XCTAssertEqual(provider.bodyFetchCallCount, 0)
+        XCTAssertFalse(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
     }
 
     func testPollSkipsMessagesFromSelf() async {
@@ -173,7 +242,7 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertNotNil(appState.watchError)
     }
 
-    func testPollMarksProcessedEvenWhenDraftFails() async {
+    func testPollDoesNotMarkProcessedWhenDraftFails() async {
         // A message with no sender email is skipped by the replyable gate, so
         // use a real sender but fail the LLM to exercise the draft-failure path.
         let (appState, _, persistence) = makeAppState(
@@ -186,8 +255,31 @@ final class AppStateWatcherTests: XCTestCase {
 
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(appState.watchError)
-        // Processed so a persistent failure doesn't re-draft every poll.
+        XCTAssertFalse(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testPollPersistsPendingDraftBeforeMarkingProcessed() async {
+        let (appState, _, persistence) = makeAppState(fetch: .success([message(id: 1)]))
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(persistence.pendingDrafts.map(\.id), [1])
         XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(persistence.saveEvents, ["pending", "processed"])
+    }
+
+    func testPollDoesNotMarkProcessedWhenPendingDraftSaveFails() async {
+        let (appState, _, persistence) = makeAppState(fetch: .success([message(id: 1)]))
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertNotNil(appState.watchError)
+        XCTAssertFalse(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.saveEvents.isEmpty)
     }
 
     func testDraftAndEnqueueDoesNotCallLLMAfterWatcherStopsDuringBodyFetch() async {

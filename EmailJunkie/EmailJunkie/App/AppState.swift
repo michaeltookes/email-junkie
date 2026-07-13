@@ -174,6 +174,9 @@ final class AppState: ObservableObject {
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.processedMessages = persistence.loadProcessedMessages()
+        let pendingDrafts = persistence.loadPendingDrafts()
+        self.pendingDrafts = pendingDrafts
+        self.pendingDraftCount = pendingDrafts.count
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort

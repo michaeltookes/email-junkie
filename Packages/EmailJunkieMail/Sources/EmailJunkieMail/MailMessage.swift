@@ -1,7 +1,7 @@
 import Foundation
 
 /// A parsed email address (from an IMAP envelope).
-public struct MailAddress: Equatable, Sendable {
+public struct MailAddress: Codable, Equatable, Sendable {
     public var name: String?
     public var email: String
 

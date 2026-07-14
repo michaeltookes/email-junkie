@@ -33,10 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // but we set it explicitly to be safe.
         NSApp.setActivationPolicy(.accessory)
 
-        appState = AppState()
+        appState = AppState(notifier: UserNotificationService())
         updateManager = UpdateManager()
         menuBarController = MenuBarController(appState: appState, updateManager: updateManager)
         updateManager.startUpdater()
+
+        // Ask for notification permission so ready drafts can surface natively.
+        appState.notifier.requestAuthorization()
 
         // Auto-resume watching if an account + LLM are already connected.
         appState.startWatchingIfReady()

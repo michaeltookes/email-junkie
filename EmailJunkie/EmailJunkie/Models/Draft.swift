@@ -20,6 +20,9 @@ struct Draft: Codable, Identifiable, Equatable {
     var sourceReplyTo: MailAddress?
     /// The source message's RFC 5322 `Message-ID`, for reply threading.
     var sourceMessageID: String?
+    /// The readable text of the incoming message, kept so the approval UI can
+    /// show it beside the proposed reply. Truncated to bound persistence size.
+    var incomingBody: String?
     /// The reply subject (`Re: …`).
     var replySubject: String
     /// The generated reply body.
@@ -38,6 +41,7 @@ struct Draft: Codable, Identifiable, Equatable {
         sourceFrom: MailAddress?,
         sourceReplyTo: MailAddress?,
         sourceMessageID: String?,
+        incomingBody: String? = nil,
         replySubject: String,
         body: String,
         model: String,
@@ -51,9 +55,19 @@ struct Draft: Codable, Identifiable, Equatable {
         self.sourceFrom = sourceFrom
         self.sourceReplyTo = sourceReplyTo
         self.sourceMessageID = sourceMessageID
+        self.incomingBody = incomingBody
         self.replySubject = replySubject
         self.body = body
         self.model = model
         self.generatedAt = generatedAt
+    }
+
+    /// A stable identity across the pending queue and notifications, scoped by
+    /// account/mailbox so the same UID in different mailboxes never collides.
+    var identity: String {
+        let account = sourceAccountEmail ?? "?"
+        let mailbox = sourceMailbox ?? "?"
+        let validity = sourceUIDValidity.map(String.init) ?? "?"
+        return "\(account)|\(mailbox)|\(validity)|\(id)"
     }
 }

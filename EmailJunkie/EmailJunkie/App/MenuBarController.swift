@@ -19,6 +19,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var settingsCloseObserver: NSObjectProtocol?
 
+    /// The draft-review window, created lazily.
+    private var reviewWindow: NSWindow?
+    private var reviewCloseObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -26,10 +30,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.updateManager = updateManager
         super.init()
         setupStatusItem()
+        // A notification "open" action (or approve/deny while closed) surfaces
+        // the review window.
+        appState.openReviewHandler = { [weak self] in self?.openReview() }
     }
 
     deinit {
         if let observer = settingsCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = reviewCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -73,6 +83,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let status = NSMenuItem(title: appState.statusText, action: nil, keyEquivalent: "")
         status.isEnabled = false
         items.append(status)
+
+        // Review Drafts (only when there are drafts awaiting approval).
+        if appState.pendingDraftCount > 0 {
+            let review = NSMenuItem(
+                title: "Review Drafts (\(appState.pendingDraftCount))…",
+                action: #selector(openReviewMenu),
+                keyEquivalent: "r"
+            )
+            review.target = self
+            items.append(review)
+        }
 
         // Start / Pause watching (only when an account + LLM are connected).
         if appState.canWatch {
@@ -131,6 +152,47 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func toggleWatching() {
         appState.toggleWatching()
+    }
+
+    @objc private func openReviewMenu() {
+        openReview()
+    }
+
+    func openReview() {
+        if reviewWindow == nil {
+            let view = PendingDraftsView()
+                .environmentObject(appState)
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Review Drafts"
+            window.contentView = NSHostingView(rootView: view)
+            window.center()
+            window.isReleasedWhenClosed = false
+            window.setAccessibilityLabel("Review Drafts")
+            reviewWindow = window
+
+            reviewCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    if let observer = self?.reviewCloseObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        self?.reviewCloseObserver = nil
+                    }
+                    self?.reviewWindow = nil
+                }
+            }
+        }
+
+        reviewWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func checkForUpdates() {

@@ -79,7 +79,7 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertFalse(store.hasBaseline(account: "me@gmail.com", mailbox: .named("Archive")))
     }
 
-    func testBaselineStartIsScopedAndClearedWhenBaselineIsInserted() {
+    func testBaselineStartIsScopedAndRetainedWhenBaselineIsInserted() {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         var store = ProcessedMessages()
         store.setBaselineStart(account: " Me@Gmail.com ", mailbox: .inbox, date: date)
@@ -91,7 +91,8 @@ final class ProcessedMessagesTests: XCTestCase {
 
         store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
 
-        XCTAssertFalse(store.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(store.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(store.baselineStartDate(account: "me@gmail.com", mailbox: .inbox), date)
     }
 
     func testBaselineIsNotEvictedWithMessageKeys() {

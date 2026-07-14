@@ -32,6 +32,12 @@ final class AppStateWatcherTests: XCTestCase {
         return processed
     }
 
+    private func baselineWithStartProcessed(_ date: Date) -> ProcessedMessages {
+        var processed = baselineStartProcessed(date)
+        processed.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
+        return processed
+    }
+
     private func pendingDraft(id: UInt32, messageID: String? = nil, uidValidity: UInt32? = nil) -> Draft {
         Draft(
             id: id,
@@ -195,7 +201,25 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(historical, account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
-        XCTAssertFalse(persistence.processedMessages.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testPollWithCompletedBaselineStillFiltersPreStartMessages() async {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let unseenHistorical = message(id: 1, date: "Tue, 14 Nov 2023 22:13:19 +0000")
+        let postStart = message(id: 2, date: "Tue, 14 Nov 2023 22:13:21 +0000")
+        let (appState, provider, persistence) = makeAppState(
+            fetch: .success([postStart, unseenHistorical]),
+            processed: baselineWithStartProcessed(start)
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [2])
+        XCTAssertEqual(provider.bodyFetchCallCount, 1)
+        XCTAssertFalse(persistence.processedMessages.contains(unseenHistorical, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
     }
 
     func testPollEnqueuesDraftsOldestFirst() async {

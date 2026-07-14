@@ -18,7 +18,7 @@ struct ProcessedMessages: Codable, Equatable {
     private(set) var keys: [String]
     /// Account/mailbox scopes that have had their initial watcher baseline seeded.
     private(set) var baselines: [String]
-    /// Account/mailbox scopes and local times when initial baseline capture began.
+    /// Account/mailbox scopes and local start cutoffs for watcher drafting.
     private(set) var baselineStarts: [String: Date]
 
     init(keys: [String] = [], baselines: [String] = [], baselineStarts: [String: Date] = [:]) {
@@ -66,7 +66,6 @@ struct ProcessedMessages: Codable, Equatable {
         let key = Self.baselineKey(account: account, mailbox: mailbox)
         guard !baselines.contains(key) else { return }
         baselines.append(key)
-        baselineStarts.removeValue(forKey: key)
     }
 
     /// Records when initial baseline capture began for this watcher scope.

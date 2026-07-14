@@ -125,6 +125,7 @@ extension AppState {
 
     private func recordWatcherBaselineStartIfNeeded(account: String, mailbox: Mailbox, date: Date = Date()) {
         guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return }
+        guard !processedMessages.hasBaselineStart(account: account, mailbox: mailbox) else { return }
         processedMessages.setBaselineStart(account: account, mailbox: mailbox, date: date)
         persistence.saveProcessedMessages(processedMessages)
     }
@@ -155,18 +156,21 @@ extension AppState {
         account: String,
         mailbox: Mailbox
     ) -> [MailMessage] {
-        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return messages }
-
         let baselineStartDate = processedMessages.baselineStartDate(account: account, mailbox: mailbox)
-        var baselineMessages: [MailMessage] = []
-        var messagesToProcess: [MailMessage] = []
+        let messagesToProcess = messages.filter {
+            Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
+        }
 
-        for message in messages {
-            if let baselineStartDate,
-               Self.isMessageDate(message.date, onOrAfter: baselineStartDate) {
-                messagesToProcess.append(message)
-            } else {
-                baselineMessages.append(message)
+        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else {
+            return messagesToProcess
+        }
+
+        let baselineMessages: [MailMessage]
+        if baselineStartDate == nil {
+            baselineMessages = messages
+        } else {
+            baselineMessages = messages.filter {
+                !Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
             }
         }
 
@@ -176,7 +180,7 @@ extension AppState {
         processedMessages.insertBaseline(account: account, mailbox: mailbox)
         persistence.saveProcessedMessages(processedMessages)
         logger.info("Inbox watcher baseline seeded: \(baselineMessages.count) historical, \(messagesToProcess.count) post-start eligible")
-        return messagesToProcess
+        return baselineStartDate == nil ? [] : messagesToProcess
     }
 
     private func hasPendingDraft(for message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
@@ -199,6 +203,11 @@ extension AppState {
     private static func isMessageDate(_ value: String, onOrAfter startDate: Date) -> Bool {
         guard let date = parsedMessageDate(value) else { return false }
         return date >= startDate
+    }
+
+    private static func isMessage(_ message: MailMessage, onOrAfterBaselineStart startDate: Date?) -> Bool {
+        guard let startDate else { return true }
+        return isMessageDate(message.date, onOrAfter: startDate)
     }
 
     private static func parsedMessageDate(_ value: String) -> Date? {

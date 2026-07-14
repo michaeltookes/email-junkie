@@ -11,6 +11,11 @@ import Foundation
 /// any realistic poll window.
 struct ProcessedMessages: Codable, Equatable {
 
+    struct BaselineUIDCutoff: Codable, Equatable {
+        var uid: UInt32
+        var uidValidity: UInt32?
+    }
+
     /// Maximum number of remembered keys before the oldest are evicted.
     static let limit = 1000
 
@@ -21,13 +26,13 @@ struct ProcessedMessages: Codable, Equatable {
     /// Account/mailbox scopes and local start cutoffs for watcher drafting.
     private(set) var baselineStarts: [String: Date]
     /// Account/mailbox UID cutoffs captured at the watcher baseline boundary.
-    private(set) var baselineUIDs: [String: UInt32]
+    private(set) var baselineUIDs: [String: BaselineUIDCutoff]
 
     init(
         keys: [String] = [],
         baselines: [String] = [],
         baselineStarts: [String: Date] = [:],
-        baselineUIDs: [String: UInt32] = [:]
+        baselineUIDs: [String: BaselineUIDCutoff] = [:]
     ) {
         self.keys = keys
         self.baselines = baselines
@@ -47,7 +52,12 @@ struct ProcessedMessages: Codable, Equatable {
         keys = try container.decodeIfPresent([String].self, forKey: .keys) ?? []
         baselines = try container.decodeIfPresent([String].self, forKey: .baselines) ?? []
         baselineStarts = try container.decodeIfPresent([String: Date].self, forKey: .baselineStarts) ?? [:]
-        baselineUIDs = try container.decodeIfPresent([String: UInt32].self, forKey: .baselineUIDs) ?? [:]
+        do {
+            baselineUIDs = try container.decodeIfPresent([String: BaselineUIDCutoff].self, forKey: .baselineUIDs) ?? [:]
+        } catch {
+            let legacyUIDs = try container.decodeIfPresent([String: UInt32].self, forKey: .baselineUIDs) ?? [:]
+            baselineUIDs = legacyUIDs.mapValues { BaselineUIDCutoff(uid: $0, uidValidity: nil) }
+        }
     }
 
     /// Whether `message` has already been processed.
@@ -94,12 +104,15 @@ struct ProcessedMessages: Codable, Equatable {
     }
 
     /// Records the newest UID that belongs to the historical watcher baseline.
-    mutating func setBaselineUID(account: String, mailbox: Mailbox, uid: UInt32) {
-        baselineUIDs[Self.baselineKey(account: account, mailbox: mailbox)] = uid
+    mutating func setBaselineUID(account: String, mailbox: Mailbox, uid: UInt32, uidValidity: UInt32?) {
+        baselineUIDs[Self.baselineKey(account: account, mailbox: mailbox)] = BaselineUIDCutoff(
+            uid: uid,
+            uidValidity: uidValidity
+        )
     }
 
     /// The newest UID that belongs to the historical watcher baseline, if known.
-    func baselineUID(account: String, mailbox: Mailbox) -> UInt32? {
+    func baselineUID(account: String, mailbox: Mailbox) -> BaselineUIDCutoff? {
         baselineUIDs[Self.baselineKey(account: account, mailbox: mailbox)]
     }
 

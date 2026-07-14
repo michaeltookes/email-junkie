@@ -97,9 +97,10 @@ final class ProcessedMessagesTests: XCTestCase {
 
     func testBaselineUIDIsScoped() {
         var store = ProcessedMessages()
-        store.setBaselineUID(account: " Me@Gmail.com ", mailbox: .inbox, uid: 42)
+        store.setBaselineUID(account: " Me@Gmail.com ", mailbox: .inbox, uid: 42, uidValidity: 99)
 
-        XCTAssertEqual(store.baselineUID(account: "me@gmail.com", mailbox: .inbox), 42)
+        XCTAssertEqual(store.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uid, 42)
+        XCTAssertEqual(store.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uidValidity, 99)
         XCTAssertNil(store.baselineUID(account: "other@gmail.com", mailbox: .inbox))
         XCTAssertNil(store.baselineUID(account: "me@gmail.com", mailbox: .named("Archive")))
     }
@@ -135,7 +136,7 @@ final class ProcessedMessagesTests: XCTestCase {
         store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
         let baselineStart = Date(timeIntervalSince1970: 1_700_000_000)
         store.setBaselineStart(account: "other@gmail.com", mailbox: .inbox, date: baselineStart)
-        store.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 99)
+        store.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 99, uidValidity: 42)
         store.insert(message(id: 1, messageID: "<1@x.com>"), account: "me@gmail.com", mailbox: .inbox)
         store.insert(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox)
 
@@ -145,8 +146,18 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertEqual(decoded, store)
         XCTAssertTrue(decoded.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertEqual(decoded.baselineStartDate(account: "other@gmail.com", mailbox: .inbox), baselineStart)
-        XCTAssertEqual(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox), 99)
+        XCTAssertEqual(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uid, 99)
+        XCTAssertEqual(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uidValidity, 42)
         XCTAssertTrue(decoded.contains(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testDecodesLegacyBareBaselineUIDs() throws {
+        let data = Data(#"{"baselineUIDs":{"baseline:acct=me@gmail.com|mailbox=inbox":99}}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(ProcessedMessages.self, from: data)
+
+        XCTAssertEqual(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uid, 99)
+        XCTAssertNil(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox)?.uidValidity)
     }
 
     func testDecodesMissingKeysAsEmpty() throws {

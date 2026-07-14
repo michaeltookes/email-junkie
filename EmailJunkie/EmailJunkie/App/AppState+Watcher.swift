@@ -161,7 +161,8 @@ extension AppState {
         guard messages.count >= limit, limit < watchCatchUpFetchLimit else { return false }
 
         if let baselineUID = processedMessages.baselineUID(account: account, mailbox: mailbox) {
-            return !messages.contains { $0.id <= baselineUID }
+            guard Self.isBaselineUIDComparable(messages: messages, baselineUID: baselineUID) else { return false }
+            return !messages.contains { Self.isMessage($0, atOrBeforeBaselineUID: baselineUID) }
         }
 
         if let baselineStartDate = processedMessages.baselineStartDate(account: account, mailbox: mailbox) {
@@ -224,21 +225,26 @@ extension AppState {
         let baselineMessages: [MailMessage]
         if let baselineUID {
             messagesToProcess = messages.filter { Self.isMessage($0, afterBaselineUID: baselineUID) }
-            baselineMessages = messages.filter { !Self.isMessage($0, afterBaselineUID: baselineUID) }
+            baselineMessages = messages.filter { Self.isMessage($0, atOrBeforeBaselineUID: baselineUID) }
         } else if let baselineStartDate {
             messagesToProcess = messages.filter {
-                Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
+                Self.isMessage($0, onOrAfterInitialBaselineStart: baselineStartDate)
             }
             baselineMessages = messages.filter {
-                Self.isMessage($0, beforeBaselineStart: baselineStartDate)
+                !Self.isMessage($0, onOrAfterInitialBaselineStart: baselineStartDate)
             }
         } else {
             messagesToProcess = []
             baselineMessages = messages
         }
 
-        if baselineUID == nil, let maxHistoricalUID = baselineMessages.map(\.id).max() {
-            processedMessages.setBaselineUID(account: account, mailbox: mailbox, uid: maxHistoricalUID)
+        if baselineUID == nil, let historicalCutoff = baselineMessages.max(by: { $0.id < $1.id }) {
+            processedMessages.setBaselineUID(
+                account: account,
+                mailbox: mailbox,
+                uid: historicalCutoff.id,
+                uidValidity: historicalCutoff.uidValidity
+            )
         }
 
         for message in baselineMessages {
@@ -269,7 +275,7 @@ extension AppState {
 
     private static func isMessage(
         _ message: MailMessage,
-        afterBaselineUID baselineUID: UInt32?,
+        afterBaselineUID baselineUID: ProcessedMessages.BaselineUIDCutoff?,
         onOrAfterBaselineStart startDate: Date?
     ) -> Bool {
         if let baselineUID {
@@ -278,13 +284,52 @@ extension AppState {
         return isMessage(message, onOrAfterBaselineStart: startDate)
     }
 
-    private static func isMessage(_ message: MailMessage, afterBaselineUID baselineUID: UInt32) -> Bool {
-        message.id > baselineUID
+    private static func isBaselineUIDComparable(
+        messages: [MailMessage],
+        baselineUID: ProcessedMessages.BaselineUIDCutoff
+    ) -> Bool {
+        guard let baselineUIDValidity = baselineUID.uidValidity else { return true }
+        return !messages.contains {
+            guard let messageUIDValidity = $0.uidValidity else { return false }
+            return messageUIDValidity != baselineUIDValidity
+        }
+    }
+
+    private static func isMessage(
+        _ message: MailMessage,
+        afterBaselineUID baselineUID: ProcessedMessages.BaselineUIDCutoff
+    ) -> Bool {
+        guard isMessageUIDComparable(message, baselineUID: baselineUID) else { return true }
+        return message.id > baselineUID.uid
+    }
+
+    private static func isMessage(
+        _ message: MailMessage,
+        atOrBeforeBaselineUID baselineUID: ProcessedMessages.BaselineUIDCutoff
+    ) -> Bool {
+        guard isMessageUIDComparable(message, baselineUID: baselineUID) else { return false }
+        return message.id <= baselineUID.uid
+    }
+
+    private static func isMessageUIDComparable(
+        _ message: MailMessage,
+        baselineUID: ProcessedMessages.BaselineUIDCutoff
+    ) -> Bool {
+        guard let baselineUIDValidity = baselineUID.uidValidity,
+              let messageUIDValidity = message.uidValidity else {
+            return true
+        }
+        return messageUIDValidity == baselineUIDValidity
     }
 
     private static func isMessage(_ message: MailMessage, onOrAfterBaselineStart startDate: Date?) -> Bool {
         guard let startDate else { return true }
         guard let date = parsedMessageDate(message.date) else { return true }
+        return date >= startDate
+    }
+
+    private static func isMessage(_ message: MailMessage, onOrAfterInitialBaselineStart startDate: Date) -> Bool {
+        guard let date = parsedMessageDate(message.date) else { return false }
         return date >= startDate
     }
 

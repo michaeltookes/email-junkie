@@ -76,10 +76,9 @@ extension AppState {
         let mailbox = Mailbox.inbox
         let messages: [MailMessage]
         do {
-            messages = try await mailProvider.fetchRecentMessages(
+            messages = try await fetchWatcherMessages(
                 credentials,
-                mailbox: mailbox,
-                limit: watchFetchLimit
+                mailbox: mailbox
             )
         } catch {
             watchError = Self.message(for: error)
@@ -123,6 +122,57 @@ extension AppState {
         persistence.saveProcessedMessages(processedMessages)
     }
 
+    private func fetchWatcherMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox
+    ) async throws -> [MailMessage] {
+        var limit = watchFetchLimit
+        var messages = try await mailProvider.fetchRecentMessages(
+            credentials,
+            mailbox: mailbox,
+            limit: limit
+        )
+
+        while shouldExpandWatcherFetch(
+            messages: messages,
+            limit: limit,
+            account: credentials.email,
+            mailbox: mailbox
+        ) {
+            let nextLimit = min(limit * 2, watchCatchUpFetchLimit)
+            guard nextLimit > limit else { break }
+            limit = nextLimit
+            messages = try await mailProvider.fetchRecentMessages(
+                credentials,
+                mailbox: mailbox,
+                limit: limit
+            )
+        }
+
+        return messages
+    }
+
+    private func shouldExpandWatcherFetch(
+        messages: [MailMessage],
+        limit: Int,
+        account: String,
+        mailbox: Mailbox
+    ) -> Bool {
+        guard messages.count >= limit, limit < watchCatchUpFetchLimit else { return false }
+
+        if let baselineUID = processedMessages.baselineUID(account: account, mailbox: mailbox) {
+            return !messages.contains { $0.id <= baselineUID }
+        }
+
+        if let baselineStartDate = processedMessages.baselineStartDate(account: account, mailbox: mailbox) {
+            return !messages.contains {
+                Self.isMessage($0, beforeBaselineStart: baselineStartDate)
+            }
+        }
+
+        return false
+    }
+
     private func recordWatcherBaselineStartIfNeeded(account: String, mailbox: Mailbox, date: Date = Date()) {
         guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else { return }
         guard !processedMessages.hasBaselineStart(account: account, mailbox: mailbox) else { return }
@@ -156,22 +206,39 @@ extension AppState {
         account: String,
         mailbox: Mailbox
     ) -> [MailMessage] {
+        let hasBaseline = processedMessages.hasBaseline(account: account, mailbox: mailbox)
         let baselineStartDate = processedMessages.baselineStartDate(account: account, mailbox: mailbox)
-        let messagesToProcess = messages.filter {
-            Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
-        }
+        let baselineUID = processedMessages.baselineUID(account: account, mailbox: mailbox)
 
-        guard !processedMessages.hasBaseline(account: account, mailbox: mailbox) else {
-            return messagesToProcess
-        }
-
-        let baselineMessages: [MailMessage]
-        if baselineStartDate == nil {
-            baselineMessages = messages
-        } else {
-            baselineMessages = messages.filter {
-                !Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
+        if hasBaseline {
+            return messages.filter {
+                Self.isMessage(
+                    $0,
+                    afterBaselineUID: baselineUID,
+                    onOrAfterBaselineStart: baselineStartDate
+                )
             }
+        }
+
+        let messagesToProcess: [MailMessage]
+        let baselineMessages: [MailMessage]
+        if let baselineUID {
+            messagesToProcess = messages.filter { Self.isMessage($0, afterBaselineUID: baselineUID) }
+            baselineMessages = messages.filter { !Self.isMessage($0, afterBaselineUID: baselineUID) }
+        } else if let baselineStartDate {
+            messagesToProcess = messages.filter {
+                Self.isMessage($0, onOrAfterBaselineStart: baselineStartDate)
+            }
+            baselineMessages = messages.filter {
+                Self.isMessage($0, beforeBaselineStart: baselineStartDate)
+            }
+        } else {
+            messagesToProcess = []
+            baselineMessages = messages
+        }
+
+        if baselineUID == nil, let maxHistoricalUID = baselineMessages.map(\.id).max() {
+            processedMessages.setBaselineUID(account: account, mailbox: mailbox, uid: maxHistoricalUID)
         }
 
         for message in baselineMessages {
@@ -200,14 +267,30 @@ extension AppState {
         }
     }
 
-    private static func isMessageDate(_ value: String, onOrAfter startDate: Date) -> Bool {
-        guard let date = parsedMessageDate(value) else { return false }
-        return date >= startDate
+    private static func isMessage(
+        _ message: MailMessage,
+        afterBaselineUID baselineUID: UInt32?,
+        onOrAfterBaselineStart startDate: Date?
+    ) -> Bool {
+        if let baselineUID {
+            return isMessage(message, afterBaselineUID: baselineUID)
+        }
+        return isMessage(message, onOrAfterBaselineStart: startDate)
+    }
+
+    private static func isMessage(_ message: MailMessage, afterBaselineUID baselineUID: UInt32) -> Bool {
+        message.id > baselineUID
     }
 
     private static func isMessage(_ message: MailMessage, onOrAfterBaselineStart startDate: Date?) -> Bool {
         guard let startDate else { return true }
-        return isMessageDate(message.date, onOrAfter: startDate)
+        guard let date = parsedMessageDate(message.date) else { return true }
+        return date >= startDate
+    }
+
+    private static func isMessage(_ message: MailMessage, beforeBaselineStart startDate: Date) -> Bool {
+        guard let date = parsedMessageDate(message.date) else { return false }
+        return date < startDate
     }
 
     private static func parsedMessageDate(_ value: String) -> Date? {

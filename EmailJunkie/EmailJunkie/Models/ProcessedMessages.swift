@@ -20,17 +20,26 @@ struct ProcessedMessages: Codable, Equatable {
     private(set) var baselines: [String]
     /// Account/mailbox scopes and local start cutoffs for watcher drafting.
     private(set) var baselineStarts: [String: Date]
+    /// Account/mailbox UID cutoffs captured at the watcher baseline boundary.
+    private(set) var baselineUIDs: [String: UInt32]
 
-    init(keys: [String] = [], baselines: [String] = [], baselineStarts: [String: Date] = [:]) {
+    init(
+        keys: [String] = [],
+        baselines: [String] = [],
+        baselineStarts: [String: Date] = [:],
+        baselineUIDs: [String: UInt32] = [:]
+    ) {
         self.keys = keys
         self.baselines = baselines
         self.baselineStarts = baselineStarts
+        self.baselineUIDs = baselineUIDs
     }
 
     enum CodingKeys: String, CodingKey {
         case keys
         case baselines
         case baselineStarts
+        case baselineUIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -38,6 +47,7 @@ struct ProcessedMessages: Codable, Equatable {
         keys = try container.decodeIfPresent([String].self, forKey: .keys) ?? []
         baselines = try container.decodeIfPresent([String].self, forKey: .baselines) ?? []
         baselineStarts = try container.decodeIfPresent([String: Date].self, forKey: .baselineStarts) ?? [:]
+        baselineUIDs = try container.decodeIfPresent([String: UInt32].self, forKey: .baselineUIDs) ?? [:]
     }
 
     /// Whether `message` has already been processed.
@@ -81,6 +91,16 @@ struct ProcessedMessages: Codable, Equatable {
     /// The local time when initial baseline capture began for this scope, if any.
     func baselineStartDate(account: String, mailbox: Mailbox) -> Date? {
         baselineStarts[Self.baselineKey(account: account, mailbox: mailbox)]
+    }
+
+    /// Records the newest UID that belongs to the historical watcher baseline.
+    mutating func setBaselineUID(account: String, mailbox: Mailbox, uid: UInt32) {
+        baselineUIDs[Self.baselineKey(account: account, mailbox: mailbox)] = uid
+    }
+
+    /// The newest UID that belongs to the historical watcher baseline, if known.
+    func baselineUID(account: String, mailbox: Mailbox) -> UInt32? {
+        baselineUIDs[Self.baselineKey(account: account, mailbox: mailbox)]
     }
 
     /// A stable identity for a message: its Message-ID when present, else a

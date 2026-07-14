@@ -168,6 +168,7 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(persistence.processedMessages.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(message(id: 2), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(persistence.processedMessages.baselineUID(account: "me@gmail.com", mailbox: .inbox), 2)
         XCTAssertEqual(persistence.processedSaveCount, 1)
     }
 
@@ -202,6 +203,7 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(persistence.processedMessages.contains(historical, account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.hasBaselineStart(account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertEqual(persistence.processedMessages.baselineUID(account: "me@gmail.com", mailbox: .inbox), 1)
     }
 
     func testPollWithCompletedBaselineStillFiltersPreStartMessages() async {
@@ -220,6 +222,62 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertEqual(provider.bodyFetchCallCount, 1)
         XCTAssertFalse(persistence.processedMessages.contains(unseenHistorical, account: "me@gmail.com", mailbox: .inbox))
         XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testPollTreatsUnparseableBaselineStartDatesAsEligible() async {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let unknownDate = message(id: 2, date: "")
+        let historical = message(id: 1, date: "Tue, 14 Nov 2023 22:13:19 +0000")
+        let (appState, provider, persistence) = makeAppState(
+            fetch: .success([unknownDate, historical]),
+            processed: baselineStartProcessed(start)
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [2])
+        XCTAssertEqual(provider.bodyFetchCallCount, 1)
+        XCTAssertTrue(persistence.processedMessages.contains(historical, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(unknownDate, account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testPollFetchesPastRecentWindowUntilBaselineUIDIsReached() async {
+        var processed = baselineProcessed()
+        processed.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 100)
+        for id in 111...130 {
+            processed.insert(message(id: UInt32(id)), account: "me@gmail.com", mailbox: .inbox)
+        }
+
+        let allMessages = (91...130).reversed().map { message(id: UInt32($0), messageID: "<\($0)@x.com>") }
+        let provider = PrefixMailProvider(messages: allMessages)
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(
+            settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@gmail.com",
+                llmProvider: "anthropic",
+                llmVerifiedModel: "claude-sonnet-4-6"
+            ),
+            processedMessages: processed
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: "On it.")))
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(provider.fetchLimits, [20, 40])
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), Array(UInt32(101)...UInt32(110)))
+        XCTAssertEqual(provider.bodyFetchCallCount, 10)
     }
 
     func testPollEnqueuesDraftsOldestFirst() async {
@@ -376,4 +434,42 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertEqual(appState.pendingDraftCount, 0)
     }
+}
+
+private final class PrefixMailProvider: MailProvider, @unchecked Sendable {
+    private let messages: [MailMessage]
+    private(set) var fetchLimits: [Int] = []
+    private(set) var bodyFetchCallCount = 0
+
+    init(messages: [MailMessage]) {
+        self.messages = messages
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] {
+        fetchLimits.append(limit)
+        return Array(messages.prefix(limit))
+    }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data {
+        bodyFetchCallCount += 1
+        return Data("Please advise.".utf8)
+    }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
 }

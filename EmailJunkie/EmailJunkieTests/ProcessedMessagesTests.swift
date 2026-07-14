@@ -95,6 +95,15 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertEqual(store.baselineStartDate(account: "me@gmail.com", mailbox: .inbox), date)
     }
 
+    func testBaselineUIDIsScoped() {
+        var store = ProcessedMessages()
+        store.setBaselineUID(account: " Me@Gmail.com ", mailbox: .inbox, uid: 42)
+
+        XCTAssertEqual(store.baselineUID(account: "me@gmail.com", mailbox: .inbox), 42)
+        XCTAssertNil(store.baselineUID(account: "other@gmail.com", mailbox: .inbox))
+        XCTAssertNil(store.baselineUID(account: "me@gmail.com", mailbox: .named("Archive")))
+    }
+
     func testBaselineIsNotEvictedWithMessageKeys() {
         var store = ProcessedMessages()
         store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
@@ -126,6 +135,7 @@ final class ProcessedMessagesTests: XCTestCase {
         store.insertBaseline(account: "me@gmail.com", mailbox: .inbox)
         let baselineStart = Date(timeIntervalSince1970: 1_700_000_000)
         store.setBaselineStart(account: "other@gmail.com", mailbox: .inbox, date: baselineStart)
+        store.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 99)
         store.insert(message(id: 1, messageID: "<1@x.com>"), account: "me@gmail.com", mailbox: .inbox)
         store.insert(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox)
 
@@ -135,6 +145,7 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertEqual(decoded, store)
         XCTAssertTrue(decoded.hasBaseline(account: "me@gmail.com", mailbox: .inbox))
         XCTAssertEqual(decoded.baselineStartDate(account: "other@gmail.com", mailbox: .inbox), baselineStart)
+        XCTAssertEqual(decoded.baselineUID(account: "me@gmail.com", mailbox: .inbox), 99)
         XCTAssertTrue(decoded.contains(message(id: 2, messageID: "<2@x.com>"), account: "me@gmail.com", mailbox: .inbox))
     }
 
@@ -143,5 +154,6 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertTrue(decoded.keys.isEmpty)
         XCTAssertTrue(decoded.baselines.isEmpty)
         XCTAssertTrue(decoded.baselineStarts.isEmpty)
+        XCTAssertTrue(decoded.baselineUIDs.isEmpty)
     }
 }

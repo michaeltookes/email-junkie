@@ -139,8 +139,12 @@ final class AppState: ObservableObject {
     /// The scheduling half of the watcher; the poll policy is `pollInboxOnce`.
     private(set) var inboxWatcher: InboxWatcher!
 
-    /// How many recent inbox messages each poll inspects.
+    /// How many recent inbox messages each poll inspects before catch-up expansion.
     let watchFetchLimit = 20
+
+    /// Maximum number of messages to inspect when catch-up needs to page back to
+    /// the watcher baseline boundary.
+    let watchCatchUpFetchLimit = ProcessedMessages.limit
 
     // MARK: - Private
 

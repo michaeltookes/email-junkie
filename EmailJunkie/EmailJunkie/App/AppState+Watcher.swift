@@ -324,8 +324,10 @@ extension AppState {
 
     private static func isMessage(_ message: MailMessage, onOrAfterBaselineStart startDate: Date?) -> Bool {
         guard let startDate else { return true }
-        guard let date = parsedMessageDate(message.date) else { return true }
-        return date >= startDate
+        if let date = parsedMessageDate(message.date) {
+            return date >= startDate
+        }
+        return true
     }
 
     private static func isMessage(_ message: MailMessage, onOrAfterInitialBaselineStart startDate: Date) -> Bool {

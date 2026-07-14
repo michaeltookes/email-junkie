@@ -21,7 +21,7 @@ final class ProcessedMessagesTests: XCTestCase {
             account: "me@gmail.com",
             mailbox: .inbox
         )
-        XCTAssertEqual(key, "mid:<abc@x.com>")
+        XCTAssertEqual(key, "mid:acct=me@gmail.com|mailbox=inbox|messageID=<abc@x.com>")
     }
 
     func testKeyFallsBackToScopedUIDValidityAndUID() {
@@ -41,14 +41,23 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertTrue(store.contains(msg, account: "me@gmail.com", mailbox: .inbox))
     }
 
-    func testSameMessageIDAcrossMailboxesIsRecognized() {
+    func testSameMessageIDIsScopedToAccountAndMailbox() {
         var store = ProcessedMessages()
         store.insert(message(id: 5, messageID: "<abc@x.com>", uidValidity: 1), account: "one@gmail.com", mailbox: .inbox)
-        // Same Message-ID, different UID/UIDVALIDITY (e.g. moved mailbox).
         XCTAssertTrue(store.contains(
             message(id: 99, messageID: "<abc@x.com>", uidValidity: 2),
+            account: "one@gmail.com",
+            mailbox: .inbox
+        ))
+        XCTAssertFalse(store.contains(
+            message(id: 99, messageID: "<abc@x.com>", uidValidity: 2),
             account: "two@gmail.com",
-            mailbox: .named("[Gmail]/All Mail")
+            mailbox: .inbox
+        ))
+        XCTAssertFalse(store.contains(
+            message(id: 99, messageID: "<abc@x.com>", uidValidity: 2),
+            account: "one@gmail.com",
+            mailbox: .named("Archive")
         ))
     }
 
@@ -60,6 +69,17 @@ final class ProcessedMessagesTests: XCTestCase {
         XCTAssertTrue(store.contains(msg, account: "one@gmail.com", mailbox: .inbox))
         XCTAssertFalse(store.contains(msg, account: "two@gmail.com", mailbox: .inbox))
         XCTAssertFalse(store.contains(msg, account: "one@gmail.com", mailbox: .named("Archive")))
+    }
+
+    func testMessageIDAlsoRecognizesScopedFallbackUIDKey() {
+        var store = ProcessedMessages()
+        let fallbackOnly = message(id: 5, uidValidity: 99)
+        store.insert(fallbackOnly, account: "one@gmail.com", mailbox: .inbox)
+
+        let withMessageID = message(id: 5, messageID: "<abc@x.com>", uidValidity: 99)
+        XCTAssertTrue(store.contains(withMessageID, account: "one@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(store.contains(withMessageID, account: "two@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(store.contains(withMessageID, account: "one@gmail.com", mailbox: .named("Archive")))
     }
 
     func testInsertIsIdempotent() {

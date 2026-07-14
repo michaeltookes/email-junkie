@@ -262,21 +262,24 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertTrue(persistence.processedMessages.contains(unknownDate, account: "me@gmail.com", mailbox: .inbox))
     }
 
-    func testCompletedBaselineDoesNotFilterBelowCutoffWhenUIDValidityChanges() async {
-        var processed = baselineProcessed()
+    func testCompletedBaselineFallsBackToStartDateWhenUIDValidityChanges() async {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var processed = baselineWithStartProcessed(start)
         processed.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 100, uidValidity: 1)
-        let newValidityMessage = message(id: 10, uidValidity: 2)
+        let historical = message(id: 10, uidValidity: 2, date: "Tue, 14 Nov 2023 22:13:19 +0000")
+        let postStart = message(id: 11, uidValidity: 2, date: "Tue, 14 Nov 2023 22:13:21 +0000")
         let (appState, provider, persistence) = makeAppState(
-            fetch: .success([newValidityMessage]),
+            fetch: .success([postStart, historical]),
             processed: processed
         )
         appState.watchStatus = .watching
 
         await appState.pollInboxOnce()
 
-        XCTAssertEqual(appState.pendingDrafts.map(\.id), [10])
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [11])
         XCTAssertEqual(provider.bodyFetchCallCount, 1)
-        XCTAssertTrue(persistence.processedMessages.contains(newValidityMessage, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(persistence.processedMessages.contains(historical, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(postStart, account: "me@gmail.com", mailbox: .inbox))
     }
 
     func testPollFetchesPastRecentWindowUntilBaselineUIDIsReached() async {

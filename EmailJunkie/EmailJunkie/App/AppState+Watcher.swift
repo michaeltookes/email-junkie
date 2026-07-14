@@ -278,7 +278,7 @@ extension AppState {
         afterBaselineUID baselineUID: ProcessedMessages.BaselineUIDCutoff?,
         onOrAfterBaselineStart startDate: Date?
     ) -> Bool {
-        if let baselineUID {
+        if let baselineUID, isMessageUIDComparable(message, baselineUID: baselineUID) {
             return isMessage(message, afterBaselineUID: baselineUID)
         }
         return isMessage(message, onOrAfterBaselineStart: startDate)

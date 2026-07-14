@@ -71,6 +71,49 @@ extension AppState {
         }
     }
 
+    /// Builds a reply draft for a watcher-selected message and appends it to the
+    /// pending queue. Unlike `generateDraft`, this does not touch the Settings
+    /// preview state, so an active preview and the watcher don't clobber each
+    /// other. Throws on missing configuration or provider/LLM errors.
+    @discardableResult
+    func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws -> Bool {
+        guard let llmConfiguration = currentDraftLLMConfiguration else {
+            throw DraftError.emptyDraft
+        }
+        let credentials = mailCredentials
+        let data = try await mailProvider.fetchBodyText(
+            credentials,
+            mailbox: mailbox,
+            uid: message.id,
+            expectedUIDValidity: message.uidValidity
+        )
+        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        let context = ReplyContext(
+            senderName: message.from?.name,
+            senderEmail: message.from?.email,
+            subject: message.subject,
+            body: MailBodyText.plainText(from: data)
+        )
+        let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        let draft = Draft(
+            id: message.id,
+            sourceUIDValidity: message.uidValidity,
+            sourceAccountEmail: credentials.email,
+            sourceMailbox: mailbox.imapName,
+            sourceSubject: message.subject,
+            sourceFrom: message.from,
+            sourceReplyTo: message.replyTo,
+            sourceMessageID: message.messageID,
+            replySubject: Self.replySubject(for: message.subject),
+            body: body,
+            model: llmConfiguration.model,
+            generatedAt: Date()
+        )
+        try enqueuePendingDraft(draft)
+        return true
+    }
+
     // MARK: - Helpers
 
     func nextDraftGeneration() -> Int {
@@ -112,6 +155,27 @@ extension AppState {
         draftGeneration == requestGeneration
             && mailCredentials == credentials
             && currentDraftLLMConfiguration == llmConfiguration
+    }
+
+    private func isCurrentWatcherDraftRequest(
+        credentials: MailAccountCredentials,
+        llmConfiguration: DraftLLMConfiguration
+    ) -> Bool {
+        watchStatus == .watching
+            && mailCredentials == credentials
+            && currentDraftLLMConfiguration == llmConfiguration
+    }
+
+    private func enqueuePendingDraft(_ draft: Draft) throws {
+        pendingDrafts.append(draft)
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+            pendingDraftCount = pendingDrafts.count
+        } catch {
+            pendingDrafts.removeLast()
+            pendingDraftCount = pendingDrafts.count
+            throw error
+        }
     }
 
     func isLatestDraftRequest(_ requestGeneration: Int) -> Bool {

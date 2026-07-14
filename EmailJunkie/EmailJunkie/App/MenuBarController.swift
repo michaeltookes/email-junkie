@@ -74,6 +74,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         status.isEnabled = false
         items.append(status)
 
+        // Start / Pause watching (only when an account + LLM are connected).
+        if appState.canWatch {
+            let watching = appState.watchStatus == .watching
+            let toggle = NSMenuItem(
+                title: watching ? "Pause Watching" : "Start Watching",
+                action: #selector(toggleWatching),
+                keyEquivalent: ""
+            )
+            toggle.target = self
+            items.append(toggle)
+        }
+
         items.append(.separator())
 
         // Settings…
@@ -115,6 +127,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func toggleLaunchAtLogin() {
         appState.setLaunchAtLogin(!appState.launchAtLogin)
+    }
+
+    @objc private func toggleWatching() {
+        appState.toggleWatching()
     }
 
     @objc private func checkForUpdates() {

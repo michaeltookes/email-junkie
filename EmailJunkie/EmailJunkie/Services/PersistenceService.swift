@@ -19,6 +19,16 @@ protocol PersistenceProvider {
     func saveVoiceProfile(_ profile: VoiceProfile)
     /// Removes the stored voice profile.
     func removeVoiceProfile()
+
+    /// The set of inbox messages the watcher has already processed.
+    func loadProcessedMessages() -> ProcessedMessages
+    /// Persists the processed-message set (replaces the previous one).
+    func saveProcessedMessages(_ processed: ProcessedMessages)
+
+    /// Watcher-created drafts awaiting approval.
+    func loadPendingDrafts() -> [Draft]
+    /// Persists watcher-created drafts before their source messages are marked processed.
+    func savePendingDraftsSync(_ drafts: [Draft]) throws
 }
 
 /// File-based persistence for non-secret application settings.
@@ -35,6 +45,8 @@ final class PersistenceService: PersistenceProvider {
 
     private let settingsURL: URL
     private let voiceProfileURL: URL
+    private let processedMessagesURL: URL
+    private let pendingDraftsURL: URL
     private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
@@ -60,6 +72,8 @@ final class PersistenceService: PersistenceProvider {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         settingsURL = directory.appendingPathComponent("Settings.json")
         voiceProfileURL = directory.appendingPathComponent("VoiceProfile.json")
+        processedMessagesURL = directory.appendingPathComponent("ProcessedMessages.json")
+        pendingDraftsURL = directory.appendingPathComponent("PendingDrafts.json")
     }
 
     // MARK: - Settings
@@ -131,6 +145,59 @@ final class PersistenceService: PersistenceProvider {
     func removeVoiceProfile() {
         ioQueue.async { [voiceProfileURL] in
             try? FileManager.default.removeItem(at: voiceProfileURL)
+        }
+    }
+
+    // MARK: - Processed Messages
+
+    func loadProcessedMessages() -> ProcessedMessages {
+        guard FileManager.default.fileExists(atPath: processedMessagesURL.path) else {
+            return ProcessedMessages()
+        }
+        do {
+            let data = try Data(contentsOf: processedMessagesURL)
+            return try decoder.decode(ProcessedMessages.self, from: data)
+        } catch {
+            logger.error("Failed to load processed messages: \(error.localizedDescription)")
+            return ProcessedMessages()
+        }
+    }
+
+    func saveProcessedMessages(_ processed: ProcessedMessages) {
+        ioQueue.async { [encoder, processedMessagesURL] in
+            do {
+                let data = try encoder.encode(processed)
+                try data.write(to: processedMessagesURL, options: .atomic)
+            } catch {
+                logger.error("Failed to save processed messages: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Pending Drafts
+
+    func loadPendingDrafts() -> [Draft] {
+        guard FileManager.default.fileExists(atPath: pendingDraftsURL.path) else {
+            return []
+        }
+        do {
+            let data = try Data(contentsOf: pendingDraftsURL)
+            return try decoder.decode([Draft].self, from: data)
+        } catch {
+            logger.error("Failed to load pending drafts: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func savePendingDraftsSync(_ drafts: [Draft]) throws {
+        do {
+            try ioQueue.sync { [encoder, pendingDraftsURL] in
+                let data = try encoder.encode(drafts)
+                try data.write(to: pendingDraftsURL, options: .atomic)
+            }
+        } catch {
+            logger.error("Failed to save pending drafts: \(error.localizedDescription)")
+            throw error
         }
     }
 }

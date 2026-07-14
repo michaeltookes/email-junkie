@@ -38,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController(appState: appState, updateManager: updateManager)
         updateManager.startUpdater()
 
+        // Auto-resume watching if an account + LLM are already connected.
+        appState.startWatchingIfReady()
+
         logger.info("Email Junkie launched")
     }
 

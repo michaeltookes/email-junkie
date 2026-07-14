@@ -160,8 +160,8 @@ extension AppState {
     ) -> Bool {
         guard messages.count >= limit, limit < watchCatchUpFetchLimit else { return false }
 
-        if let baselineUID = processedMessages.baselineUID(account: account, mailbox: mailbox) {
-            guard Self.isBaselineUIDComparable(messages: messages, baselineUID: baselineUID) else { return false }
+        if let baselineUID = processedMessages.baselineUID(account: account, mailbox: mailbox),
+           Self.isBaselineUIDComparable(messages: messages, baselineUID: baselineUID) {
             return !messages.contains { Self.isMessage($0, atOrBeforeBaselineUID: baselineUID) }
         }
 

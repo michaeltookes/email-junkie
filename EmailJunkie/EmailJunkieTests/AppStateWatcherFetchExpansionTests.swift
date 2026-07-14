@@ -10,7 +10,15 @@ final class AppStateWatcherFetchExpansionTests: XCTestCase {
         var processed = baselineWithStartProcessed(start)
         processed.setBaselineUID(account: "me@gmail.com", mailbox: .inbox, uid: 100, uidValidity: 1)
         for id in 121...130 {
-            processed.insert(message(id: UInt32(id), uidValidity: 2), account: "me@gmail.com", mailbox: .inbox)
+            processed.insert(
+                message(
+                    id: UInt32(id),
+                    uidValidity: 2,
+                    date: "Tue, 14 Nov 2023 22:13:21 +0000"
+                ),
+                account: "me@gmail.com",
+                mailbox: .inbox
+            )
         }
 
         let provider = PrefixMailProvider(messages: postStartMessages() + historicalMessages())

@@ -19,6 +19,7 @@ final class InboxWatcher {
     private var isRunning = false
     private var isAsleep = false
     private var isTicking = false
+    private var needsImmediateTickAfterCurrent = false
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
@@ -39,13 +40,14 @@ final class InboxWatcher {
         isAsleep = false
         registerSleepWake()
         schedule()
-        tick()
+        tick(queueIfRunning: true)
     }
 
     /// Pauses watching and tears down the timer and sleep/wake observers.
     func stop() {
         isRunning = false
         isAsleep = false
+        needsImmediateTickAfterCurrent = false
         invalidate()
         unregisterSleepWake()
     }
@@ -75,12 +77,23 @@ final class InboxWatcher {
     }
 
     /// Runs `onTick`, single-flighting so overlapping ticks can't stack up.
-    private func tick() {
-        guard !isTicking else { return }
+    private func tick(queueIfRunning: Bool = false) {
+        guard !isTicking else {
+            if queueIfRunning {
+                needsImmediateTickAfterCurrent = true
+            }
+            return
+        }
         isTicking = true
         Task { @MainActor in
             await onTick()
             isTicking = false
+            if needsImmediateTickAfterCurrent, isRunning, !isAsleep {
+                needsImmediateTickAfterCurrent = false
+                tick()
+            } else {
+                needsImmediateTickAfterCurrent = false
+            }
         }
     }
 
@@ -122,6 +135,6 @@ final class InboxWatcher {
         guard isRunning, isAsleep else { return }
         isAsleep = false
         schedule()
-        tick()
+        tick(queueIfRunning: true)
     }
 }

@@ -27,6 +27,10 @@ extension AppState {
             approvalError = "Connect an email account first."
             return
         }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            approvalError = "This draft was generated for a different email account."
+            return
+        }
 
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }
@@ -80,5 +84,14 @@ extension AppState {
             logger.error("Failed to persist pending drafts after removal: \(error.localizedDescription)")
         }
         notifier.removeNotification(identity: draft.identity)
+    }
+
+    private func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
+        guard let sourceAccount = draft.sourceAccountEmail else { return false }
+        return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
+    }
+
+    private func normalizedEmail(_ email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

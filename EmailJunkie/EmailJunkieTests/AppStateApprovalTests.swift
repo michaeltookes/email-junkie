@@ -5,11 +5,11 @@ import XCTest
 @MainActor
 final class AppStateApprovalTests: XCTestCase {
 
-    private func pendingDraft(id: UInt32 = 1) -> Draft {
+    private func pendingDraft(id: UInt32 = 1, sourceAccountEmail: String? = "me@gmail.com") -> Draft {
         Draft(
             id: id,
             sourceUIDValidity: 10,
-            sourceAccountEmail: "me@gmail.com",
+            sourceAccountEmail: sourceAccountEmail,
             sourceMailbox: "INBOX",
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
@@ -40,7 +40,7 @@ final class AppStateApprovalTests: XCTestCase {
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
             sendBehavior: sendBehavior.rawValue
-        ))
+        ), pendingDrafts: drafts)
         let provider = FakeAppMailProvider(result: .success(()), appendResult: appendResult, sendResult: sendResult)
         let notifier = FakeDraftNotifier()
         let appState = AppState(
@@ -102,6 +102,21 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertNotNil(appState.approvalError)
         XCTAssertTrue(notifier.removedIdentities.isEmpty)
         XCTAssertFalse(appState.approvingDraftIDs.contains(draft.identity))
+    }
+
+    func testApproveBlocksDraftFromDifferentAccount() async {
+        let draft = pendingDraft(sourceAccountEmail: "old@gmail.com")
+        let (appState, provider, notifier, persistence) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        await appState.approveDraft(draft)
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDraftCount, 1)
+        XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
+        XCTAssertTrue(notifier.removedIdentities.isEmpty)
+        XCTAssertEqual(appState.approvalError, "This draft was generated for a different email account.")
     }
 
     func testDenyDiscardsWithoutSendingAndClearsNotification() async {

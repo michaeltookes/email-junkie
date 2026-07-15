@@ -99,7 +99,7 @@ extension AppState {
         do {
             try persistence.savePendingDraftsSync(pendingDrafts)
         } catch {
-            logger.error("Failed to clean pending draft after approval; approved tombstone will suppress reload: \(error.localizedDescription)")
+            logger.error("Failed to clean approved draft; tombstone will suppress reload: \(error.localizedDescription)")
         }
     }
 

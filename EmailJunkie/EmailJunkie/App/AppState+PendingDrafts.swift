@@ -16,8 +16,9 @@ extension AppState {
     }
 
     /// Approves a pending draft: sends it or saves it as a Gmail draft per the
-    /// send-behavior setting, then removes it from the queue on success.
-    func approveDraft(_ draft: Draft) async {
+    /// supplied send behavior (defaulting to the current setting), then removes
+    /// it from the queue on success.
+    func approveDraft(_ draft: Draft, sendBehavior approvalSendBehavior: SendBehavior? = nil) async {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         guard !approvingDraftIDs.contains(draft.identity) else { return }
 
@@ -38,7 +39,7 @@ extension AppState {
         do {
             let removalIndex = try removePendingDraft(draft, removeNotification: false)
             do {
-                switch sendBehavior {
+                switch approvalSendBehavior ?? sendBehavior {
                 case .autoSend:
                     try await performSend(draft, credentials: credentials)
                 case .saveAsDraft:
@@ -70,9 +71,9 @@ extension AppState {
         switch action {
         case .open:
             openReviewHandler?()
-        case .approve:
+        case .approve(let sendBehavior):
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
-            await approveDraft(draft)
+            await approveDraft(draft, sendBehavior: sendBehavior)
         case .deny:
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             denyDraft(draft)

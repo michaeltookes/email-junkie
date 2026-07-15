@@ -6,11 +6,13 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Noti
 
 /// `userInfo` key carrying a draft's `identity` on its notification.
 private let draftIdentityUserInfoKey = "draftIdentity"
+/// `userInfo` key carrying the send behavior displayed on the notification.
+private let draftSendBehaviorUserInfoKey = "sendBehavior"
 
 /// An action the user took on a draft-ready notification.
 enum DraftNotificationAction: Equatable {
-    /// Approve inline (send or save per the send-behavior setting).
-    case approve
+    /// Approve inline using the send behavior displayed on the notification.
+    case approve(SendBehavior)
     /// Deny inline (discard the draft).
     case deny
     /// Open the review window (the notification body was clicked).
@@ -85,7 +87,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
         content.subtitle = draft.sourceSubject
         content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
         content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
-        content.userInfo = [draftIdentityUserInfoKey: draft.identity]
+        content.userInfo = Self.notificationUserInfo(for: draft, sendBehavior: sendBehavior)
         content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
 
         let request = UNNotificationRequest(
@@ -172,10 +174,21 @@ final class UserNotificationService: NSObject, DraftNotifying {
         "\(approvalNotice(for: sendBehavior)). \(snippet(replyBody))"
     }
 
-    private func action(for actionIdentifier: String) -> DraftNotificationAction {
+    static func notificationUserInfo(for draft: Draft, sendBehavior: SendBehavior) -> [AnyHashable: Any] {
+        [
+            draftIdentityUserInfoKey: draft.identity,
+            draftSendBehaviorUserInfoKey: sendBehavior.rawValue
+        ]
+    }
+
+    static func action(for actionIdentifier: String, userInfo: [AnyHashable: Any]) -> DraftNotificationAction {
         switch actionIdentifier {
         case Self.approveActionIdentifier:
-            return .approve
+            guard let rawSendBehavior = userInfo[draftSendBehaviorUserInfoKey] as? String,
+                  let sendBehavior = SendBehavior(rawValue: rawSendBehavior) else {
+                return .open
+            }
+            return .approve(sendBehavior)
         case Self.denyActionIdentifier:
             return .deny
         default:
@@ -202,12 +215,13 @@ extension UserNotificationService: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let identity = response.notification.request.content.userInfo[draftIdentityUserInfoKey] as? String
+        let userInfo = response.notification.request.content.userInfo
         let actionIdentifier = response.actionIdentifier
         Task { @MainActor in
             defer { completionHandler() }
             guard actionIdentifier != UNNotificationDismissActionIdentifier,
                   let identity else { return }
-            await onAction?(action(for: actionIdentifier), identity)
+            await onAction?(Self.action(for: actionIdentifier, userInfo: userInfo), identity)
         }
     }
 }

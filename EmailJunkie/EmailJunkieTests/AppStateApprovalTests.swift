@@ -204,10 +204,21 @@ final class AppStateApprovalTests: XCTestCase {
         let draft = pendingDraft()
         let (appState, provider, notifier, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
 
-        await notifier.fireAction(.approve, identity: draft.identity)
+        await notifier.fireAction(.approve(.autoSend), identity: draft.identity)
 
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(provider.sentEnvelope)
+    }
+
+    func testNotificationApproveActionUsesDisplayedSendBehavior() async {
+        let draft = pendingDraft()
+        let (appState, provider, notifier, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        await notifier.fireAction(.approve(.saveAsDraft), identity: draft.identity)
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(provider.appendedMailbox, .drafts)
+        XCTAssertNil(provider.sentRFC822)
     }
 
     func testNotificationApproveActionWaitsForApprovalToFinish() async {
@@ -216,8 +227,8 @@ final class AppStateApprovalTests: XCTestCase {
         let probe = NotificationActionProbe()
 
         let route = Task {
-            await appState.handleNotificationAction(.approve, identity: draft.identity)
-            await probe.markComplete()
+            await appState.handleNotificationAction(.approve(.autoSend), identity: draft.identity)
+            probe.markComplete()
         }
         await fulfillment(of: [provider.didStartSend], timeout: 1)
         await Task.yield()
@@ -290,6 +301,22 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertNotEqual(
             UserNotificationService.categoryIdentifier(for: .autoSend),
             UserNotificationService.categoryIdentifier(for: .saveAsDraft)
+        )
+
+        let userInfo = UserNotificationService.notificationUserInfo(for: pendingDraft(), sendBehavior: .autoSend)
+        XCTAssertEqual(
+            UserNotificationService.action(
+                for: UserNotificationService.approveActionIdentifier,
+                userInfo: userInfo
+            ),
+            .approve(.autoSend)
+        )
+        XCTAssertEqual(
+            UserNotificationService.action(
+                for: UserNotificationService.approveActionIdentifier,
+                userInfo: [:]
+            ),
+            .open
         )
     }
 

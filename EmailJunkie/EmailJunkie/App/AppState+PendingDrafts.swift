@@ -66,13 +66,13 @@ extension AppState {
     }
 
     /// Routes a native-notification action back into the queue.
-    func handleNotificationAction(_ action: DraftNotificationAction, identity: String) {
+    func handleNotificationAction(_ action: DraftNotificationAction, identity: String) async {
         switch action {
         case .open:
             openReviewHandler?()
         case .approve:
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
-            Task { await approveDraft(draft) }
+            await approveDraft(draft)
         case .deny:
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             denyDraft(draft)

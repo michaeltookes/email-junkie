@@ -4,6 +4,15 @@ import XCTest
 @testable import EmailJunkie
 
 @MainActor
+private final class NotificationActionProbe {
+    var isComplete = false
+
+    func markComplete() {
+        isComplete = true
+    }
+}
+
+@MainActor
 final class AppStateApprovalTests: XCTestCase {
 
     private func pendingDraft(id: UInt32 = 1, sourceAccountEmail: String? = "me@gmail.com") -> Draft {
@@ -43,6 +52,35 @@ final class AppStateApprovalTests: XCTestCase {
             sendBehavior: sendBehavior.rawValue
         ), pendingDrafts: drafts)
         let provider = FakeAppMailProvider(result: .success(()), appendResult: appendResult, sendResult: sendResult)
+        let notifier = FakeDraftNotifier()
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(())),
+            notifier: notifier
+        )
+        appState.pendingDrafts = drafts
+        appState.pendingDraftCount = drafts.count
+        return (appState, provider, notifier, persistence)
+    }
+
+    private func makeAppStateWithSuspendedSend(
+        seed drafts: [Draft]
+    ) -> (AppState, SuspendedSendMailProvider, FakeDraftNotifier, AppStateMemoryPersistence) {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: SendBehavior.autoSend.rawValue
+        ), pendingDrafts: drafts)
+        let provider = SuspendedSendMailProvider()
         let notifier = FakeDraftNotifier()
         let appState = AppState(
             persistence: persistence,
@@ -166,39 +204,59 @@ final class AppStateApprovalTests: XCTestCase {
         let draft = pendingDraft()
         let (appState, provider, notifier, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
 
-        notifier.fireAction(.approve, identity: draft.identity)
-        // The approve runs in a detached Task; yield until it settles.
-        for _ in 0..<50 where !appState.pendingDrafts.isEmpty {
-            await Task.yield()
-        }
+        await notifier.fireAction(.approve, identity: draft.identity)
 
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(provider.sentEnvelope)
     }
 
-    func testNotificationDenyActionDiscardsDraft() {
+    func testNotificationApproveActionWaitsForApprovalToFinish() async {
+        let draft = pendingDraft()
+        let (appState, provider, _, _) = makeAppStateWithSuspendedSend(seed: [draft])
+        let probe = NotificationActionProbe()
+
+        let route = Task {
+            await appState.handleNotificationAction(.approve, identity: draft.identity)
+            await probe.markComplete()
+        }
+        await fulfillment(of: [provider.didStartSend], timeout: 1)
+        await Task.yield()
+
+        XCTAssertFalse(probe.isComplete)
+        XCTAssertEqual(provider.sentMessageCount, 1)
+        XCTAssertTrue(appState.approvingDraftIDs.contains(draft.identity))
+
+        provider.completeSend(with: .success(()))
+        await route.value
+
+        XCTAssertTrue(probe.isComplete)
+        XCTAssertFalse(appState.approvingDraftIDs.contains(draft.identity))
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
+    func testNotificationDenyActionDiscardsDraft() async {
         let draft = pendingDraft()
         let (appState, _, notifier, _) = makeAppState(seed: [draft])
 
-        notifier.fireAction(.deny, identity: draft.identity)
+        await notifier.fireAction(.deny, identity: draft.identity)
 
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
-    func testNotificationOpenActionInvokesReviewHandler() {
+    func testNotificationOpenActionInvokesReviewHandler() async {
         let (appState, _, notifier, _) = makeAppState(seed: [pendingDraft()])
         var opened = false
         appState.openReviewHandler = { opened = true }
 
-        notifier.fireAction(.open, identity: "anything")
+        await notifier.fireAction(.open, identity: "anything")
 
         XCTAssertTrue(opened)
     }
 
-    func testUnknownIdentityActionIsIgnored() {
+    func testUnknownIdentityActionIsIgnored() async {
         let (appState, _, notifier, _) = makeAppState(seed: [pendingDraft()])
 
-        notifier.fireAction(.deny, identity: "missing")
+        await notifier.fireAction(.deny, identity: "missing")
 
         XCTAssertEqual(appState.pendingDrafts.count, 1)
     }
@@ -211,6 +269,28 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertTrue(approve?.options.contains(.authenticationRequired) ?? false)
         XCTAssertTrue(deny?.options.contains(.authenticationRequired) ?? false)
         XCTAssertTrue(deny?.options.contains(.destructive) ?? false)
+    }
+
+    func testInlineNotificationCopyReflectsSendBehavior() {
+        let sendActions = UserNotificationService.draftActions(for: .autoSend)
+        let saveActions = UserNotificationService.draftActions(for: .saveAsDraft)
+        let sendApprove = sendActions.first { $0.identifier == UserNotificationService.approveActionIdentifier }
+        let saveApprove = saveActions.first { $0.identifier == UserNotificationService.approveActionIdentifier }
+
+        XCTAssertEqual(sendApprove?.title, "Send Now")
+        XCTAssertEqual(saveApprove?.title, "Save Draft")
+        XCTAssertEqual(
+            UserNotificationService.notificationBody(replyBody: "Thursday works!", sendBehavior: .autoSend),
+            "Approve sends this reply now. Thursday works!"
+        )
+        XCTAssertEqual(
+            UserNotificationService.notificationBody(replyBody: "Thursday works!", sendBehavior: .saveAsDraft),
+            "Approve saves this as a draft. Thursday works!"
+        )
+        XCTAssertNotEqual(
+            UserNotificationService.categoryIdentifier(for: .autoSend),
+            UserNotificationService.categoryIdentifier(for: .saveAsDraft)
+        )
     }
 
     // MARK: - Enqueue posts a notification (and captures the incoming body)

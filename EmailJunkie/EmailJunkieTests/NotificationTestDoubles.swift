@@ -5,7 +5,7 @@ import Foundation
 /// delivered notification via `onAction`.
 @MainActor
 final class FakeDraftNotifier: DraftNotifying {
-    var onAction: ((DraftNotificationAction, String) -> Void)?
+    var onAction: ((DraftNotificationAction, String) async -> Void)?
     private(set) var authorizationRequested = false
     private(set) var notifiedDrafts: [Draft] = []
     private(set) var removedIdentities: [String] = []
@@ -23,7 +23,7 @@ final class FakeDraftNotifier: DraftNotifying {
     }
 
     /// Simulates the user acting on the notification for `identity`.
-    func fireAction(_ action: DraftNotificationAction, identity: String) {
-        onAction?(action, identity)
+    func fireAction(_ action: DraftNotificationAction, identity: String) async {
+        await onAction?(action, identity)
     }
 }

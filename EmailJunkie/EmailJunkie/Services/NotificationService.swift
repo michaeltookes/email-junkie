@@ -23,8 +23,9 @@ enum DraftNotificationAction: Equatable {
 @MainActor
 protocol DraftNotifying: AnyObject {
     /// Called on the main actor when the user acts on a notification; the second
-    /// argument is the draft's `identity`.
-    var onAction: ((DraftNotificationAction, String) -> Void)? { get set }
+    /// argument is the draft's `identity`. The notification response is not
+    /// completed until this async handler returns.
+    var onAction: ((DraftNotificationAction, String) async -> Void)? { get set }
 
     /// Requests notification authorization (no-op if already decided).
     func requestAuthorization()
@@ -41,7 +42,7 @@ protocol DraftNotifying: AnyObject {
 /// `UserNotificationService` via the app delegate.
 @MainActor
 final class NullDraftNotifier: DraftNotifying {
-    var onAction: ((DraftNotificationAction, String) -> Void)?
+    var onAction: ((DraftNotificationAction, String) async -> Void)?
     nonisolated init() {}
     func requestAuthorization() {}
     func notify(for draft: Draft, sendBehavior: SendBehavior) {}
@@ -57,7 +58,7 @@ final class NullDraftNotifier: DraftNotifying {
 @MainActor
 final class UserNotificationService: NSObject, DraftNotifying {
 
-    var onAction: ((DraftNotificationAction, String) -> Void)?
+    var onAction: ((DraftNotificationAction, String) async -> Void)?
 
     private let center = UNUserNotificationCenter.current()
 
@@ -82,8 +83,8 @@ final class UserNotificationService: NSObject, DraftNotifying {
         let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
         content.title = "Reply ready for \(sender)"
         content.subtitle = draft.sourceSubject
-        content.body = Self.snippet(draft.body)
-        content.categoryIdentifier = Self.categoryIdentifier
+        content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
+        content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
         content.userInfo = [draftIdentityUserInfoKey: draft.identity]
         content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
 
@@ -106,10 +107,37 @@ final class UserNotificationService: NSObject, DraftNotifying {
 
     // MARK: - Helpers
 
-    static func draftActions() -> [UNNotificationAction] {
+    static func categoryIdentifier(for sendBehavior: SendBehavior) -> String {
+        switch sendBehavior {
+        case .autoSend:
+            return "\(categoryIdentifier)_AUTO_SEND"
+        case .saveAsDraft:
+            return "\(categoryIdentifier)_SAVE_DRAFT"
+        }
+    }
+
+    static func approveActionTitle(for sendBehavior: SendBehavior) -> String {
+        switch sendBehavior {
+        case .autoSend:
+            return "Send Now"
+        case .saveAsDraft:
+            return "Save Draft"
+        }
+    }
+
+    static func approvalNotice(for sendBehavior: SendBehavior) -> String {
+        switch sendBehavior {
+        case .autoSend:
+            return "Approve sends this reply now"
+        case .saveAsDraft:
+            return "Approve saves this as a draft"
+        }
+    }
+
+    static func draftActions(for sendBehavior: SendBehavior = .default) -> [UNNotificationAction] {
         let approve = UNNotificationAction(
             identifier: Self.approveActionIdentifier,
-            title: "Approve",
+            title: Self.approveActionTitle(for: sendBehavior),
             options: [.authenticationRequired]
         )
         let deny = UNNotificationAction(
@@ -121,13 +149,15 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     private func registerCategory() {
-        let category = UNNotificationCategory(
-            identifier: Self.categoryIdentifier,
-            actions: Self.draftActions(),
-            intentIdentifiers: [],
-            options: []
-        )
-        center.setNotificationCategories([category])
+        let categories = Set(SendBehavior.allCases.map { sendBehavior in
+            UNNotificationCategory(
+                identifier: Self.categoryIdentifier(for: sendBehavior),
+                actions: Self.draftActions(for: sendBehavior),
+                intentIdentifiers: [],
+                options: []
+            )
+        })
+        center.setNotificationCategories(categories)
     }
 
     /// A single-line preview of the reply body for the notification.
@@ -136,6 +166,10 @@ final class UserNotificationService: NSObject, DraftNotifying {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return collapsed.count > maxChars ? String(collapsed.prefix(maxChars)) + "…" : collapsed
+    }
+
+    static func notificationBody(replyBody: String, sendBehavior: SendBehavior) -> String {
+        "\(approvalNotice(for: sendBehavior)). \(snippet(replyBody))"
     }
 
     private func action(for actionIdentifier: String) -> DraftNotificationAction {
@@ -173,7 +207,7 @@ extension UserNotificationService: UNUserNotificationCenterDelegate {
             defer { completionHandler() }
             guard actionIdentifier != UNNotificationDismissActionIdentifier,
                   let identity else { return }
-            onAction?(action(for: actionIdentifier), identity)
+            await onAction?(action(for: actionIdentifier), identity)
         }
     }
 }

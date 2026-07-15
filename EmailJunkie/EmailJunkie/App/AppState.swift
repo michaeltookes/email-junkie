@@ -220,7 +220,7 @@ final class AppState: ObservableObject {
         )
 
         self.notifier.onAction = { [weak self] action, identity in
-            self?.handleNotificationAction(action, identity: identity)
+            await self?.handleNotificationAction(action, identity: identity)
         }
     }
 

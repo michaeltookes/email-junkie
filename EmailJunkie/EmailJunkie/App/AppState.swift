@@ -191,7 +191,16 @@ final class AppState: ObservableObject {
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.processedMessages = persistence.loadProcessedMessages()
-        let pendingDrafts = persistence.loadPendingDrafts()
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
         self.pendingDrafts = pendingDrafts
         self.pendingDraftCount = pendingDrafts.count
         self.mailEmail = settings.mailEmail

@@ -112,6 +112,7 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertEqual(appState.pendingDraftCount, 0)
         XCTAssertEqual(notifier.removedIdentities, [draft.identity])
         XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(draft.identity))
         XCTAssertNil(appState.approvalError)
         XCTAssertFalse(appState.approvingDraftIDs.contains(draft.identity))
     }
@@ -144,20 +145,74 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertFalse(appState.approvingDraftIDs.contains(draft.identity))
     }
 
-    func testApproveDoesNotDispatchWhenDurableRemovalFails() async {
+    func testApproveUsesTombstoneWhenPendingRemovalPersistenceFails() async {
         let draft = pendingDraft()
         let (appState, provider, notifier, persistence) = makeAppState(sendBehavior: .autoSend, seed: [draft])
         persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
 
         await appState.approveDraft(draft)
 
-        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNotNil(provider.sentRFC822)
         XCTAssertNil(provider.appendedRFC822)
-        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
-        XCTAssertEqual(appState.pendingDraftCount, 1)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(appState.pendingDraftCount, 0)
         XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(draft.identity))
+        XCTAssertEqual(notifier.removedIdentities, [draft.identity])
+        XCTAssertNil(appState.approvalError)
+    }
+
+    func testApproveKeepsDraftDurableWhileSendIsInFlight() async {
+        let draft = pendingDraft()
+        let (appState, provider, notifier, persistence) = makeAppStateWithSuspendedSend(seed: [draft])
+
+        let approval = Task {
+            await appState.approveDraft(draft)
+        }
+        await fulfillment(of: [provider.didStartSend], timeout: 1)
+        await Task.yield()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().isEmpty)
         XCTAssertTrue(notifier.removedIdentities.isEmpty)
-        XCTAssertNotNil(appState.approvalError)
+
+        provider.completeSend(with: .success(()))
+        await approval.value
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(draft.identity))
+        XCTAssertEqual(notifier.removedIdentities, [draft.identity])
+    }
+
+    func testLaunchFiltersApprovedDraftTombstones() {
+        let draft = pendingDraft()
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(
+            settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@gmail.com",
+                llmProvider: "anthropic",
+                llmVerifiedModel: "claude-sonnet-4-6"
+            ),
+            pendingDrafts: [draft],
+            approvedDraftIdentities: [draft.identity]
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(appState.pendingDraftCount, 0)
+        XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
     }
 
     func testApproveBlocksDraftFromDifferentAccount() async {

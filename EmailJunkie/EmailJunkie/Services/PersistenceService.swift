@@ -29,6 +29,11 @@ protocol PersistenceProvider {
     func loadPendingDrafts() -> [Draft]
     /// Persists watcher-created drafts before their source messages are marked processed.
     func savePendingDraftsSync(_ drafts: [Draft]) throws
+
+    /// Identities of drafts whose approve action completed.
+    func loadApprovedDraftIdentities() -> Set<String>
+    /// Persists completed approve identities before pending-draft cleanup is treated as complete.
+    func saveApprovedDraftIdentitiesSync(_ identities: Set<String>) throws
 }
 
 /// File-based persistence for non-secret application settings.
@@ -47,6 +52,7 @@ final class PersistenceService: PersistenceProvider {
     private let voiceProfileURL: URL
     private let processedMessagesURL: URL
     private let pendingDraftsURL: URL
+    private let approvedDraftsURL: URL
     private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
@@ -74,6 +80,7 @@ final class PersistenceService: PersistenceProvider {
         voiceProfileURL = directory.appendingPathComponent("VoiceProfile.json")
         processedMessagesURL = directory.appendingPathComponent("ProcessedMessages.json")
         pendingDraftsURL = directory.appendingPathComponent("PendingDrafts.json")
+        approvedDraftsURL = directory.appendingPathComponent("ApprovedDrafts.json")
     }
 
     // MARK: - Settings
@@ -197,6 +204,33 @@ final class PersistenceService: PersistenceProvider {
             }
         } catch {
             logger.error("Failed to save pending drafts: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    // MARK: - Approved Drafts
+
+    func loadApprovedDraftIdentities() -> Set<String> {
+        guard FileManager.default.fileExists(atPath: approvedDraftsURL.path) else {
+            return []
+        }
+        do {
+            let data = try Data(contentsOf: approvedDraftsURL)
+            return Set(try decoder.decode([String].self, from: data))
+        } catch {
+            logger.error("Failed to load approved drafts: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func saveApprovedDraftIdentitiesSync(_ identities: Set<String>) throws {
+        do {
+            try ioQueue.sync { [encoder, approvedDraftsURL] in
+                let data = try encoder.encode(identities.sorted())
+                try data.write(to: approvedDraftsURL, options: .atomic)
+            }
+        } catch {
+            logger.error("Failed to save approved drafts: \(error.localizedDescription)")
             throw error
         }
     }

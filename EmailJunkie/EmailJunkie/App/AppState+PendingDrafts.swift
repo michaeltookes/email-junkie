@@ -37,19 +37,13 @@ extension AppState {
         defer { approvingDraftIDs.remove(draft.identity) }
 
         do {
-            let removalIndex = try removePendingDraft(draft, removeNotification: false)
-            do {
-                switch approvalSendBehavior ?? sendBehavior {
-                case .autoSend:
-                    try await performSend(draft, credentials: credentials)
-                case .saveAsDraft:
-                    try await performSave(draft, credentials: credentials)
-                }
-                notifier.removeNotification(identity: draft.identity)
-            } catch {
-                restorePendingDraft(draft, at: removalIndex)
-                throw error
+            switch approvalSendBehavior ?? sendBehavior {
+            case .autoSend:
+                try await performSend(draft, credentials: credentials)
+            case .saveAsDraft:
+                try await performSave(draft, credentials: credentials)
             }
+            try finalizeApprovedDraft(draft)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
@@ -80,6 +74,35 @@ extension AppState {
         }
     }
 
+    private func finalizeApprovedDraft(_ draft: Draft) throws {
+        do {
+            try recordApprovedDraftIdentity(draft.identity)
+            removePendingDraftAfterApproval(draft)
+        } catch {
+            logger.error("Failed to persist approved draft tombstone: \(error.localizedDescription)")
+            try removePendingDraft(draft, removeNotification: false)
+        }
+        notifier.removeNotification(identity: draft.identity)
+    }
+
+    private func recordApprovedDraftIdentity(_ identity: String) throws {
+        var approvedDrafts = persistence.loadApprovedDraftIdentities()
+        approvedDrafts.insert(identity)
+        try persistence.saveApprovedDraftIdentitiesSync(approvedDrafts)
+    }
+
+    private func removePendingDraftAfterApproval(_ draft: Draft) {
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
+        pendingDrafts.removeAll { $0.identity == draft.identity }
+        pendingDraftCount = pendingDrafts.count
+
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            logger.error("Failed to clean pending draft after approval; approved tombstone will suppress reload: \(error.localizedDescription)")
+        }
+    }
+
     /// Removes a draft from the queue only after the updated queue is durable.
     @discardableResult
     private func removePendingDraft(_ draft: Draft, removeNotification: Bool = true) throws -> Int? {
@@ -100,19 +123,6 @@ extension AppState {
             notifier.removeNotification(identity: draft.identity)
         }
         return removalIndex
-    }
-
-    private func restorePendingDraft(_ draft: Draft, at index: Int?) {
-        guard !pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
-        let insertionIndex = min(index ?? pendingDrafts.count, pendingDrafts.count)
-        pendingDrafts.insert(draft, at: insertionIndex)
-        pendingDraftCount = pendingDrafts.count
-
-        do {
-            try persistence.savePendingDraftsSync(pendingDrafts)
-        } catch {
-            logger.error("Failed to restore pending draft after approval error: \(error.localizedDescription)")
-        }
     }
 
     private func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {

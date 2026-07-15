@@ -11,22 +11,27 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     private(set) var voiceProfile: VoiceProfile?
     private(set) var processedMessages: ProcessedMessages
     private(set) var pendingDrafts: [Draft]
+    private(set) var approvedDraftIdentities: Set<String>
     private(set) var processedSaveCount = 0
     private(set) var pendingDraftSaveCount = 0
+    private(set) var approvedDraftSaveCount = 0
     private(set) var saveEvents: [String] = []
     var syncSaveError: Error?
     var pendingDraftSaveError: Error?
+    var approvedDraftSaveError: Error?
 
     init(
         settings: Settings = .default,
         voiceProfile: VoiceProfile? = nil,
         processedMessages: ProcessedMessages = ProcessedMessages(),
-        pendingDrafts: [Draft] = []
+        pendingDrafts: [Draft] = [],
+        approvedDraftIdentities: Set<String> = []
     ) {
         self.settings = settings
         self.voiceProfile = voiceProfile
         self.processedMessages = processedMessages
         self.pendingDrafts = pendingDrafts
+        self.approvedDraftIdentities = approvedDraftIdentities
     }
 
     func loadSettings() -> Settings { settings }
@@ -57,6 +62,16 @@ final class AppStateMemoryPersistence: PersistenceProvider {
         pendingDrafts = drafts
         pendingDraftSaveCount += 1
         saveEvents.append("pending")
+    }
+
+    func loadApprovedDraftIdentities() -> Set<String> { approvedDraftIdentities }
+    func saveApprovedDraftIdentitiesSync(_ identities: Set<String>) throws {
+        if let approvedDraftSaveError {
+            throw approvedDraftSaveError
+        }
+        approvedDraftIdentities = identities
+        approvedDraftSaveCount += 1
+        saveEvents.append("approved")
     }
 }
 

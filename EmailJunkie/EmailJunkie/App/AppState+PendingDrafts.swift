@@ -36,13 +36,19 @@ extension AppState {
         defer { approvingDraftIDs.remove(draft.identity) }
 
         do {
-            switch sendBehavior {
-            case .autoSend:
-                try await performSend(draft, credentials: credentials)
-            case .saveAsDraft:
-                try await performSave(draft, credentials: credentials)
+            let removalIndex = try removePendingDraft(draft, removeNotification: false)
+            do {
+                switch sendBehavior {
+                case .autoSend:
+                    try await performSend(draft, credentials: credentials)
+                case .saveAsDraft:
+                    try await performSave(draft, credentials: credentials)
+                }
+                notifier.removeNotification(identity: draft.identity)
+            } catch {
+                restorePendingDraft(draft, at: removalIndex)
+                throw error
             }
-            removePendingDraft(draft)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
@@ -52,7 +58,11 @@ extension AppState {
     func denyDraft(_ draft: Draft) {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
         approvalError = nil
-        removePendingDraft(draft)
+        do {
+            try removePendingDraft(draft)
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+        }
     }
 
     /// Routes a native-notification action back into the queue.
@@ -69,21 +79,39 @@ extension AppState {
         }
     }
 
-    /// Removes a draft from the queue and its notification. Best-effort persist:
-    /// the in-memory removal always sticks (so an approved draft can't be
-    /// re-approved), and a failed disk write is logged rather than rolled back.
-    private func removePendingDraft(_ draft: Draft) {
-        let before = pendingDrafts.count
+    /// Removes a draft from the queue only after the updated queue is durable.
+    @discardableResult
+    private func removePendingDraft(_ draft: Draft, removeNotification: Bool = true) throws -> Int? {
+        let previousDrafts = pendingDrafts
+        guard let removalIndex = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return nil }
         pendingDrafts.removeAll { $0.identity == draft.identity }
-        guard pendingDrafts.count != before else { return }
         pendingDraftCount = pendingDrafts.count
 
         do {
             try persistence.savePendingDraftsSync(pendingDrafts)
         } catch {
+            pendingDrafts = previousDrafts
+            pendingDraftCount = previousDrafts.count
             logger.error("Failed to persist pending drafts after removal: \(error.localizedDescription)")
+            throw error
         }
-        notifier.removeNotification(identity: draft.identity)
+        if removeNotification {
+            notifier.removeNotification(identity: draft.identity)
+        }
+        return removalIndex
+    }
+
+    private func restorePendingDraft(_ draft: Draft, at index: Int?) {
+        guard !pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
+        let insertionIndex = min(index ?? pendingDrafts.count, pendingDrafts.count)
+        pendingDrafts.insert(draft, at: insertionIndex)
+        pendingDraftCount = pendingDrafts.count
+
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            logger.error("Failed to restore pending draft after approval error: \(error.localizedDescription)")
+        }
     }
 
     private func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {

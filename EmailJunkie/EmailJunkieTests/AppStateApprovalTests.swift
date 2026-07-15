@@ -90,7 +90,7 @@ final class AppStateApprovalTests: XCTestCase {
 
     func testApproveFailureKeepsDraftAndNotification() async {
         let draft = pendingDraft()
-        let (appState, _, notifier, _) = makeAppState(
+        let (appState, _, notifier, persistence) = makeAppState(
             sendBehavior: .autoSend,
             sendResult: .failure(.authenticationFailed("bad app password")),
             seed: [draft]
@@ -99,9 +99,26 @@ final class AppStateApprovalTests: XCTestCase {
         await appState.approveDraft(draft)
 
         XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
         XCTAssertNotNil(appState.approvalError)
         XCTAssertTrue(notifier.removedIdentities.isEmpty)
         XCTAssertFalse(appState.approvingDraftIDs.contains(draft.identity))
+    }
+
+    func testApproveDoesNotDispatchWhenDurableRemovalFails() async {
+        let draft = pendingDraft()
+        let (appState, provider, notifier, persistence) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        await appState.approveDraft(draft)
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDraftCount, 1)
+        XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
+        XCTAssertTrue(notifier.removedIdentities.isEmpty)
+        XCTAssertNotNil(appState.approvalError)
     }
 
     func testApproveBlocksDraftFromDifferentAccount() async {

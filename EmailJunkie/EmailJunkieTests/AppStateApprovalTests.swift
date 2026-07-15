@@ -1,4 +1,5 @@
 import EmailJunkieMail
+import UserNotifications
 import XCTest
 @testable import EmailJunkie
 
@@ -200,6 +201,16 @@ final class AppStateApprovalTests: XCTestCase {
         notifier.fireAction(.deny, identity: "missing")
 
         XCTAssertEqual(appState.pendingDrafts.count, 1)
+    }
+
+    func testInlineNotificationActionsRequireAuthentication() {
+        let actions = UserNotificationService.draftActions()
+        let approve = actions.first { $0.identifier == UserNotificationService.approveActionIdentifier }
+        let deny = actions.first { $0.identifier == UserNotificationService.denyActionIdentifier }
+
+        XCTAssertTrue(approve?.options.contains(.authenticationRequired) ?? false)
+        XCTAssertTrue(deny?.options.contains(.authenticationRequired) ?? false)
+        XCTAssertTrue(deny?.options.contains(.destructive) ?? false)
     }
 
     // MARK: - Enqueue posts a notification (and captures the incoming body)

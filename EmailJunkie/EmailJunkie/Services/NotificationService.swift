@@ -106,7 +106,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
 
     // MARK: - Helpers
 
-    private func registerCategory() {
+    static func draftActions() -> [UNNotificationAction] {
         let approve = UNNotificationAction(
             identifier: Self.approveActionIdentifier,
             title: "Approve",
@@ -115,11 +115,15 @@ final class UserNotificationService: NSObject, DraftNotifying {
         let deny = UNNotificationAction(
             identifier: Self.denyActionIdentifier,
             title: "Deny",
-            options: [.destructive]
+            options: [.authenticationRequired, .destructive]
         )
+        return [approve, deny]
+    }
+
+    private func registerCategory() {
         let category = UNNotificationCategory(
             identifier: Self.categoryIdentifier,
-            actions: [approve, deny],
+            actions: Self.draftActions(),
             intentIdentifiers: [],
             options: []
         )

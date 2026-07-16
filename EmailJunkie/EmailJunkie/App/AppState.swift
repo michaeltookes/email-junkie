@@ -127,6 +127,12 @@ final class AppState: ObservableObject {
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
     @Published var pendingDrafts: [Draft] = []
 
+    /// Identities of pending drafts currently being approved (send/save in flight).
+    @Published var approvingDraftIDs: Set<String> = []
+
+    /// A user-facing message describing the last approve/deny error, if any.
+    @Published var approvalError: String?
+
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
 
@@ -155,6 +161,11 @@ final class AppState: ObservableObject {
     /// Internal (not private) so the `AppState+Voice` extension can reach it.
     let mailProvider: MailProvider
     let llm: LLMProviding
+    /// Posts draft-ready notifications and routes their actions back.
+    let notifier: DraftNotifying
+    /// Set by the menu-bar controller so a notification "open" action (or a
+    /// menu click) can surface the review window.
+    var openReviewHandler: (() -> Void)?
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     var previewGeneration = 0
@@ -167,18 +178,29 @@ final class AppState: ObservableObject {
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
-        llm: LLMProviding = LLMService()
+        llm: LLMProviding = LLMService(),
+        notifier: DraftNotifying = NullDraftNotifier()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
         self.llm = llm
+        self.notifier = notifier
 
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.processedMessages = persistence.loadProcessedMessages()
-        let pendingDrafts = persistence.loadPendingDrafts()
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
         self.pendingDrafts = pendingDrafts
         self.pendingDraftCount = pendingDrafts.count
         self.mailEmail = settings.mailEmail
@@ -205,6 +227,10 @@ final class AppState: ObservableObject {
             interval: { [weak self] in TimeInterval(self?.pollIntervalSeconds ?? 300) },
             onTick: { [weak self] in await self?.pollInboxOnce() }
         )
+
+        self.notifier.onAction = { [weak self] action, identity in
+            await self?.handleNotificationAction(action, identity: identity)
+        }
     }
 
     // MARK: - Mail Account

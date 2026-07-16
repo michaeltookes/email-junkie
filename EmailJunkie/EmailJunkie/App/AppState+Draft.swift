@@ -88,11 +88,12 @@ extension AppState {
             expectedUIDValidity: message.uidValidity
         )
         guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        let incomingText = MailBodyText.plainText(from: data)
         let context = ReplyContext(
             senderName: message.from?.name,
             senderEmail: message.from?.email,
             subject: message.subject,
-            body: MailBodyText.plainText(from: data)
+            body: incomingText
         )
         let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
         guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
@@ -105,6 +106,7 @@ extension AppState {
             sourceFrom: message.from,
             sourceReplyTo: message.replyTo,
             sourceMessageID: message.messageID,
+            incomingBody: Self.truncatedIncomingBody(incomingText),
             replySubject: Self.replySubject(for: message.subject),
             body: body,
             model: llmConfiguration.model,
@@ -176,6 +178,7 @@ extension AppState {
             pendingDraftCount = pendingDrafts.count
             throw error
         }
+        notifier.notify(for: draft, sendBehavior: sendBehavior)
     }
 
     func isLatestDraftRequest(_ requestGeneration: Int) -> Bool {
@@ -226,26 +229,11 @@ extension AppState {
             return
         }
 
-        let outgoing = Self.outgoingMessage(
-            for: draft,
-            from: credentials.email,
-            date: Date(),
-            messageID: Self.generateMessageID(forEmail: credentials.email)
-        )
-        guard !outgoing.to.isEmpty else {
-            draftError = "This draft has no recipient address to send to."
-            return
-        }
-
         isSendingDraft = true
         defer { isSendingDraft = false }
 
         do {
-            try await mailProvider.sendMessage(
-                credentials,
-                rfc822: outgoing.rfc822(),
-                envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
-            )
+            try await performSend(draft, credentials: credentials)
             draftSentMessage = "Sent."
             generatedDraft = nil
         } catch {
@@ -270,23 +258,46 @@ extension AppState {
         isSavingDraft = true
         defer { isSavingDraft = false }
 
+        do {
+            try await performSave(draft, credentials: credentials)
+            draftSavedMessage = "Saved to your Drafts."
+        } catch {
+            draftError = Self.draftMessage(for: error)
+        }
+    }
+
+    /// Sends `draft` over SMTP. Shared by the Settings preview and the approval
+    /// queue. Throws `DraftDispatchError.noRecipient` when there is no address.
+    func performSend(_ draft: Draft, credentials: MailAccountCredentials) async throws {
         let outgoing = Self.outgoingMessage(
             for: draft,
             from: credentials.email,
             date: Date(),
             messageID: Self.generateMessageID(forEmail: credentials.email)
         )
-        do {
-            try await mailProvider.appendMessage(
-                credentials,
-                mailbox: .drafts,
-                rfc822: outgoing.rfc822(),
-                flags: [.draft]
-            )
-            draftSavedMessage = "Saved to your Drafts."
-        } catch {
-            draftError = Self.draftMessage(for: error)
-        }
+        guard !outgoing.to.isEmpty else { throw DraftDispatchError.noRecipient }
+        try await mailProvider.sendMessage(
+            credentials,
+            rfc822: outgoing.rfc822(),
+            envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
+        )
+    }
+
+    /// Saves `draft` to the Drafts mailbox. Shared by the Settings preview and
+    /// the approval queue.
+    func performSave(_ draft: Draft, credentials: MailAccountCredentials) async throws {
+        let outgoing = Self.outgoingMessage(
+            for: draft,
+            from: credentials.email,
+            date: Date(),
+            messageID: Self.generateMessageID(forEmail: credentials.email)
+        )
+        try await mailProvider.appendMessage(
+            credentials,
+            mailbox: .drafts,
+            rfc822: outgoing.rfc822(),
+            flags: [.draft]
+        )
     }
 
     static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {
@@ -312,16 +323,30 @@ extension AppState {
         return trimmed.lowercased().hasPrefix("re:") ? trimmed : "Re: \(trimmed)"
     }
 
+    /// Bounds the incoming body kept for the approval preview so the persisted
+    /// queue stays small; the full message is re-fetchable from the server.
+    static func truncatedIncomingBody(_ text: String, maxChars: Int = 4000) -> String {
+        text.count > maxChars ? String(text.prefix(maxChars)) + "…" : text
+    }
+
     static func draftMessage(for error: Error) -> String {
         switch error {
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
+        case DraftDispatchError.noRecipient:
+            return "This draft has no recipient address to send to."
         case is LLMError:
             return llmMessage(for: error)
         default:
             return message(for: error)
         }
     }
+}
+
+/// Errors dispatching an approved draft to send/save.
+enum DraftDispatchError: Error, Equatable {
+    /// The draft has no resolvable recipient address.
+    case noRecipient
 }
 
 private struct DraftLLMConfiguration: Equatable {

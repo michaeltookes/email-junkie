@@ -22,14 +22,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 > Resolved items are recorded in [`resolved.md`](./resolved.md). Item numbers are stable IDs — they are not reused or renumbered when items are completed.
 
-2. **First-run onboarding flow**
-   Guided setup on first launch so a non-tinkering technical user can finish in a few minutes.
-   *As Priya, I want a short guided setup the first time I open the app, so that I can go from install to a working assistant without reading docs.*
-   - Step-by-step flow: (1) connect Gmail, (2) configure LLM provider + key, (3) choose send behavior, (4) kick off initial voice learning.
-   - Each step validates before advancing (Gmail auth succeeds; key produces a successful test call).
-   - Flow can be exited and resumed; completing it flips the app into "watching" state.
-   - A clear privacy statement explains what stays local and what is sent to the chosen LLM.
-
 3. **Gmail connection (OAuth)** — *PARKED (superseded by item 32 as the primary path); engine kept for a future bundled-client option*
    > **Parked 2026-07-03:** BYO OAuth proved too high-friction for non-developers, so IMAP + app password (item 32) is now the primary connection path. The OAuth engine stays in the codebase for a possible future "bundled verified client + CASA" revival. Known parked bug: loopback listener throws `NWError 22` on start. The ✅ items below are built; the ⬜ items are only relevant if OAuth is revived.
 

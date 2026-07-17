@@ -73,27 +73,13 @@ extension AppState {
     }
 
     /// Persists just the onboarding flag durably, without disturbing the
-    /// connection-error surface used by the mail/LLM flows.
+    /// connection-error surface used by the mail/LLM flows. Reuses
+    /// `buildSettings()` so the snapshot stays consistent with every other save.
     private func persistOnboardingCompletion() {
         do {
-            try persistence.saveSettingsSync(buildOnboardingSettings())
+            try persistence.saveSettingsSync(buildSettings())
         } catch {
             logger.error("Failed to persist onboarding completion: \(error.localizedDescription)")
         }
-    }
-
-    private func buildOnboardingSettings() -> Settings {
-        Settings(
-            schemaVersion: Settings.currentSchemaVersion,
-            pollIntervalSeconds: pollIntervalSeconds,
-            mailEmail: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHost: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
-            mailPort: mailPort,
-            llmProvider: llmProviderKind.rawValue,
-            llmModel: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
-            llmVerifiedModel: verifiedLLMModel,
-            sendBehavior: sendBehavior.rawValue,
-            onboardingCompleted: onboardingCompleted
-        )
     }
 }

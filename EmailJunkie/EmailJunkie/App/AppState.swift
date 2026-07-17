@@ -403,7 +403,10 @@ final class AppState: ObservableObject {
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
     }
 
-    private func buildSettings(
+    /// Builds a `Settings` snapshot from the current published values.
+    /// Internal so the `AppState+Onboarding` extension can persist the
+    /// onboarding flag through the same path.
+    func buildSettings(
         mailEmail: String? = nil,
         mailHost: String? = nil,
         mailPort: Int? = nil,

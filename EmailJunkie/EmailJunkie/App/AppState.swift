@@ -122,6 +122,11 @@ final class AppState: ObservableObject {
     /// What approving a draft does: save a Gmail draft or send immediately.
     @Published var sendBehavior: SendBehavior
 
+    /// Whether first-run onboarding has been completed (or dismissed). Mirrors
+    /// the persisted `Settings.onboardingCompleted`; mutated only through the
+    /// transitions in `AppState+Onboarding`.
+    @Published var onboardingCompleted: Bool
+
     // MARK: - Inbox Watcher
 
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
@@ -166,6 +171,9 @@ final class AppState: ObservableObject {
     /// Set by the menu-bar controller so a notification "open" action (or a
     /// menu click) can surface the review window.
     var openReviewHandler: (() -> Void)?
+    /// Set by the menu-bar controller so the app can surface the first-run
+    /// onboarding window at launch or from the menu.
+    var openOnboardingHandler: (() -> Void)?
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     var previewGeneration = 0
@@ -190,6 +198,7 @@ final class AppState: ObservableObject {
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
+        self.onboardingCompleted = settings.onboardingCompleted
         self.processedMessages = persistence.loadProcessedMessages()
         let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
         let loadedPendingDrafts = persistence.loadPendingDrafts()
@@ -409,7 +418,8 @@ final class AppState: ObservableObject {
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
             llmVerifiedModel: verifiedLLMModel,
-            sendBehavior: sendBehavior.rawValue
+            sendBehavior: sendBehavior.rawValue,
+            onboardingCompleted: onboardingCompleted
         )
     }
 

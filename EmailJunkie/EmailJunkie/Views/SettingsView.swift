@@ -259,10 +259,7 @@ struct SettingsView: View {
             }
 
             Section("Privacy") {
-                Text("Email Junkie is local-first. Your mail and settings stay on this "
-                     + "Mac, and secrets like API keys and OAuth tokens are stored in the "
-                     + "macOS Keychain — never in plaintext. Nothing leaves your machine "
-                     + "except the LLM request you configure and control.")
+                Text(AppState.privacyStatement)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

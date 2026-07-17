@@ -41,8 +41,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ask for notification permission so ready drafts can surface natively.
         appState.notifier.requestAuthorization()
 
-        // Auto-resume watching if an account + LLM are already connected.
-        appState.startWatchingIfReady()
+        // First-run onboarding: show the setup assistant until it's completed
+        // once. An already-configured install is reconciled to "complete" so
+        // existing users are never sent back through the flow.
+        if appState.reconcileOnboardingState() {
+            appState.openOnboardingHandler?()
+        } else {
+            // Auto-resume watching if an account + LLM are already connected.
+            appState.startWatchingIfReady()
+        }
 
         logger.info("Email Junkie launched")
     }

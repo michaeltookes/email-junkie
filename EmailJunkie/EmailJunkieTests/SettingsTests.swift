@@ -52,4 +52,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmModel, "")
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
+
+    func testCurrentSchemaVersionIsSix() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 6)
+    }
+
+    func testLegacyFileWithoutOnboardingFlagDecodesToNotCompleted() throws {
+        // A pre-v6 settings file has no onboarding key; it must decode to false
+        // so the flow can run (and be reconciled for already-configured users).
+        let legacy = #"{"schemaVersion":5,"pollIntervalSeconds":300,"mailEmail":"me@x.com"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertFalse(decoded.onboardingCompleted)
+    }
+
+    func testOnboardingFlagRoundTripsThroughCodable() throws {
+        let original = Settings(schemaVersion: 6, pollIntervalSeconds: 300, onboardingCompleted: true)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertTrue(decoded.onboardingCompleted)
+    }
 }

@@ -187,6 +187,18 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(appState.watchStatus, .paused)
     }
 
+    func testCompleteOnboardingCancelsPendingDebouncedSettingsSave() async throws {
+        let (appState, persistence) = makeFullyConnected(onboardingCompleted: false)
+        appState.sendBehavior = .autoSend
+
+        appState.completeOnboarding()
+        try await Task.sleep(nanoseconds: 700_000_000)
+
+        let settings = persistence.loadSettings()
+        XCTAssertTrue(settings.onboardingCompleted)
+        XCTAssertEqual(settings.sendBehavior, SendBehavior.autoSend.rawValue)
+    }
+
     func testCompleteOnboardingIsIdempotent() {
         let (appState, _) = makeFullyConnected(onboardingCompleted: false)
 

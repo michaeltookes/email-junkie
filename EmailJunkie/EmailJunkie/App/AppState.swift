@@ -379,8 +379,7 @@ final class AppState: ObservableObject {
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
 
-        settingsDebouncer.cancel()
-        try persistence.saveSettingsSync(buildSettings(
+        try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
             mailHost: credentials.host,
             mailPort: credentials.port
@@ -440,12 +439,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Saves a specific settings snapshot immediately, cancelling stale
+    /// debounced snapshots first.
+    func persistSettingsSync(_ settings: Settings) throws {
+        settingsDebouncer.cancel()
+        try persistence.saveSettingsSync(settings)
+    }
+
     /// Saves settings immediately (used on app termination).
     func saveSettingsSync() {
         let settings = buildSettings()
-        settingsDebouncer.cancel()
         do {
-            try persistence.saveSettingsSync(settings)
+            try persistSettingsSync(settings)
         } catch {
             connectionError = Self.settingsMessage(action: "save", error: error)
             logger.error("Failed to save settings synchronously: \(error.localizedDescription)")

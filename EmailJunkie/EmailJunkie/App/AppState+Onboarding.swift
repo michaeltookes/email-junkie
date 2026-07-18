@@ -82,7 +82,7 @@ extension AppState {
     /// `buildSettings()` so the snapshot stays consistent with every other save.
     private func persistOnboardingCompletion() {
         do {
-            try persistence.saveSettingsSync(buildSettings())
+            try persistSettingsSync(buildSettings())
         } catch {
             logger.error("Failed to persist onboarding completion: \(error.localizedDescription)")
         }

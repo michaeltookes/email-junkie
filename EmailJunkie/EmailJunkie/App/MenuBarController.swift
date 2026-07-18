@@ -23,6 +23,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var reviewWindow: NSWindow?
     private var reviewCloseObserver: NSObjectProtocol?
 
+    /// The first-run onboarding window, created lazily.
+    private var onboardingWindow: NSWindow?
+    private var onboardingCloseObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -33,6 +37,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // A notification "open" action (or approve/deny while closed) surfaces
         // the review window.
         appState.openReviewHandler = { [weak self] in self?.openReview() }
+        // The app delegate (at first launch) or the menu opens onboarding.
+        appState.openOnboardingHandler = { [weak self] in self?.openOnboarding() }
     }
 
     deinit {
@@ -40,6 +46,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = reviewCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = onboardingCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -109,6 +118,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         items.append(.separator())
 
+        // Setup Assistant…
+        let setup = NSMenuItem(title: "Setup Assistant…", action: #selector(openOnboardingMenu), keyEquivalent: "")
+        setup.target = self
+        items.append(setup)
+
         // Settings…
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
@@ -156,6 +170,49 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openReviewMenu() {
         openReview()
+    }
+
+    @objc private func openOnboardingMenu() {
+        openOnboarding()
+    }
+
+    func openOnboarding() {
+        if onboardingWindow == nil {
+            let view = OnboardingView(initialStep: appState.onboardingResumeStep) { [weak self] in
+                self?.onboardingWindow?.close()
+            }
+            .environmentObject(appState)
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 540),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Email Junkie Setup"
+            window.contentView = NSHostingView(rootView: view)
+            window.center()
+            window.isReleasedWhenClosed = false
+            window.setAccessibilityLabel("Email Junkie Setup")
+            onboardingWindow = window
+
+            onboardingCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    if let observer = self?.onboardingCloseObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        self?.onboardingCloseObserver = nil
+                    }
+                    self?.onboardingWindow = nil
+                }
+            }
+        }
+
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func openReview() {

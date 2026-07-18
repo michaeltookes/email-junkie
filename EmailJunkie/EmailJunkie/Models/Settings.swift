@@ -19,7 +19,10 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 5
+    static let currentSchemaVersion = 6
+
+    /// Schema version that introduced the persisted onboarding completion flag.
+    static let onboardingCompletionSchemaVersion = 6
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -50,6 +53,11 @@ struct Settings: Codable, Equatable {
     /// string so an unknown/future value decodes gracefully to the default.
     var sendBehavior: String
 
+    /// Whether the user has finished (or explicitly dismissed) the first-run
+    /// onboarding flow. Old files without this key decode to `false`; an
+    /// already-configured install is treated as complete at launch.
+    var onboardingCompleted: Bool
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -59,7 +67,8 @@ struct Settings: Codable, Equatable {
         llmProvider: String = "anthropic",
         llmModel: String = "",
         llmVerifiedModel: String = "",
-        sendBehavior: String = SendBehavior.default.rawValue
+        sendBehavior: String = SendBehavior.default.rawValue,
+        onboardingCompleted: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -70,6 +79,7 @@ struct Settings: Codable, Equatable {
         self.llmModel = llmModel
         self.llmVerifiedModel = llmVerifiedModel
         self.sendBehavior = sendBehavior
+        self.onboardingCompleted = onboardingCompleted
     }
 
     /// Default settings for a fresh install.
@@ -80,7 +90,7 @@ struct Settings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort
-        case llmProvider, llmModel, llmVerifiedModel, sendBehavior
+        case llmProvider, llmModel, llmVerifiedModel, sendBehavior, onboardingCompleted
     }
 
     init(from decoder: Decoder) throws {
@@ -94,6 +104,7 @@ struct Settings: Codable, Equatable {
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
         sendBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior) ?? SendBehavior.default.rawValue
+        onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
     }
 
     /// Returns a copy with values clamped to sane ranges.

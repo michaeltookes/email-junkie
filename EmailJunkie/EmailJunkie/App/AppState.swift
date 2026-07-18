@@ -122,6 +122,15 @@ final class AppState: ObservableObject {
     /// What approving a draft does: save a Gmail draft or send immediately.
     @Published var sendBehavior: SendBehavior
 
+    /// Whether first-run onboarding has been completed (or dismissed). Mirrors
+    /// the persisted `Settings.onboardingCompleted`; mutated only through the
+    /// transitions in `AppState+Onboarding`.
+    @Published var onboardingCompleted: Bool
+
+    /// Whether the loaded settings file predates the onboarding completion flag.
+    /// Used only to keep already-configured installs out of first-run setup.
+    let loadedSettingsPredateOnboardingCompletion: Bool
+
     // MARK: - Inbox Watcher
 
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
@@ -166,6 +175,9 @@ final class AppState: ObservableObject {
     /// Set by the menu-bar controller so a notification "open" action (or a
     /// menu click) can surface the review window.
     var openReviewHandler: (() -> Void)?
+    /// Set by the menu-bar controller so the app can surface the first-run
+    /// onboarding window at launch or from the menu.
+    var openOnboardingHandler: (() -> Void)?
     private let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     var previewGeneration = 0
@@ -190,6 +202,9 @@ final class AppState: ObservableObject {
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
+        self.onboardingCompleted = settings.onboardingCompleted
+        self.loadedSettingsPredateOnboardingCompletion =
+            settings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
         let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
         let loadedPendingDrafts = persistence.loadPendingDrafts()
@@ -364,8 +379,7 @@ final class AppState: ObservableObject {
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
 
-        settingsDebouncer.cancel()
-        try persistence.saveSettingsSync(buildSettings(
+        try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
             mailHost: credentials.host,
             mailPort: credentials.port
@@ -394,7 +408,10 @@ final class AppState: ObservableObject {
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
     }
 
-    private func buildSettings(
+    /// Builds a `Settings` snapshot from the current published values.
+    /// Internal so the `AppState+Onboarding` extension can persist the
+    /// onboarding flag through the same path.
+    func buildSettings(
         mailEmail: String? = nil,
         mailHost: String? = nil,
         mailPort: Int? = nil,
@@ -409,7 +426,8 @@ final class AppState: ObservableObject {
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
             llmVerifiedModel: verifiedLLMModel,
-            sendBehavior: sendBehavior.rawValue
+            sendBehavior: sendBehavior.rawValue,
+            onboardingCompleted: onboardingCompleted
         )
     }
 
@@ -421,12 +439,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Saves a specific settings snapshot immediately, cancelling stale
+    /// debounced snapshots first.
+    func persistSettingsSync(_ settings: Settings) throws {
+        settingsDebouncer.cancel()
+        try persistence.saveSettingsSync(settings)
+    }
+
     /// Saves settings immediately (used on app termination).
     func saveSettingsSync() {
         let settings = buildSettings()
-        settingsDebouncer.cancel()
         do {
-            try persistence.saveSettingsSync(settings)
+            try persistSettingsSync(settings)
         } catch {
             connectionError = Self.settingsMessage(action: "save", error: error)
             logger.error("Failed to save settings synchronously: \(error.localizedDescription)")

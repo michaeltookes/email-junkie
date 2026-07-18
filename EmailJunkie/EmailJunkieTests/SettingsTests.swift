@@ -57,6 +57,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Settings.currentSchemaVersion, 6)
     }
 
+    func testOnboardingCompletionSchemaVersionIsSix() {
+        XCTAssertEqual(Settings.onboardingCompletionSchemaVersion, 6)
+    }
+
     func testLegacyFileWithoutOnboardingFlagDecodesToNotCompleted() throws {
         // A pre-v6 settings file has no onboarding key; it must decode to false
         // so the flow can run (and be reconciled for already-configured users).

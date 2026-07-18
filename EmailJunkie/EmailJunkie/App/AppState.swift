@@ -127,6 +127,10 @@ final class AppState: ObservableObject {
     /// transitions in `AppState+Onboarding`.
     @Published var onboardingCompleted: Bool
 
+    /// Whether the loaded settings file predates the onboarding completion flag.
+    /// Used only to keep already-configured installs out of first-run setup.
+    let loadedSettingsPredateOnboardingCompletion: Bool
+
     // MARK: - Inbox Watcher
 
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
@@ -199,6 +203,8 @@ final class AppState: ObservableObject {
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.onboardingCompleted = settings.onboardingCompleted
+        self.loadedSettingsPredateOnboardingCompletion =
+            settings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
         let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
         let loadedPendingDrafts = persistence.loadPendingDrafts()

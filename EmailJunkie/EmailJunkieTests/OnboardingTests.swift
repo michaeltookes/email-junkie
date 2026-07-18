@@ -11,9 +11,12 @@ final class OnboardingTests: XCTestCase {
 
     // MARK: - Builders
 
-    private func connectedSettings(onboardingCompleted: Bool = false) -> Settings {
+    private func connectedSettings(
+        schemaVersion: Int = Settings.currentSchemaVersion,
+        onboardingCompleted: Bool = false
+    ) -> Settings {
         Settings(
-            schemaVersion: Settings.currentSchemaVersion,
+            schemaVersion: schemaVersion,
             pollIntervalSeconds: 300,
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
@@ -23,14 +26,20 @@ final class OnboardingTests: XCTestCase {
     }
 
     /// An AppState with both an account and an LLM connected.
-    private func makeFullyConnected(onboardingCompleted: Bool = false)
+    private func makeFullyConnected(
+        schemaVersion: Int = Settings.currentSchemaVersion,
+        onboardingCompleted: Bool = false
+    )
         -> (AppState, AppStateMemoryPersistence) {
         let secrets = InMemorySecretStore(seed: [
             .mailAppPassword: "app-pw",
             .llmAPIKey(provider: "anthropic"): "sk-live"
         ])
         let persistence = AppStateMemoryPersistence(
-            settings: connectedSettings(onboardingCompleted: onboardingCompleted)
+            settings: connectedSettings(
+                schemaVersion: schemaVersion,
+                onboardingCompleted: onboardingCompleted
+            )
         )
         let appState = AppState(
             persistence: persistence,
@@ -101,8 +110,11 @@ final class OnboardingTests: XCTestCase {
 
     // MARK: - Reconcile (already-configured install)
 
-    func testReconcileMarksConfiguredInstallCompleteAndSkipsFlow() {
-        let (appState, persistence) = makeFullyConnected(onboardingCompleted: false)
+    func testReconcileMarksLegacyConfiguredInstallCompleteAndSkipsFlow() {
+        let (appState, persistence) = makeFullyConnected(
+            schemaVersion: Settings.onboardingCompletionSchemaVersion - 1,
+            onboardingCompleted: false
+        )
 
         let needsOnboarding = appState.reconcileOnboardingState()
 
@@ -110,6 +122,17 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(appState.onboardingCompleted)
         XCTAssertTrue(persistence.loadSettings().onboardingCompleted,
                       "reconcile must persist the completion so it survives relaunch")
+    }
+
+    func testReconcilePreservesPartiallyCompletedCurrentOnboarding() {
+        let (appState, persistence) = makeFullyConnected(onboardingCompleted: false)
+
+        let needsOnboarding = appState.reconcileOnboardingState()
+
+        XCTAssertTrue(needsOnboarding)
+        XCTAssertFalse(appState.onboardingCompleted)
+        XCTAssertFalse(persistence.loadSettings().onboardingCompleted)
+        XCTAssertEqual(appState.onboardingResumeStep, .sendBehavior)
     }
 
     func testReconcileKeepsFlowForFreshInstall() {
@@ -160,6 +183,15 @@ final class OnboardingTests: XCTestCase {
         appState.completeOnboarding()
 
         XCTAssertTrue(appState.onboardingCompleted)
+    }
+
+    func testCompleteOnboardingDoesNotRestartPausedWatcherWhenAlreadyComplete() {
+        let (appState, _) = makeFullyConnected(onboardingCompleted: true)
+        appState.watchStatus = .paused
+
+        appState.completeOnboarding()
+
+        XCTAssertEqual(appState.watchStatus, .paused)
     }
 
     func testInitLoadsPersistedOnboardingFlag() {

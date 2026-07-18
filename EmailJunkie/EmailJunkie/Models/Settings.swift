@@ -21,6 +21,9 @@ struct Settings: Codable, Equatable {
     /// The current settings schema version.
     static let currentSchemaVersion = 6
 
+    /// Schema version that introduced the persisted onboarding completion flag.
+    static let onboardingCompletionSchemaVersion = 6
+
     /// Schema version of the persisted file.
     var schemaVersion: Int
 

@@ -53,10 +53,10 @@ extension AppState {
     /// Marks onboarding complete, persists the flag, and starts watching if the
     /// account + provider are ready. Idempotent.
     func completeOnboarding() {
-        if !onboardingCompleted {
-            onboardingCompleted = true
-            persistOnboardingCompletion()
-        }
+        guard !onboardingCompleted else { return }
+
+        onboardingCompleted = true
+        persistOnboardingCompletion()
         startWatchingIfReady()
     }
 
@@ -65,7 +65,9 @@ extension AppState {
     /// still needs to be shown.
     @discardableResult
     func reconcileOnboardingState() -> Bool {
-        if !onboardingCompleted && canFinishOnboarding {
+        if !onboardingCompleted,
+           loadedSettingsPredateOnboardingCompletion,
+           canFinishOnboarding {
             onboardingCompleted = true
             persistOnboardingCompletion()
         }

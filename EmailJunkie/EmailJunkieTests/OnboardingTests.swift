@@ -176,6 +176,17 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(appState.watchStatus, .idle)
     }
 
+    func testCompleteOnboardingDoesNotRestartPausedWatcherOnFirstCompletion() {
+        let (appState, persistence) = makeFullyConnected(onboardingCompleted: false)
+        appState.watchStatus = .paused
+
+        appState.completeOnboarding()
+
+        XCTAssertTrue(appState.onboardingCompleted)
+        XCTAssertTrue(persistence.loadSettings().onboardingCompleted)
+        XCTAssertEqual(appState.watchStatus, .paused)
+    }
+
     func testCompleteOnboardingIsIdempotent() {
         let (appState, _) = makeFullyConnected(onboardingCompleted: false)
 

@@ -50,14 +50,17 @@ extension AppState {
         isAccountConnected && isLLMConnected
     }
 
-    /// Marks onboarding complete, persists the flag, and starts watching if the
-    /// account + provider are ready. Idempotent.
+    /// Marks onboarding complete, persists the flag, and starts watching from an
+    /// idle state if the account + provider are ready. Idempotent.
     func completeOnboarding() {
         guard !onboardingCompleted else { return }
 
+        let shouldAutoStartWatching = watchStatus == .idle
         onboardingCompleted = true
         persistOnboardingCompletion()
-        startWatchingIfReady()
+        if shouldAutoStartWatching {
+            startWatchingIfReady()
+        }
     }
 
     /// At launch, treat an already-configured install as onboarded so existing

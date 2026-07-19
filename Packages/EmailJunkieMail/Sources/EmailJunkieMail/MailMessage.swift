@@ -51,15 +51,19 @@ public enum Mailbox: Sendable, Equatable {
     case inbox
     case sent
     case drafts
+    /// Gmail's "All Mail" — every message regardless of folder/label. Useful as
+    /// the broadest target when searching for a specific message.
+    case allMail
     /// A provider-specific mailbox path (e.g. a custom IMAP folder).
     case named(String)
 
-    /// The IMAP mailbox name. Sent/Drafts default to Gmail's paths.
+    /// The IMAP mailbox name. Sent/Drafts/All Mail default to Gmail's paths.
     public var imapName: String {
         switch self {
         case .inbox: return "INBOX"
         case .sent: return "[Gmail]/Sent Mail"
         case .drafts: return "[Gmail]/Drafts"
+        case .allMail: return "[Gmail]/All Mail"
         case .named(let name): return name
         }
     }

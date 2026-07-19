@@ -207,6 +207,21 @@ final class IMAPSearchTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testAllMailMapsToGmailPath() {
+        XCTAssertEqual(Mailbox.allMail.imapName, "[Gmail]/All Mail")
+    }
+
+    func testSelectsTheRequestedMailbox() throws {
+        let (channel, _) = try makeChannel(mailbox: Mailbox.allMail.imapName)
+
+        try feed(channel, "* OK Service Ready\r\n")
+        let selectCommand = try feed(channel, "A1 OK LOGIN completed\r\n")
+
+        XCTAssertTrue(selectCommand.contains("SELECT"), "got: \(selectCommand)")
+        XCTAssertTrue(selectCommand.contains("All Mail"), "got: \(selectCommand)")
+        _ = try? channel.finish()
+    }
+
     func testLoginFailureSurfacesAuthenticationError() throws {
         let (channel, future) = try makeChannel()
 

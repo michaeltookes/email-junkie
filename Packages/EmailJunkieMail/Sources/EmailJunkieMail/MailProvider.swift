@@ -40,6 +40,19 @@ public protocol MailProvider: Sendable {
         expectedUIDValidity: UInt32?
     ) async throws -> Data
 
+    /// Searches `mailbox` server-side (IMAP `UID SEARCH`) for messages matching
+    /// `criteria`, returning one page of envelope-level results (newest first)
+    /// plus the total match count. `offset`/`limit` page through the full match
+    /// set so large mailboxes never download in full. Throws `MailError` on
+    /// failure.
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult
+
     /// Appends a full RFC 822 message to `mailbox` via IMAP `APPEND`, tagging it
     /// with the given flags (e.g. `\Draft`). Used to save a reply as a draft
     /// without sending it. Throws `MailError` on failure.
@@ -105,5 +118,102 @@ public extension MailProvider {
         envelope: SMTPEnvelope
     ) async throws {
         throw MailError.commandFailed("This provider does not support sending mail.")
+    }
+
+    /// Default: searching is unsupported. `IMAPMailProvider` overrides this so
+    /// other conformers (test doubles, non-IMAP backends) inherit a clear
+    /// failure rather than a compile-time requirement.
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult {
+        throw MailError.commandFailed("This provider does not support searching mail.")
+    }
+}
+
+/// A read/unread filter for a mailbox search.
+public enum MailReadState: Sendable, Equatable {
+    /// No read-state constraint.
+    case any
+    /// Only unread messages (IMAP `UNSEEN`).
+    case unreadOnly
+    /// Only read messages (IMAP `SEEN`).
+    case readOnly
+}
+
+/// Criteria for a server-side mailbox search. Every set field is combined with
+/// `AND`; leaving them all unset matches every message (newest first). Blank
+/// text fields are ignored, so an empty search box behaves like "recent mail".
+public struct MailSearchCriteria: Sendable, Equatable {
+    /// Free-text keyword matched against the whole message (IMAP `TEXT`).
+    public var text: String?
+    /// Matched against the `From` header (IMAP `FROM`).
+    public var from: String?
+    /// Matched against the `Subject` header (IMAP `SUBJECT`).
+    public var subject: String?
+    /// Only messages on/after this calendar day (IMAP `SINCE`).
+    public var since: Date?
+    /// Only messages before this calendar day (IMAP `BEFORE`).
+    public var before: Date?
+    /// Read/unread constraint.
+    public var readState: MailReadState
+    /// Only flagged/starred messages (IMAP `FLAGGED`).
+    public var flaggedOnly: Bool
+
+    public init(
+        text: String? = nil,
+        from: String? = nil,
+        subject: String? = nil,
+        since: Date? = nil,
+        before: Date? = nil,
+        readState: MailReadState = .any,
+        flaggedOnly: Bool = false
+    ) {
+        self.text = text
+        self.from = from
+        self.subject = subject
+        self.since = since
+        self.before = before
+        self.readState = readState
+        self.flaggedOnly = flaggedOnly
+    }
+
+    /// True when no filter is set — the search reduces to "all mail, newest
+    /// first". Blank/whitespace-only text fields do not count as a filter.
+    public var isEmpty: Bool {
+        Self.isBlank(text) && Self.isBlank(from) && Self.isBlank(subject)
+            && since == nil && before == nil && readState == .any && !flaggedOnly
+    }
+
+    private static func isBlank(_ value: String?) -> Bool {
+        (value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
+    }
+}
+
+/// One page of mailbox-search results.
+public struct MailSearchResult: Sendable, Equatable {
+    /// This page of messages, newest first.
+    public var messages: [MailMessage]
+    /// Total number of messages the search matched across all pages.
+    public var totalMatches: Int
+    /// The offset into the full match set this page started at.
+    public var offset: Int
+    /// Whether more results exist beyond this page.
+    public var hasMore: Bool
+
+    public init(messages: [MailMessage], totalMatches: Int, offset: Int, hasMore: Bool) {
+        self.messages = messages
+        self.totalMatches = totalMatches
+        self.offset = offset
+        self.hasMore = hasMore
+    }
+
+    /// An empty result (no matches), used when a search returns nothing or the
+    /// requested page is beyond the match set.
+    public static func empty(offset: Int) -> MailSearchResult {
+        MailSearchResult(messages: [], totalMatches: 0, offset: offset, hasMore: false)
     }
 }

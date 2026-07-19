@@ -34,22 +34,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
-4. **Voice profile from Sent folder** — *in progress*
-   Derive a reusable voice profile from Sent mail and inject it into every draft prompt.
-   *As Priya, I want the assistant to study my Sent folder, so that drafts sound like me and not a generic bot.*
-   - ✅ On-demand "Learn my voice" samples recent `[Gmail]/Sent Mail` messages (bodies via IMAP + `MailBodyText`, quoted-reply stripped, truncated) and derives greeting/sign-off, formality, tone, typical length, recurring phrasings via the LLM (`VoiceProfiler`, tolerant JSON parsing). Covered by pure + AppState tests.
-   - ✅ Profile stored locally (`VoiceProfile.json`) and loaded on launch; `VoiceProfile.promptBlock()` renders it for prompt injection (consumed by the draft engine, item 7).
-   - ✅ Human-readable summary shown in the Settings "Voice" section; Learn / Re-learn / Forget actions.
-   - ✅ Learning runs off the main path with per-message progress; errors surfaced (no-samples, bad model reply, provider/mail errors).
-   - ⬜ **Remaining:** live-verify against a real Sent folder + Anthropic key; wire the profile into actual draft prompts when item 7 lands; "on setup" step is part of onboarding (item 2); scheduled re-learn is item 20; empty/sparse Sent cold-start is item 25.
-
 6. **Pluggable LLM provider layer** — *in progress*
    Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 16) drops in cleanly.
    *As Sam, I want to choose which LLM provider drafts my replies, so that I'm not locked to one vendor and can keep data where I want.*
    - ✅ Common `LLMClient` interface + DTOs (`LLMRequest`/`LLMResponse`) and an injectable JSON transport; **Anthropic (Claude)** adapter implementing the Messages API. Adapter + coordinator covered by fake-transport unit tests.
    - ✅ `LLMService` resolves the selected provider + key into a client; `LLMConnectionTesting` seam so AppState is tested without the network. Provider/model and last verified model persisted in Settings (schema v4).
    - ✅ A "Test Connection" action verifies the key/model with a live call; on success the key is stored in the Keychain (item 10). "AI provider" Settings section is a working provider picker + model + API key + Test.
-   - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy); live-verify against a real Anthropic key. (Local-model adapter is item 16.)
+   - ✅ **Live-verified against a real Anthropic key (2026-07-19):** "Test Connection" succeeded and the verified model (`claude-sonnet-4-6`) persisted.
+   - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy). (Local-model adapter is item 16.)
 
 7. **Draft generation engine** — *in progress*
    Produce a reply draft from the incoming message, thread context, and voice profile.
@@ -57,7 +49,8 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ `DraftGenerator` builds a reply prompt from the incoming message and injects the voice profile via `VoiceProfile.promptBlock()` (neutral fallback when none); output cleaned (strips stray `Subject:` lines). Pure core + injected completion, unit-tested.
    - ✅ Provider errors/rate limits surfaced via `AppState.draftMessage(for:)` — no silent failures.
    - ✅ Draft tied to its source message (UID + UIDVALIDITY, subject, sender, `Re:` subject) for correct send later. On-demand "Draft reply" action + preview sheet in Settings.
-   - ⬜ **Remaining:** incorporate full **thread/quote context** (currently the single incoming message body); capture the source **Message-ID** for `In-Reply-To`/`References` threading (needed by item 9 send); live-verify against a real inbox message; inline editing is item 19; low-confidence "needs info" handling is item 13.
+   - ✅ **Live-verified against a real inbox message (2026-07-19):** generated a reply in the user's voice that addressed the incoming message; source Message-ID capture for `In-Reply-To`/`References` threading confirmed working (see item 9).
+   - ⬜ **Remaining:** incorporate full **thread/quote context** (currently only the single incoming message body); inline editing is item 19; low-confidence "needs info" handling is item 13.
 
 9. **Send / save-as-draft (user-configurable)** — *in progress (send + save-as-draft + toggle done; live-verify remaining)*
    On approval, either send immediately or create a Gmail draft, per a setting.
@@ -66,7 +59,8 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ **Auto-send:** reply submitted over a hand-rolled **SMTP** client on NIO (implicit TLS on 465, `AUTH LOGIN`, `MAIL FROM`/`RCPT TO`/`DATA` with dot-stuffing). Reuses the same RFC 822 builder for correct subject/threading; SMTP host derived from the IMAP host (`imap.` → `smtp.`). Response decoder + send state machine covered by EmbeddedChannel tests.
    - ✅ **Toggle:** `SendBehavior` setting (save-as-draft vs auto-send, schema v5) with a "On approve" picker in Settings; `approveGeneratedDraft()` dispatches to send or save. The draft preview's action reflects the choice ("Send now" vs "Save to Drafts").
    - ✅ The approval UI indicates what "Approve" will do — the Review Drafts window (item 8) shows "Approve will send/save" and labels the button accordingly; the Settings preview also reflects it.
-   - ⬜ Live-verify a real send + a real draft appear and thread correctly in Gmail (against a real account + app password).
+   - ✅ **Save-as-draft live-verified end-to-end against real Gmail (2026-07-19):** an approved reply appeared in Gmail → Drafts, correctly addressed and threaded under the original message.
+   - ⬜ **Remaining (deferred by user for a later, self-addressed test):** live-verify the **auto-send (SMTP)** path against real Gmail, and exercise the watcher → notification → approve path with a real watcher-produced draft (item 8) once a fresh message arrives.
 
 11. **Distribution: signed DMG + Sparkle + Homebrew cask**
     Reuse the Prompter shipping pipeline.
@@ -236,7 +230,8 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain. **Live-verified against real Gmail 2026-07-04.**
     - ✅ Recent-message fetch (LOGIN → SELECT → FETCH UID+ENVELOPE → LOGOUT), newest first; sender/subject/date parsed; "Preview inbox" action in Settings. State machine + envelope parsing covered by EmbeddedChannel tests.
     - ✅ Body-text fetch (`UID FETCH BODY.PEEK[TEXT]`, streaming assembly over NIO, no `\Seen` flag set) + `MailBodyText` readable-text reduction (multipart, quoted-printable/base64, HTML-strip fallback). "View body" preview sheet in Settings. Covered by EmbeddedChannel + pure unit tests.
-    - ⬜ **Remaining:** live-verify fetch + body against real Gmail (incl. `[Gmail]/Sent Mail`); hand-rolled **SMTP send** over NIO; efficient `BODYSTRUCTURE`-guided fetch of just the `text/plain` part (avoids downloading attachments; also fixes single-part transfer-encoding decoding); handle missing provider-native features (push, labels) gracefully.
+    - ✅ **Fetch + body live-verified** against real Gmail incl. `[Gmail]/Sent Mail` (2026-07-19).
+   - ⬜ **Remaining:** live-verify **SMTP send** against real Gmail (built; deferred with item 9's auto-send test); efficient `BODYSTRUCTURE`-guided fetch of just the `text/plain` part (avoids downloading attachments; also fixes single-part transfer-encoding decoding); handle missing provider-native features (push, labels) gracefully.
 
 33. **Multiple-account support**
     Watch more than one mailbox.

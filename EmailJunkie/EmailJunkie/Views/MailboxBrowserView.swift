@@ -88,24 +88,28 @@ struct MailboxBrowserView: View {
 
     @ViewBuilder
     private var results: some View {
-        if appState.browser.isSearching {
+        if !appState.browser.results.isEmpty {
+            // Keep results visible even if a later "load more" failed — the
+            // pagination error surfaces inline in the footer instead.
+            resultsList
+        } else if appState.browser.isSearching {
             centered { ProgressView("Searching…") }
         } else if let error = appState.browser.error {
             centered {
                 statusLabel(error, systemImage: "exclamationmark.triangle", color: .red)
             }
-        } else if appState.browser.results.isEmpty {
+        } else if appState.browser.hasSearched {
+            centered {
+                statusLabel("No messages match your search.", systemImage: "tray", color: .secondary)
+            }
+        } else {
             centered {
                 statusLabel(
-                    appState.browser.hasSearched
-                        ? "No messages match your search."
-                        : "Search your mailbox to find a message.",
-                    systemImage: "tray",
+                    "Search your mailbox to find a message.",
+                    systemImage: "magnifyingglass",
                     color: .secondary
                 )
             }
-        } else {
-            resultsList
         }
     }
 
@@ -138,11 +142,18 @@ struct MailboxBrowserView: View {
 
     @ViewBuilder
     private var loadMoreFooter: some View {
-        if appState.browser.isLoadingMore {
-            ProgressView().controlSize(.small).padding()
-        } else if appState.browser.hasMore {
-            Button("Load more") {
-                Task { await appState.loadMoreMailboxResults() }
+        if appState.browser.error != nil || appState.browser.isLoadingMore || appState.browser.hasMore {
+            VStack(spacing: 6) {
+                if let error = appState.browser.error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+                if appState.browser.isLoadingMore {
+                    ProgressView().controlSize(.small)
+                } else if appState.browser.hasMore {
+                    Button("Load more") {
+                        Task { await appState.loadMoreMailboxResults() }
+                    }
+                }
             }
             .padding()
         }

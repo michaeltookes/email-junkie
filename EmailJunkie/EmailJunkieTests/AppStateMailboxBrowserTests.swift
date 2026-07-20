@@ -57,7 +57,7 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertFalse(appState.browser.isSearching)
         XCTAssertNil(appState.browser.error)
         XCTAssertEqual(appState.browser.resultQuery?.mailbox, .inbox)
-        XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria())
+        XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria(maximumUID: 129))
         XCTAssertEqual(provider.lastOffset, 0)
     }
 
@@ -93,8 +93,35 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertEqual(provider.lastMailbox, .inbox)
         XCTAssertEqual(provider.lastCriteria?.text, "invoice")
         XCTAssertNil(provider.lastCriteria?.from)
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 129)
         XCTAssertEqual(provider.lastOffset, AppState.mailboxBrowserPageSize)
         XCTAssertEqual(appState.browser.results.count, 30)
+    }
+
+    func testLoadMoreUsesStableUIDWindowWhenNewMessagesArrive() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+        await appState.runMailboxSearch()
+
+        provider.allMessages.insert(
+            MailMessage(
+                id: 130,
+                uidValidity: 1,
+                from: MailAddress(name: "New", email: "new@x.com"),
+                subject: "New mail",
+                date: "",
+                messageID: "<new@x.com>"
+            ),
+            at: 0
+        )
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 129)
+        XCTAssertEqual(appState.browser.totalMatches, 30)
+        XCTAssertEqual(appState.browser.results.count, 30)
+        XCTAssertFalse(appState.browser.results.contains { $0.id == 130 })
+        XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
+        XCTAssertEqual(appState.browser.results.last?.id, 100)
     }
 
     func testLoadMoreRetryClearsPreviousPaginationError() async {

@@ -5,7 +5,7 @@ import Foundation
 /// paging by `(offset, limit)` — for exercising the mailbox browser (item 40).
 /// Kept in its own file so `AppStateTestDoubles` stays within the length limit.
 final class PagingSearchMailProvider: MailProvider, @unchecked Sendable {
-    let allMessages: [MailMessage]
+    var allMessages: [MailMessage]
     var searchError: MailError?
     private(set) var searchCallCount = 0
     private(set) var lastCriteria: MailSearchCriteria?
@@ -57,13 +57,16 @@ final class PagingSearchMailProvider: MailProvider, @unchecked Sendable {
         lastLimit = limit
         if let searchError { throw searchError }
 
-        let total = allMessages.count
+        let matchingMessages = allMessages.filter { message in
+            criteria.maximumUID.map { message.id <= $0 } ?? true
+        }
+        let total = matchingMessages.count
         guard offset < total, limit > 0 else {
             return MailSearchResult(messages: [], totalMatches: total, offset: offset, hasMore: false)
         }
         let end = min(offset + limit, total)
         return MailSearchResult(
-            messages: Array(allMessages[offset..<end]),
+            messages: Array(matchingMessages[offset..<end]),
             totalMatches: total,
             offset: offset,
             hasMore: end < total

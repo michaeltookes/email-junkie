@@ -5,6 +5,12 @@ import Foundation
 struct MailboxBrowserQuery: Equatable {
     var mailbox: Mailbox
     var criteria: MailSearchCriteria
+
+    func capped(at maximumUID: UInt32?) -> MailboxBrowserQuery {
+        var capped = self
+        capped.criteria.maximumUID = maximumUID
+        return capped
+    }
 }
 
 /// State for the mailbox browser window (item 40): search inputs, one page of
@@ -107,7 +113,7 @@ extension AppState {
             )
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.results = result.messages
-            browser.resultQuery = query
+            browser.resultQuery = query.capped(at: result.messages.map(\.id).max())
             browser.hasMore = result.hasMore
             browser.totalMatches = result.totalMatches
         } catch {

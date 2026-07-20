@@ -1,3 +1,4 @@
+import Foundation
 import NIOCore
 import NIOEmbedded
 import NIOIMAP
@@ -14,7 +15,8 @@ final class IMAPSearchTests: XCTestCase {
         criteria: MailSearchCriteria = MailSearchCriteria(),
         offset: Int = 0,
         limit: Int = 50,
-        mailbox: String = "INBOX"
+        mailbox: String = "INBOX",
+        calendar: Calendar = .current
     ) throws -> (EmbeddedChannel, EventLoopFuture<MailSearchResult>) {
         let channel = EmbeddedChannel()
         let promise = channel.eventLoop.makePromise(of: MailSearchResult.self)
@@ -25,6 +27,7 @@ final class IMAPSearchTests: XCTestCase {
             criteria: criteria,
             offset: offset,
             limit: limit,
+            calendar: calendar,
             promise: promise
         )
         try channel.pipeline.syncOperations.addHandlers([IMAPClientHandler(), handler])
@@ -104,6 +107,7 @@ final class IMAPSearchTests: XCTestCase {
         XCTAssertFalse(MailSearchCriteria(text: "hi").isEmpty)
         XCTAssertFalse(MailSearchCriteria(readState: .unreadOnly).isEmpty)
         XCTAssertFalse(MailSearchCriteria(flaggedOnly: true).isEmpty)
+        XCTAssertFalse(MailSearchCriteria(maximumUID: 123).isEmpty)
     }
 
     // MARK: - State machine
@@ -182,7 +186,8 @@ final class IMAPSearchTests: XCTestCase {
             from: "alice@example.com",
             since: Date(timeIntervalSince1970: 1_768_435_200),  // 2026-01-15 UTC
             readState: .unreadOnly,
-            flaggedOnly: true
+            flaggedOnly: true,
+            maximumUID: 500
         )
         let (channel, _) = try makeChannel(criteria: criteria)
 
@@ -196,6 +201,29 @@ final class IMAPSearchTests: XCTestCase {
         XCTAssertTrue(searchCommand.contains("UNSEEN"), "got: \(searchCommand)")
         XCTAssertTrue(searchCommand.contains("FLAGGED"), "got: \(searchCommand)")
         XCTAssertTrue(searchCommand.contains("SINCE"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("UID 1:500"), "got: \(searchCommand)")
+        _ = try? channel.finish()
+    }
+
+    func testDateCriteriaUsesCurrentCalendarDay() throws {
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 10 * 60 * 60))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let selectedDate = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20
+        )))
+        let (channel, _) = try makeChannel(criteria: MailSearchCriteria(
+            since: selectedDate,
+            before: selectedDate
+        ), calendar: calendar)
+
+        let searchCommand = try advanceThroughSelect(channel)
+
+        XCTAssertTrue(searchCommand.contains("SINCE 20-Jul-2026"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("BEFORE 20-Jul-2026"), "got: \(searchCommand)")
+        XCTAssertFalse(searchCommand.contains("19-Jul-2026"), "got: \(searchCommand)")
         _ = try? channel.finish()
     }
 

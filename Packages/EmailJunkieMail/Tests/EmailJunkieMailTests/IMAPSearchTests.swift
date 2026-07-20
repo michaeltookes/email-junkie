@@ -227,6 +227,31 @@ final class IMAPSearchTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testDateCriteriaUsesGregorianYearWithInjectedTimeZone() throws {
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 10 * 60 * 60))
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = timeZone
+        let selectedDate = try XCTUnwrap(gregorian.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20
+        )))
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = timeZone
+        let (channel, _) = try makeChannel(criteria: MailSearchCriteria(
+            since: selectedDate,
+            before: selectedDate
+        ), calendar: buddhist)
+
+        let searchCommand = try advanceThroughSelect(channel)
+
+        XCTAssertTrue(searchCommand.contains("SINCE 20-Jul-2026"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("BEFORE 20-Jul-2026"), "got: \(searchCommand)")
+        XCTAssertFalse(searchCommand.contains("2569"), "got: \(searchCommand)")
+        XCTAssertFalse(searchCommand.contains("19-Jul-2026"), "got: \(searchCommand)")
+        _ = try? channel.finish()
+    }
+
     func testEmptyCriteriaSearchesAll() throws {
         let (channel, _) = try makeChannel()
         let searchCommand = try advanceThroughSelect(channel)

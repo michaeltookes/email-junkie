@@ -407,11 +407,17 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     }
 
     static func calendarDay(from date: Date, calendar: Calendar = .current) -> IMAPCalendarDay? {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let components = imapDateCalendar(from: calendar).dateComponents([.year, .month, .day], from: date)
         guard let year = components.year, let month = components.month, let day = components.day else {
             return nil
         }
         return IMAPCalendarDay(year: year, month: month, day: day)
+    }
+
+    private static func imapDateCalendar(from calendar: Calendar) -> Calendar {
+        var imapCalendar = Calendar(identifier: .gregorian)
+        imapCalendar.timeZone = calendar.timeZone
+        return imapCalendar
     }
 
     private static func trimmed(_ value: String?) -> String? {

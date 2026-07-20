@@ -102,6 +102,7 @@ extension AppState {
         _ = nextDraftGeneration()
         clearRecentMessagePreview()
         clearDraftPreview()
+        resetMailboxBrowserForAccountChange()
         isFetching = false
         isFetchingBody = false
         isGeneratingDraft = false

@@ -27,6 +27,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var onboardingWindow: NSWindow?
     private var onboardingCloseObserver: NSObjectProtocol?
 
+    /// The mailbox browser window, created lazily.
+    private var browserWindow: NSWindow?
+    private var browserCloseObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -49,6 +53,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = onboardingCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = browserCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -80,18 +87,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func buildMenuItems() -> [NSMenuItem] {
+    /// Account-dependent action items (review, browse, watch) shown between the
+    /// status line and the settings section.
+    private func contextualActionItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
-
-        // Header (disabled label)
-        let header = NSMenuItem(title: "Email Junkie", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        items.append(header)
-
-        // Status line (disabled label)
-        let status = NSMenuItem(title: appState.statusText, action: nil, keyEquivalent: "")
-        status.isEnabled = false
-        items.append(status)
 
         // Review Drafts (only when there are drafts awaiting approval).
         if appState.pendingDraftCount > 0 {
@@ -102,6 +101,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             )
             review.target = self
             items.append(review)
+        }
+
+        // Browse Mailbox (only when an account is connected — search needs it).
+        if appState.isAccountConnected {
+            let browse = NSMenuItem(
+                title: "Browse Mailbox…",
+                action: #selector(openBrowserMenu),
+                keyEquivalent: "b"
+            )
+            browse.target = self
+            items.append(browse)
         }
 
         // Start / Pause watching (only when an account + LLM are connected).
@@ -115,6 +125,24 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             toggle.target = self
             items.append(toggle)
         }
+
+        return items
+    }
+
+    private func buildMenuItems() -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+
+        // Header (disabled label)
+        let header = NSMenuItem(title: "Email Junkie", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        items.append(header)
+
+        // Status line (disabled label)
+        let status = NSMenuItem(title: appState.statusText, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        items.append(status)
+
+        items.append(contentsOf: contextualActionItems())
 
         items.append(.separator())
 
@@ -174,6 +202,47 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openOnboardingMenu() {
         openOnboarding()
+    }
+
+    @objc private func openBrowserMenu() {
+        openBrowser()
+    }
+
+    func openBrowser() {
+        if browserWindow == nil {
+            let view = MailboxBrowserView()
+                .environmentObject(appState)
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Browse Mailbox"
+            window.contentView = NSHostingView(rootView: view)
+            window.center()
+            window.isReleasedWhenClosed = false
+            window.setAccessibilityLabel("Browse Mailbox")
+            browserWindow = window
+
+            browserCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    if let observer = self?.browserCloseObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        self?.browserCloseObserver = nil
+                    }
+                    self?.browserWindow = nil
+                }
+            }
+        }
+
+        browserWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func openOnboarding() {

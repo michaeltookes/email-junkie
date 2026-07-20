@@ -131,6 +131,12 @@ final class AppState: ObservableObject {
     /// Used only to keep already-configured installs out of first-run setup.
     let loadedSettingsPredateOnboardingCompletion: Bool
 
+    // MARK: - Mailbox Browser (item 40)
+
+    /// Search inputs + results for the mailbox browser window. Grouped into one
+    /// value so `AppState` stays compact; SwiftUI binds into individual fields.
+    @Published var browser = MailboxBrowserState()
+
     // MARK: - Inbox Watcher
 
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
@@ -183,6 +189,7 @@ final class AppState: ObservableObject {
     var previewGeneration = 0
     var bodyPreviewGeneration = 0
     var draftGeneration = 0
+    var browserGeneration = 0
 
     // MARK: - Initialization
 

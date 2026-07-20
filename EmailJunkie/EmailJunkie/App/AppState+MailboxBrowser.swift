@@ -1,0 +1,155 @@
+import EmailJunkieMail
+import Foundation
+
+/// State for the mailbox browser window (item 40): search inputs, one page of
+/// results, and paging status. Grouped into a single value so `AppState` stays
+/// compact; SwiftUI binds into the individual fields.
+struct MailboxBrowserState: Equatable {
+
+    // MARK: Inputs
+
+    var mailbox: Mailbox = .inbox
+    var keyword: String = ""
+    var sender: String = ""
+    var readState: MailReadState = .any
+    /// Date filters are opt-in so an untouched browser searches all dates.
+    var useSinceFilter = false
+    var since = Date()
+    var useBeforeFilter = false
+    var before = Date()
+
+    // MARK: Results / status
+
+    /// Results accumulated across the pages loaded so far, newest first.
+    var results: [MailMessage] = []
+    var isSearching = false
+    var isLoadingMore = false
+    var error: String?
+    var hasMore = false
+    var totalMatches = 0
+    /// True once at least one search has completed, so the UI can tell "no
+    /// search yet" from "no matches".
+    var hasSearched = false
+
+    /// The IMAP search criteria described by the current inputs.
+    var criteria: MailSearchCriteria {
+        MailSearchCriteria(
+            text: Self.trimmedOrNil(keyword),
+            from: Self.trimmedOrNil(sender),
+            since: useSinceFilter ? since : nil,
+            before: useBeforeFilter ? before : nil,
+            readState: readState
+        )
+    }
+
+    private static func trimmedOrNil(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Mailbox-browser actions on `AppState` (item 40). Kept in a separate file so
+/// `AppState` stays within the file/type length limits. Each request is guarded
+/// by a monotonic generation counter so a stale completion (after an account
+/// change or a newer search) never clobbers current state.
+extension AppState {
+
+    /// How many results each search page fetches.
+    static let mailboxBrowserPageSize = 25
+
+    /// Runs a fresh search from the first page using the current browser inputs.
+    func runMailboxSearch() async {
+        let requestGeneration = nextBrowserGeneration()
+        browser.error = nil
+        browser.results = []
+        browser.hasMore = false
+        browser.totalMatches = 0
+        browser.isLoadingMore = false
+
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            browser.error = "Connect an account first."
+            browser.hasSearched = true
+            return
+        }
+
+        browser.isSearching = true
+        defer {
+            if browserGeneration == requestGeneration {
+                browser.isSearching = false
+                browser.hasSearched = true
+            }
+        }
+
+        do {
+            let result = try await mailProvider.searchMessages(
+                credentials,
+                mailbox: browser.mailbox,
+                criteria: browser.criteria,
+                offset: 0,
+                limit: Self.mailboxBrowserPageSize
+            )
+            guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
+            browser.results = result.messages
+            browser.hasMore = result.hasMore
+            browser.totalMatches = result.totalMatches
+        } catch {
+            guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
+            browser.error = Self.message(for: error)
+        }
+    }
+
+    /// Loads and appends the next page of results (pagination). No-op unless a
+    /// prior search reported more results and nothing else is in flight.
+    func loadMoreMailboxResults() async {
+        guard browser.hasMore, !browser.isSearching, !browser.isLoadingMore else { return }
+        let requestGeneration = browserGeneration
+        let offset = browser.results.count
+
+        let credentials = mailCredentials
+        guard credentials.isComplete else { return }
+
+        browser.isLoadingMore = true
+        defer {
+            if browserGeneration == requestGeneration {
+                browser.isLoadingMore = false
+            }
+        }
+
+        do {
+            let result = try await mailProvider.searchMessages(
+                credentials,
+                mailbox: browser.mailbox,
+                criteria: browser.criteria,
+                offset: offset,
+                limit: Self.mailboxBrowserPageSize
+            )
+            guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
+            browser.results.append(contentsOf: result.messages)
+            browser.hasMore = result.hasMore
+            browser.totalMatches = result.totalMatches
+        } catch {
+            guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
+            browser.error = Self.message(for: error)
+        }
+    }
+
+    func nextBrowserGeneration() -> Int {
+        browserGeneration += 1
+        return browserGeneration
+    }
+
+    /// Clears the browser and invalidates any in-flight request when the
+    /// connected account changes.
+    func resetMailboxBrowserForAccountChange() {
+        _ = nextBrowserGeneration()
+        browser = MailboxBrowserState()
+    }
+
+    private func isCurrentBrowserRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        browserGeneration == requestGeneration && mailCredentials == credentials
+    }
+}

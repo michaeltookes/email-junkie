@@ -135,7 +135,7 @@ public extension MailProvider {
 }
 
 /// A read/unread filter for a mailbox search.
-public enum MailReadState: Sendable, Equatable {
+public enum MailReadState: Sendable, Equatable, Hashable {
     /// No read-state constraint.
     case any
     /// Only unread messages (IMAP `UNSEEN`).

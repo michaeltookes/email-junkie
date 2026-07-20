@@ -47,7 +47,7 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
 }
 
 /// A mailbox to fetch from.
-public enum Mailbox: Sendable, Equatable {
+public enum Mailbox: Sendable, Equatable, Hashable {
     case inbox
     case sent
     case drafts

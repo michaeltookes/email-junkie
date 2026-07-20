@@ -14,6 +14,13 @@ struct MailboxBrowserView: View {
             results
         }
         .frame(minWidth: 600, minHeight: 520)
+        .task {
+            // Default to a recent-messages view (empty search = all, newest
+            // first) the first time the window opens.
+            if !appState.browser.hasSearched {
+                await appState.runMailboxSearch()
+            }
+        }
         .sheet(item: $appState.openedBody) { preview in
             MessageBodyView(preview: preview)
         }

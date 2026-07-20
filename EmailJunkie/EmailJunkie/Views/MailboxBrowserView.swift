@@ -127,7 +127,10 @@ struct MailboxBrowserView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(appState.browser.results) { message in
-                        MailboxBrowserRow(message: message)
+                        MailboxBrowserRow(
+                            message: message,
+                            sourceMailbox: appState.browser.resultQuery?.mailbox
+                        )
                         Divider()
                     }
                     loadMoreFooter
@@ -189,6 +192,7 @@ struct MailboxBrowserView: View {
 /// reusing the same `AppState` preview/draft actions as Settings.
 private struct MailboxBrowserRow: View {
     let message: MailMessage
+    let sourceMailbox: Mailbox?
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -204,23 +208,25 @@ private struct MailboxBrowserRow: View {
             }
             Spacer()
             Button {
-                Task { await appState.previewBody(for: message, mailbox: appState.browser.mailbox) }
+                guard let sourceMailbox else { return }
+                Task { await appState.previewBody(for: message, mailbox: sourceMailbox) }
             } label: {
                 Image(systemName: "doc.text")
             }
             .buttonStyle(.borderless)
             .help("View body")
-            .disabled(appState.isFetchingBody)
+            .disabled(sourceMailbox == nil || appState.isFetchingBody)
             .accessibilityLabel("View body")
 
             Button {
-                Task { await appState.generateDraft(for: message, mailbox: appState.browser.mailbox) }
+                guard let sourceMailbox else { return }
+                Task { await appState.generateDraft(for: message, mailbox: sourceMailbox) }
             } label: {
                 Image(systemName: "arrowshape.turn.up.left")
             }
             .buttonStyle(.borderless)
             .help("Draft reply")
-            .disabled(appState.isGeneratingDraft || !appState.canGenerateDraft)
+            .disabled(sourceMailbox == nil || appState.isGeneratingDraft || !appState.canGenerateDraft)
             .accessibilityLabel("Draft reply")
         }
         .padding(.horizontal)

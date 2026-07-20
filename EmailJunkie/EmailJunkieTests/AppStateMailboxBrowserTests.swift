@@ -56,6 +56,8 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertTrue(appState.browser.hasSearched)
         XCTAssertFalse(appState.browser.isSearching)
         XCTAssertNil(appState.browser.error)
+        XCTAssertEqual(appState.browser.resultQuery?.mailbox, .inbox)
+        XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria())
         XCTAssertEqual(provider.lastOffset, 0)
     }
 
@@ -74,6 +76,45 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertEqual(provider.searchCallCount, 2)
         // No duplicates: ids are unique and contiguous.
         XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
+    }
+
+    func testLoadMoreUsesQueryFromDisplayedResults() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+        appState.browser.mailbox = .inbox
+        appState.browser.keyword = "  invoice  "
+
+        await appState.runMailboxSearch()
+        appState.browser.mailbox = .sent
+        appState.browser.keyword = "changed"
+        appState.browser.sender = "other@example.com"
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertEqual(provider.lastMailbox, .inbox)
+        XCTAssertEqual(provider.lastCriteria?.text, "invoice")
+        XCTAssertNil(provider.lastCriteria?.from)
+        XCTAssertEqual(provider.lastOffset, AppState.mailboxBrowserPageSize)
+        XCTAssertEqual(appState.browser.results.count, 30)
+    }
+
+    func testLoadMoreRetryClearsPreviousPaginationError() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+        await appState.runMailboxSearch()
+
+        provider.searchError = .commandFailed("transient failure")
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertNotNil(appState.browser.error)
+        XCTAssertEqual(appState.browser.results.count, AppState.mailboxBrowserPageSize)
+        XCTAssertTrue(appState.browser.hasMore)
+
+        provider.searchError = nil
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertNil(appState.browser.error)
+        XCTAssertEqual(appState.browser.results.count, 30)
+        XCTAssertFalse(appState.browser.hasMore)
     }
 
     func testLoadMoreIsNoOpWhenNoMoreResults() async {

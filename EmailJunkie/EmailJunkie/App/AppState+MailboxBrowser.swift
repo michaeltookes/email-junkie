@@ -1,6 +1,12 @@
 import EmailJunkieMail
 import Foundation
 
+/// The mailbox + criteria used to produce the currently displayed result set.
+struct MailboxBrowserQuery: Equatable {
+    var mailbox: Mailbox
+    var criteria: MailSearchCriteria
+}
+
 /// State for the mailbox browser window (item 40): search inputs, one page of
 /// results, and paging status. Grouped into a single value so `AppState` stays
 /// compact; SwiftUI binds into the individual fields.
@@ -30,6 +36,9 @@ struct MailboxBrowserState: Equatable {
     /// True once at least one search has completed, so the UI can tell "no
     /// search yet" from "no matches".
     var hasSearched = false
+    /// Query that produced `results`; used so pagination and row actions remain
+    /// attached to those rows even if the editable controls change afterward.
+    var resultQuery: MailboxBrowserQuery?
 
     /// The IMAP search criteria described by the current inputs.
     var criteria: MailSearchCriteria {
@@ -40,6 +49,11 @@ struct MailboxBrowserState: Equatable {
             before: useBeforeFilter ? before : nil,
             readState: readState
         )
+    }
+
+    /// The mailbox search described by the current inputs.
+    var query: MailboxBrowserQuery {
+        MailboxBrowserQuery(mailbox: mailbox, criteria: criteria)
     }
 
     private static func trimmedOrNil(_ value: String) -> String? {
@@ -60,8 +74,10 @@ extension AppState {
     /// Runs a fresh search from the first page using the current browser inputs.
     func runMailboxSearch() async {
         let requestGeneration = nextBrowserGeneration()
+        let query = browser.query
         browser.error = nil
         browser.results = []
+        browser.resultQuery = nil
         browser.hasMore = false
         browser.totalMatches = 0
         browser.isLoadingMore = false
@@ -84,13 +100,14 @@ extension AppState {
         do {
             let result = try await mailProvider.searchMessages(
                 credentials,
-                mailbox: browser.mailbox,
-                criteria: browser.criteria,
+                mailbox: query.mailbox,
+                criteria: query.criteria,
                 offset: 0,
                 limit: Self.mailboxBrowserPageSize
             )
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.results = result.messages
+            browser.resultQuery = query
             browser.hasMore = result.hasMore
             browser.totalMatches = result.totalMatches
         } catch {
@@ -103,12 +120,14 @@ extension AppState {
     /// prior search reported more results and nothing else is in flight.
     func loadMoreMailboxResults() async {
         guard browser.hasMore, !browser.isSearching, !browser.isLoadingMore else { return }
+        guard let query = browser.resultQuery else { return }
         let requestGeneration = browserGeneration
         let offset = browser.results.count
 
         let credentials = mailCredentials
         guard credentials.isComplete else { return }
 
+        browser.error = nil
         browser.isLoadingMore = true
         defer {
             if browserGeneration == requestGeneration {
@@ -119,12 +138,13 @@ extension AppState {
         do {
             let result = try await mailProvider.searchMessages(
                 credentials,
-                mailbox: browser.mailbox,
-                criteria: browser.criteria,
+                mailbox: query.mailbox,
+                criteria: query.criteria,
                 offset: offset,
                 limit: Self.mailboxBrowserPageSize
             )
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
+            browser.error = nil
             browser.results.append(contentsOf: result.messages)
             browser.hasMore = result.hasMore
             browser.totalMatches = result.totalMatches

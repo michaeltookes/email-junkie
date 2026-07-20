@@ -11,6 +11,12 @@ struct MailboxBrowserQuery: Equatable {
         capped.criteria.maximumUID = maximumUID
         return capped
     }
+
+    func nextPage(after lastUID: UInt32?) -> MailboxBrowserQuery? {
+        guard let lastUID, lastUID > 1 else { return nil }
+        let cursorMaximumUID = lastUID - 1
+        return capped(at: criteria.maximumUID.map { min($0, cursorMaximumUID) } ?? cursorMaximumUID)
+    }
 }
 
 /// State for the mailbox browser window (item 40): search inputs, one page of
@@ -127,8 +133,12 @@ extension AppState {
     func loadMoreMailboxResults() async {
         guard browser.hasMore, !browser.isSearching, !browser.isLoadingMore else { return }
         guard let query = browser.resultQuery else { return }
+        guard let pageQuery = query.nextPage(after: browser.results.last?.id) else {
+            browser.hasMore = false
+            return
+        }
         let requestGeneration = browserGeneration
-        let offset = browser.results.count
+        let loadedCount = browser.results.count
 
         let credentials = mailCredentials
         guard credentials.isComplete else { return }
@@ -144,16 +154,16 @@ extension AppState {
         do {
             let result = try await mailProvider.searchMessages(
                 credentials,
-                mailbox: query.mailbox,
-                criteria: query.criteria,
-                offset: offset,
+                mailbox: pageQuery.mailbox,
+                criteria: pageQuery.criteria,
+                offset: 0,
                 limit: Self.mailboxBrowserPageSize
             )
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = nil
             browser.results.append(contentsOf: result.messages)
             browser.hasMore = result.hasMore
-            browser.totalMatches = result.totalMatches
+            browser.totalMatches = loadedCount + result.totalMatches
         } catch {
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = Self.message(for: error)

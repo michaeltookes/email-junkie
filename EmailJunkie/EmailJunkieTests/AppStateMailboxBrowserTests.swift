@@ -72,7 +72,8 @@ final class AppStateMailboxBrowserTests: XCTestCase {
 
         XCTAssertEqual(appState.browser.results.count, 30)
         XCTAssertFalse(appState.browser.hasMore)
-        XCTAssertEqual(provider.lastOffset, AppState.mailboxBrowserPageSize)
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 104)
+        XCTAssertEqual(provider.lastOffset, 0)
         XCTAssertEqual(provider.searchCallCount, 2)
         // No duplicates: ids are unique and contiguous.
         XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
@@ -93,8 +94,8 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertEqual(provider.lastMailbox, .inbox)
         XCTAssertEqual(provider.lastCriteria?.text, "invoice")
         XCTAssertNil(provider.lastCriteria?.from)
-        XCTAssertEqual(provider.lastCriteria?.maximumUID, 129)
-        XCTAssertEqual(provider.lastOffset, AppState.mailboxBrowserPageSize)
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 104)
+        XCTAssertEqual(provider.lastOffset, 0)
         XCTAssertEqual(appState.browser.results.count, 30)
     }
 
@@ -116,12 +117,28 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         )
         await appState.loadMoreMailboxResults()
 
-        XCTAssertEqual(provider.lastCriteria?.maximumUID, 129)
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 104)
+        XCTAssertEqual(provider.lastOffset, 0)
         XCTAssertEqual(appState.browser.totalMatches, 30)
         XCTAssertEqual(appState.browser.results.count, 30)
         XCTAssertFalse(appState.browser.results.contains { $0.id == 130 })
         XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
         XCTAssertEqual(appState.browser.results.last?.id, 100)
+    }
+
+    func testLoadMoreUsesCursorWhenLoadedMessageIsDeleted() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+        await appState.runMailboxSearch()
+
+        provider.allMessages.removeAll { $0.id == 120 }
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertEqual(provider.lastCriteria?.maximumUID, 104)
+        XCTAssertEqual(provider.lastOffset, 0)
+        XCTAssertEqual(appState.browser.results.suffix(5).map(\.id), [104, 103, 102, 101, 100])
+        XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
+        XCTAssertEqual(appState.browser.totalMatches, 30)
     }
 
     func testLoadMoreRetryClearsPreviousPaginationError() async {

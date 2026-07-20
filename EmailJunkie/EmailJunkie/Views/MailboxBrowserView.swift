@@ -124,6 +124,7 @@ struct MailboxBrowserView: View {
         VStack(spacing: 0) {
             resultCountBar
             Divider()
+            rowActionStatus
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(appState.browser.results) { message in
@@ -148,6 +149,38 @@ struct MailboxBrowserView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var rowActionStatus: some View {
+        if appState.isGeneratingDraft || appState.bodyError != nil || appState.draftError != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if appState.isGeneratingDraft {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Drafting a reply…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let error = appState.bodyError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if let error = appState.draftError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            Divider()
+        }
     }
 
     @ViewBuilder

@@ -73,20 +73,10 @@ struct VoiceProfiler {
     }
 
     /// Truncates at the first quoted-reply marker so profiling sees only what
-    /// the user actually wrote, not the message they replied to.
+    /// the user actually wrote, not the message they replied to. Delegates to
+    /// the shared `EmailThreadParser` so quote detection has one source of truth.
     static func strippingQuotedReply(_ text: String) -> String {
-        let lines = text.components(separatedBy: "\n")
-        var kept: [String] = []
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(">")
-                || trimmed.hasPrefix("-----Original Message-----")
-                || trimmed.range(of: #"^On .+wrote:$"#, options: .regularExpression) != nil {
-                break
-            }
-            kept.append(line)
-        }
-        return kept.joined(separator: "\n")
+        EmailThreadParser.split(text).latest
     }
 
     // MARK: - Prompt

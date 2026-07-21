@@ -85,6 +85,79 @@ final class DraftGeneratorTests: XCTestCase {
         }
     }
 
+    func testIncludesThreadHistoryAsContextWhenPresent() async throws {
+        var captured: LLMRequest?
+        let threaded = ReplyContext(
+            senderName: "Alice", senderEmail: "alice@example.com", subject: "Re: Proposal",
+            body: """
+            Yes, let's proceed with option B.
+
+            On Mon, Jul 21, 2026 at 9:00 AM Bob <bob@example.com> wrote:
+            > Do you prefer option A or option B for the rollout?
+            """
+        )
+
+        _ = try await DraftGenerator().makeDraft(replyingTo: threaded, voiceProfile: nil, model: "m") { request in
+            captured = request
+            return LLMResponse(text: "Great — option B it is.")
+        }
+
+        let user = try XCTUnwrap(captured?.messages.first?.content)
+        XCTAssertTrue(user.contains("Reply to the latest message"))
+        XCTAssertTrue(user.contains("Yes, let's proceed with option B."), "fresh message present")
+        XCTAssertTrue(user.contains("Earlier in this thread"), "thread section present")
+        XCTAssertTrue(user.contains("Do you prefer option A or option B"), "quoted history present, de-quoted")
+        XCTAssertFalse(user.contains("> Do you prefer"), "leading quote markers stripped from context")
+    }
+
+    func testOmitsThreadSectionWhenNoHistory() async throws {
+        var captured: LLMRequest?
+
+        _ = try await DraftGenerator().makeDraft(replyingTo: context(), voiceProfile: nil, model: "m") { request in
+            captured = request
+            return LLMResponse(text: "ok")
+        }
+
+        XCTAssertFalse(try XCTUnwrap(captured?.messages.first?.content).contains("Earlier in this thread"))
+    }
+
+    func testLongQuotedHistoryDoesNotStarveTheFreshMessage() async throws {
+        var captured: LLMRequest?
+        let freshLine = "Please confirm the Thursday slot works."
+        let threaded = ReplyContext(
+            senderName: nil, senderEmail: "a@mail.com", subject: "Scheduling",
+            body: freshLine + "\n\n> " + String(repeating: "q", count: 20_000)
+        )
+
+        _ = try await DraftGenerator().makeDraft(replyingTo: threaded, voiceProfile: nil, model: "m") { request in
+            captured = request
+            return LLMResponse(text: "ok")
+        }
+
+        // The fresh message survives in full even though the quoted tail is huge.
+        XCTAssertTrue(try XCTUnwrap(captured?.messages.first?.content).contains(freshLine))
+    }
+
+    func testCapsThreadHistoryAtMaxThreadChars() async throws {
+        var captured: LLMRequest?
+        var generator = DraftGenerator()
+        generator.maxThreadChars = 30
+        // Use a letter absent from the prompt boilerplate so the count reflects
+        // only the (capped) quoted history.
+        let threaded = ReplyContext(
+            senderName: nil, senderEmail: "a@mail.com", subject: "S",
+            body: "Ping.\n> " + String(repeating: "z", count: 500)
+        )
+
+        _ = try await generator.makeDraft(replyingTo: threaded, voiceProfile: nil, model: "m") { request in
+            captured = request
+            return LLMResponse(text: "ok")
+        }
+
+        let zCount = (captured?.messages.first?.content ?? "").filter { $0 == "z" }.count
+        XCTAssertEqual(zCount, 30)
+    }
+
     func testTruncatesLongIncomingBody() async throws {
         var captured: LLMRequest?
         var generator = DraftGenerator()

@@ -263,6 +263,12 @@ extension AppState {
             }
             throw DraftDispatchError.accountMismatch
         }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftError.unsupportedSourceMailbox
+        }
 
         switch sendBehavior {
         case .autoSend:
@@ -286,6 +292,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
@@ -312,6 +322,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
@@ -380,6 +394,21 @@ extension AppState {
         let host = email.split(separator: "@").last.map(String.init) ?? "emailjunkie.local"
         return "<\(UUID().uuidString)@\(host)>"
     }
+
+    func draftSourceAllowsReplyDispatch(_ draft: Draft) -> Bool {
+        guard let sourceMailbox = draft.sourceMailbox else { return true }
+        let normalized = sourceMailbox.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !Self.outgoingDraftSourceMailboxes.contains(normalized)
+    }
+
+    private static let outgoingDraftSourceMailboxes: Set<String> = [
+        Mailbox.sent.imapName.lowercased(),
+        Mailbox.drafts.imapName.lowercased(),
+        "sent",
+        "sent mail",
+        "draft",
+        "drafts"
+    ]
 
     static func replySubject(for subject: String) -> String {
         let trimmed = subject.trimmingCharacters(in: .whitespaces)

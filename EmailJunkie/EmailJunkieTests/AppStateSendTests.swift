@@ -7,13 +7,14 @@ final class AppStateSendTests: XCTestCase {
 
     private func draft(
         replyTo: MailAddress? = nil,
-        sourceAccountEmail: String? = "me@gmail.com"
+        sourceAccountEmail: String? = "me@gmail.com",
+        sourceMailbox: String? = Mailbox.inbox.imapName
     ) -> Draft {
         Draft(
             id: 5,
             sourceUIDValidity: 1,
             sourceAccountEmail: sourceAccountEmail,
-            sourceMailbox: Mailbox.inbox.imapName,
+            sourceMailbox: sourceMailbox,
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
             sourceReplyTo: replyTo,
@@ -115,6 +116,25 @@ final class AppStateSendTests: XCTestCase {
         } catch let error as DraftDispatchError {
             XCTAssertEqual(error, .accountMismatch)
             XCTAssertEqual(AppState.draftMessage(for: error), "This draft was generated for a different email account.")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertNil(appState.generatedDraft)
+    }
+
+    func testPreviewApprovalRejectsDraftFromOutgoingMailbox() async {
+        let outgoingDraft = draft(sourceMailbox: Mailbox.sent.imapName)
+        let (appState, provider) = makeAppState(sendBehavior: .autoSend, draft: outgoingDraft)
+
+        do {
+            _ = try await appState.approveDraftPreview(outgoingDraft)
+            XCTFail("Expected preview approval to reject drafts from outgoing mailboxes")
+        } catch let error as DraftError {
+            XCTAssertEqual(error, .unsupportedSourceMailbox)
+            XCTAssertEqual(AppState.draftMessage(for: error), "Draft replies are only available for incoming mail.")
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

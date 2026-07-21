@@ -32,6 +32,10 @@ extension AppState {
             approvalError = "This draft was generated for a different email account."
             return
         }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
 
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }

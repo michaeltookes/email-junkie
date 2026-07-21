@@ -125,7 +125,7 @@ extension AppState {
         return removalIndex
     }
 
-    private func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
+    func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
         guard let sourceAccount = draft.sourceAccountEmail else { return false }
         return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
     }

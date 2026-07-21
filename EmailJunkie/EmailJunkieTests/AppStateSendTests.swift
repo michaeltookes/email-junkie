@@ -5,10 +5,15 @@ import XCTest
 @MainActor
 final class AppStateSendTests: XCTestCase {
 
-    private func draft(replyTo: MailAddress? = nil) -> Draft {
+    private func draft(
+        replyTo: MailAddress? = nil,
+        sourceAccountEmail: String? = "me@gmail.com"
+    ) -> Draft {
         Draft(
             id: 5,
             sourceUIDValidity: 1,
+            sourceAccountEmail: sourceAccountEmail,
+            sourceMailbox: Mailbox.inbox.imapName,
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
             sourceReplyTo: replyTo,
@@ -98,6 +103,25 @@ final class AppStateSendTests: XCTestCase {
         XCTAssertTrue(rfc822.contains("Subject: Re: Alice"))
         XCTAssertFalse(rfc822.contains("Subject: Re: Bob"))
         XCTAssertFalse(rfc822.contains("bob@example.com"))
+    }
+
+    func testPreviewApprovalRejectsDraftAfterAccountChanges() async {
+        let staleDraft = draft(sourceAccountEmail: "old@gmail.com")
+        let (appState, provider) = makeAppState(sendBehavior: .autoSend, draft: staleDraft)
+
+        do {
+            _ = try await appState.approveDraftPreview(staleDraft)
+            XCTFail("Expected preview approval to reject a draft from another account")
+        } catch let error as DraftDispatchError {
+            XCTAssertEqual(error, .accountMismatch)
+            XCTAssertEqual(AppState.draftMessage(for: error), "This draft was generated for a different email account.")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertNil(appState.generatedDraft)
     }
 
     func testApproveWithAutoSendIgnoresSecondApprovalWhileSendInFlight() async {

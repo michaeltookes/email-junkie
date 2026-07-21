@@ -58,7 +58,13 @@ extension AppState {
             guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
                 return nil
             }
-            let draft = Self.draftPreview(for: message, body: body, llmConfiguration: llmConfiguration)
+            let draft = Self.draftPreview(
+                for: message,
+                body: body,
+                llmConfiguration: llmConfiguration,
+                credentials: credentials,
+                mailbox: mailbox
+            )
             generatedDraft = draft
             return draft
         } catch {
@@ -151,11 +157,15 @@ extension AppState {
     private static func draftPreview(
         for message: MailMessage,
         body: String,
-        llmConfiguration: DraftLLMConfiguration
+        llmConfiguration: DraftLLMConfiguration,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox
     ) -> Draft {
         Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
+            sourceAccountEmail: credentials.email,
+            sourceMailbox: mailbox.imapName,
             sourceSubject: message.subject,
             sourceFrom: message.from,
             sourceReplyTo: message.replyTo,
@@ -238,6 +248,12 @@ extension AppState {
         let credentials = mailCredentials
         guard credentials.isComplete else {
             throw DraftDispatchError.missingCredentials
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftDispatchError.accountMismatch
         }
 
         switch sendBehavior {
@@ -372,6 +388,8 @@ extension AppState {
         switch error {
         case DraftDispatchError.missingCredentials:
             return "Connect an email account first."
+        case DraftDispatchError.accountMismatch:
+            return "This draft was generated for a different email account."
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
         case DraftDispatchError.noRecipient:
@@ -388,6 +406,8 @@ extension AppState {
 enum DraftDispatchError: Error, Equatable {
     /// No connected mail account is available for dispatch.
     case missingCredentials
+    /// The draft was generated under a different mail account.
+    case accountMismatch
     /// The draft has no resolvable recipient address.
     case noRecipient
 }

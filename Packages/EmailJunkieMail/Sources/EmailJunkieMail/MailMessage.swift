@@ -47,7 +47,7 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
 }
 
 /// A mailbox to fetch from.
-public enum Mailbox: Sendable, Equatable {
+public enum Mailbox: Sendable, Equatable, Hashable {
     case inbox
     case sent
     case drafts
@@ -65,6 +65,18 @@ public enum Mailbox: Sendable, Equatable {
         case .drafts: return "[Gmail]/Drafts"
         case .allMail: return "[Gmail]/All Mail"
         case .named(let name): return name
+        }
+    }
+
+    /// Whether a fetched row has enough envelope context to generate a reply
+    /// safely. Sent and Drafts rows currently only preserve `From`/`Reply-To`,
+    /// which points back at the connected account for outgoing mail.
+    public var supportsReplyDrafting: Bool {
+        switch self {
+        case .sent, .drafts:
+            return false
+        case .inbox, .allMail, .named:
+            return true
         }
     }
 }

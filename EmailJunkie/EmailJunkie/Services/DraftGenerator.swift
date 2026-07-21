@@ -12,6 +12,8 @@ struct ReplyContext: Equatable {
 enum DraftError: Error, Equatable {
     /// The model returned no usable reply text.
     case emptyDraft
+    /// The selected source mailbox cannot produce a safe reply recipient.
+    case unsupportedSourceMailbox
 }
 
 /// Produces a reply body from an incoming message and the user's voice profile

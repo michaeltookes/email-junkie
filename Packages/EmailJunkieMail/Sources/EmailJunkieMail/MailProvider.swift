@@ -135,7 +135,7 @@ public extension MailProvider {
 }
 
 /// A read/unread filter for a mailbox search.
-public enum MailReadState: Sendable, Equatable {
+public enum MailReadState: Sendable, Equatable, Hashable {
     /// No read-state constraint.
     case any
     /// Only unread messages (IMAP `UNSEEN`).
@@ -162,6 +162,9 @@ public struct MailSearchCriteria: Sendable, Equatable {
     public var readState: MailReadState
     /// Only flagged/starred messages (IMAP `FLAGGED`).
     public var flaggedOnly: Bool
+    /// Optional high-water UID, used to keep paged result sets stable when newer
+    /// matching messages arrive after the first page was loaded.
+    public var maximumUID: UInt32?
 
     public init(
         text: String? = nil,
@@ -170,7 +173,8 @@ public struct MailSearchCriteria: Sendable, Equatable {
         since: Date? = nil,
         before: Date? = nil,
         readState: MailReadState = .any,
-        flaggedOnly: Bool = false
+        flaggedOnly: Bool = false,
+        maximumUID: UInt32? = nil
     ) {
         self.text = text
         self.from = from
@@ -179,13 +183,14 @@ public struct MailSearchCriteria: Sendable, Equatable {
         self.before = before
         self.readState = readState
         self.flaggedOnly = flaggedOnly
+        self.maximumUID = maximumUID
     }
 
     /// True when no filter is set — the search reduces to "all mail, newest
     /// first". Blank/whitespace-only text fields do not count as a filter.
     public var isEmpty: Bool {
         Self.isBlank(text) && Self.isBlank(from) && Self.isBlank(subject)
-            && since == nil && before == nil && readState == .any && !flaggedOnly
+            && since == nil && before == nil && readState == .any && !flaggedOnly && maximumUID == nil
     }
 
     private static func isBlank(_ value: String?) -> Bool {

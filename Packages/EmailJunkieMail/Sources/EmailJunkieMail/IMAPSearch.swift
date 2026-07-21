@@ -142,6 +142,7 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     private let criteria: MailSearchCriteria
     private let offset: Int
     private let limit: Int
+    private let calendar: Calendar
     private let promise: EventLoopPromise<MailSearchResult>
 
     private let loginTag = "A1"
@@ -166,6 +167,7 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         criteria: MailSearchCriteria,
         offset: Int,
         limit: Int,
+        calendar: Calendar = .current,
         promise: EventLoopPromise<MailSearchResult>
     ) {
         self.email = email
@@ -174,6 +176,7 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         self.criteria = criteria
         self.offset = offset
         self.limit = limit
+        self.calendar = calendar
         self.promise = promise
     }
 
@@ -230,7 +233,7 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             captureUIDValidity(from: tagged.state)
-            send(.uidSearch(key: Self.searchKey(for: criteria)), tag: searchTag, context: context)
+            send(.uidSearch(key: Self.searchKey(for: criteria, calendar: calendar)), tag: searchTag, context: context)
             step = .search
         case searchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
@@ -356,8 +359,9 @@ final class IMAPSearchHandler: ChannelInboundHandler {
 
     /// Translates search criteria into a single IMAP `SearchKey` (fields AND-ed;
     /// `.all` when nothing is set). Blank text fields are dropped.
-    static func searchKey(for criteria: MailSearchCriteria) -> SearchKey {
-        let keys = textKeys(for: criteria) + dateKeys(for: criteria) + stateKeys(for: criteria)
+    static func searchKey(for criteria: MailSearchCriteria, calendar: Calendar = .current) -> SearchKey {
+        let keys = textKeys(for: criteria) + dateKeys(for: criteria, calendar: calendar) + stateKeys(for: criteria)
+            + uidKeys(for: criteria)
         switch keys.count {
         case 0: return .all
         case 1: return keys[0]
@@ -373,10 +377,14 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         return keys
     }
 
-    private static func dateKeys(for criteria: MailSearchCriteria) -> [SearchKey] {
+    private static func dateKeys(for criteria: MailSearchCriteria, calendar: Calendar) -> [SearchKey] {
         var keys: [SearchKey] = []
-        if let since = criteria.since, let day = calendarDay(from: since) { keys.append(.since(day)) }
-        if let before = criteria.before, let day = calendarDay(from: before) { keys.append(.before(day)) }
+        if let since = criteria.since, let day = calendarDay(from: since, calendar: calendar) {
+            keys.append(.since(day))
+        }
+        if let before = criteria.before, let day = calendarDay(from: before, calendar: calendar) {
+            keys.append(.before(day))
+        }
         return keys
     }
 
@@ -391,20 +399,25 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         return keys
     }
 
-    /// UTC Gregorian calendar so `since`/`before` map to a stable IMAP day
-    /// regardless of the host's local time zone (and so tests are deterministic).
-    private static let utcCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-        return calendar
-    }()
+    private static func uidKeys(for criteria: MailSearchCriteria) -> [SearchKey] {
+        guard let maximumUID = criteria.maximumUID, let upperBound = UID(exactly: maximumUID) else {
+            return []
+        }
+        return [.uid(.range(...upperBound))]
+    }
 
-    static func calendarDay(from date: Date) -> IMAPCalendarDay? {
-        let components = utcCalendar.dateComponents([.year, .month, .day], from: date)
+    static func calendarDay(from date: Date, calendar: Calendar = .current) -> IMAPCalendarDay? {
+        let components = imapDateCalendar(from: calendar).dateComponents([.year, .month, .day], from: date)
         guard let year = components.year, let month = components.month, let day = components.day else {
             return nil
         }
         return IMAPCalendarDay(year: year, month: month, day: day)
+    }
+
+    private static func imapDateCalendar(from calendar: Calendar) -> Calendar {
+        var imapCalendar = Calendar(identifier: .gregorian)
+        imapCalendar.timeZone = calendar.timeZone
+        return imapCalendar
     }
 
     private static func trimmed(_ value: String?) -> String? {

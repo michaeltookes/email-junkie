@@ -8,9 +8,9 @@ struct Draft: Codable, Identifiable, Equatable {
     var id: UInt32
     /// UIDVALIDITY captured with the source UID, for safe re-fetch before send.
     var sourceUIDValidity: UInt32?
-    /// The account that produced this draft, when created by the watcher.
+    /// The account that produced this draft.
     var sourceAccountEmail: String?
-    /// The mailbox that contained the source message, when created by the watcher.
+    /// The mailbox that contained the source message.
     var sourceMailbox: String?
     /// The source message's subject.
     var sourceSubject: String

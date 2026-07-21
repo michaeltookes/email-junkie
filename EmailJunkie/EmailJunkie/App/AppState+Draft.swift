@@ -11,23 +11,23 @@ extension AppState {
     }
 
     /// Fetches a message's body and generates a reply draft in the user's voice.
-    func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+    @discardableResult
+    func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async -> Draft? {
         let requestGeneration = nextDraftGeneration()
-        bodyError = nil
-        draftError = nil
-        draftSavedMessage = nil
-        draftSentMessage = nil
-        generatedDraft = nil
-        isGeneratingDraft = false
+        resetDraftPreviewForGeneration()
 
+        guard mailbox.supportsReplyDrafting else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return nil
+        }
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             draftError = "Connect an AI provider first (Test Connection above)."
-            return
+            return nil
         }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
-            return
+            return nil
         }
 
         isGeneratingDraft = true
@@ -44,7 +44,9 @@ extension AppState {
                 uid: message.id,
                 expectedUIDValidity: message.uidValidity
             )
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
             let context = ReplyContext(
                 senderName: message.from?.name,
                 senderEmail: message.from?.email,
@@ -52,22 +54,24 @@ extension AppState {
                 body: MailBodyText.plainText(from: data)
             )
             let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
-            generatedDraft = Draft(
-                id: message.id,
-                sourceUIDValidity: message.uidValidity,
-                sourceSubject: message.subject,
-                sourceFrom: message.from,
-                sourceReplyTo: message.replyTo,
-                sourceMessageID: message.messageID,
-                replySubject: Self.replySubject(for: message.subject),
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
+            let draft = Self.draftPreview(
+                for: message,
                 body: body,
-                model: llmConfiguration.model,
-                generatedAt: Date()
+                llmConfiguration: llmConfiguration,
+                credentials: credentials,
+                mailbox: mailbox
             )
+            generatedDraft = draft
+            return draft
         } catch {
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
             draftError = Self.draftMessage(for: error)
+            return nil
         }
     }
 
@@ -77,6 +81,9 @@ extension AppState {
     /// other. Throws on missing configuration or provider/LLM errors.
     @discardableResult
     func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws -> Bool {
+        guard mailbox.supportsReplyDrafting else {
+            throw DraftError.unsupportedSourceMailbox
+        }
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             throw DraftError.emptyDraft
         }
@@ -136,6 +143,12 @@ extension AppState {
         isGeneratingDraft = false
     }
 
+    private func resetDraftPreviewForGeneration() {
+        bodyError = nil
+        clearDraftPreview()
+        isGeneratingDraft = false
+    }
+
     private var currentDraftLLMConfiguration: DraftLLMConfiguration? {
         guard isLLMConnected,
               let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil),
@@ -146,6 +159,29 @@ extension AppState {
             provider: llmProviderKind,
             model: resolvedLLMModel,
             apiKey: key
+        )
+    }
+
+    private static func draftPreview(
+        for message: MailMessage,
+        body: String,
+        llmConfiguration: DraftLLMConfiguration,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox
+    ) -> Draft {
+        Draft(
+            id: message.id,
+            sourceUIDValidity: message.uidValidity,
+            sourceAccountEmail: credentials.email,
+            sourceMailbox: mailbox.imapName,
+            sourceSubject: message.subject,
+            sourceFrom: message.from,
+            sourceReplyTo: message.replyTo,
+            sourceMessageID: message.messageID,
+            replySubject: replySubject(for: message.subject),
+            body: body,
+            model: llmConfiguration.model,
+            generatedAt: Date()
         )
     }
 
@@ -214,6 +250,39 @@ extension AppState {
         }
     }
 
+    /// Dispatches a preview sheet's displayed draft without reading mutable
+    /// global preview state. The sheet owns its own progress/error UI.
+    func approveDraftPreview(_ draft: Draft) async throws -> String {
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftDispatchError.accountMismatch
+        }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftError.unsupportedSourceMailbox
+        }
+
+        switch sendBehavior {
+        case .autoSend:
+            try await performSend(draft, credentials: credentials)
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            return "Sent."
+        case .saveAsDraft:
+            try await performSave(draft, credentials: credentials)
+            return "Saved to your Drafts."
+        }
+    }
+
     /// Sends the current generated draft immediately over SMTP.
     func sendGeneratedDraft() async {
         guard !isSendingDraft, !isSavingDraft else { return }
@@ -223,6 +292,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
@@ -249,6 +322,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
@@ -318,6 +395,21 @@ extension AppState {
         return "<\(UUID().uuidString)@\(host)>"
     }
 
+    func draftSourceAllowsReplyDispatch(_ draft: Draft) -> Bool {
+        guard let sourceMailbox = draft.sourceMailbox else { return true }
+        let normalized = sourceMailbox.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !Self.outgoingDraftSourceMailboxes.contains(normalized)
+    }
+
+    private static let outgoingDraftSourceMailboxes: Set<String> = [
+        Mailbox.sent.imapName.lowercased(),
+        Mailbox.drafts.imapName.lowercased(),
+        "sent",
+        "sent mail",
+        "draft",
+        "drafts"
+    ]
+
     static func replySubject(for subject: String) -> String {
         let trimmed = subject.trimmingCharacters(in: .whitespaces)
         return trimmed.lowercased().hasPrefix("re:") ? trimmed : "Re: \(trimmed)"
@@ -331,8 +423,14 @@ extension AppState {
 
     static func draftMessage(for error: Error) -> String {
         switch error {
+        case DraftDispatchError.missingCredentials:
+            return "Connect an email account first."
+        case DraftDispatchError.accountMismatch:
+            return "This draft was generated for a different email account."
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
+        case DraftError.unsupportedSourceMailbox:
+            return "Draft replies are only available for incoming mail."
         case DraftDispatchError.noRecipient:
             return "This draft has no recipient address to send to."
         case is LLMError:
@@ -345,6 +443,10 @@ extension AppState {
 
 /// Errors dispatching an approved draft to send/save.
 enum DraftDispatchError: Error, Equatable {
+    /// No connected mail account is available for dispatch.
+    case missingCredentials
+    /// The draft was generated under a different mail account.
+    case accountMismatch
     /// The draft has no resolvable recipient address.
     case noRecipient
 }

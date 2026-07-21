@@ -230,6 +230,22 @@ final class AppStateApprovalTests: XCTestCase {
         XCTAssertEqual(appState.approvalError, "This draft was generated for a different email account.")
     }
 
+    func testApproveBlocksDraftFromOutgoingMailbox() async {
+        var draft = pendingDraft()
+        draft.sourceMailbox = Mailbox.drafts.imapName
+        let (appState, provider, notifier, persistence) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        await appState.approveDraft(draft)
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDraftCount, 1)
+        XCTAssertEqual(persistence.loadPendingDrafts().map(\.identity), [draft.identity])
+        XCTAssertTrue(notifier.removedIdentities.isEmpty)
+        XCTAssertEqual(appState.approvalError, "Draft replies are only available for incoming mail.")
+    }
+
     func testDenyDiscardsWithoutSendingAndClearsNotification() async {
         let draft = pendingDraft()
         let (appState, provider, notifier, persistence) = makeAppState(seed: [draft])

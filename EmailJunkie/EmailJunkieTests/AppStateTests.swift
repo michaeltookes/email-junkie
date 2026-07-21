@@ -206,10 +206,13 @@ final class AppStateTests: XCTestCase {
         appState.mailAppPassword = "pw"
         let message = MailMessage(id: 42, uidValidity: 99, from: MailAddress(email: "a@x.com"), subject: "Hi", date: "")
 
-        await appState.previewBody(for: message)
+        let preview = await appState.previewBody(for: message)
 
         XCTAssertEqual(provider.lastBodyUID, 42)
         XCTAssertEqual(provider.lastExpectedUIDValidity, 99)
+        XCTAssertEqual(preview?.id, 42)
+        XCTAssertEqual(preview?.subject, "Hi")
+        XCTAssertEqual(preview?.text, "Hello there.")
         XCTAssertEqual(appState.openedBody?.id, 42)
         XCTAssertEqual(appState.openedBody?.subject, "Hi")
         XCTAssertEqual(appState.openedBody?.text, "Hello there.")
@@ -224,8 +227,9 @@ final class AppStateTests: XCTestCase {
         appState.mailAppPassword = "pw"
         let message = MailMessage(id: 7, from: nil, subject: "X", date: "")
 
-        await appState.previewBody(for: message)
+        let preview = await appState.previewBody(for: message)
 
+        XCTAssertNil(preview)
         XCTAssertNil(appState.openedBody)
         XCTAssertNotNil(appState.bodyError)
         XCTAssertFalse(appState.isFetchingBody)

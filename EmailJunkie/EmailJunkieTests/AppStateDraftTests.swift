@@ -38,16 +38,40 @@ final class AppStateDraftTests: XCTestCase {
         let (appState, llm) = makeConnectedAppState()
         XCTAssertTrue(appState.canGenerateDraft)
 
-        await appState.generateDraft(for: inboxMessage())
+        let draft = await appState.generateDraft(for: inboxMessage())
 
+        XCTAssertEqual(draft?.id, 5)
+        XCTAssertEqual(draft?.body, "Sure, Thursday works!")
+        XCTAssertEqual(draft?.replySubject, "Re: Lunch?")
+        XCTAssertEqual(draft?.sourceFrom?.email, "alice@x.com")
+        XCTAssertEqual(draft?.sourceReplyTo?.email, "team@x.com")
         XCTAssertEqual(appState.generatedDraft?.id, 5)
         XCTAssertEqual(appState.generatedDraft?.body, "Sure, Thursday works!")
         XCTAssertEqual(appState.generatedDraft?.replySubject, "Re: Lunch?")
         XCTAssertEqual(appState.generatedDraft?.sourceFrom?.email, "alice@x.com")
         XCTAssertEqual(appState.generatedDraft?.sourceReplyTo?.email, "team@x.com")
+        XCTAssertEqual(appState.generatedDraft?.sourceAccountEmail, "me@gmail.com")
+        XCTAssertEqual(appState.generatedDraft?.sourceMailbox, Mailbox.inbox.imapName)
         XCTAssertNil(appState.draftError)
         XCTAssertFalse(appState.isGeneratingDraft)
         XCTAssertEqual(llm.lastAPIKey, "sk-live")
+    }
+
+    func testGenerateDraftRejectsSentAndDraftMailboxes() async {
+        let (appState, llm) = makeConnectedAppState()
+        let provider = appState.mailProvider as? FakeAppMailProvider
+
+        let sentDraft = await appState.generateDraft(for: inboxMessage(), mailbox: .sent)
+        let sentError = appState.draftError
+        let draftsDraft = await appState.generateDraft(for: inboxMessage(), mailbox: .drafts)
+
+        XCTAssertNil(sentDraft)
+        XCTAssertNil(draftsDraft)
+        XCTAssertEqual(sentError, "Draft replies are only available for incoming mail.")
+        XCTAssertEqual(appState.draftError, "Draft replies are only available for incoming mail.")
+        XCTAssertEqual(provider?.bodyFetchCallCount, 0)
+        XCTAssertNil(llm.lastRequest)
+        XCTAssertFalse(appState.isGeneratingDraft)
     }
 
     func testGenerateDraftIgnoresResultAfterAccountChanges() async {

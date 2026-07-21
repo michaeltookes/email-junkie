@@ -32,6 +32,10 @@ extension AppState {
             approvalError = "This draft was generated for a different email account."
             return
         }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
 
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }
@@ -125,7 +129,7 @@ extension AppState {
         return removalIndex
     }
 
-    private func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
+    func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
         guard let sourceAccount = draft.sourceAccountEmail else { return false }
         return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
     }

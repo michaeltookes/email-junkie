@@ -189,16 +189,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Signing secrets are handled securely via encrypted CI secrets.
     - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
 
-40. **Inbox browser modal (search & filter)** — *depends on item 39 (done)*
-    Replace the cramped Settings "Recent messages" preview with a resizable pop-out window to search, filter, and browse the mailbox for a message to view or reply to.
-    *As Priya, I want a spacious window where I can search and filter my email — by keyword, sender, date, read/unread, and folder — so that I can quickly find the exact message I want to reply to instead of scrolling through recent mail.*
-    - A "Browse mailbox…" action (menu bar and/or Settings) opens a dedicated resizable window, separate from the Settings "Recent messages" section.
-    - A search field (keyword) plus filter controls — read/unread, date range, sender, and a folder/mailbox picker — powered by item 39's server-side search.
-    - Results are paginated / lazily loaded with clear loading, empty ("no matches"), and error states; stays responsive on large, poorly-organized mailboxes.
-    - With no query it defaults to a recent-messages view; entering a query or filters switches to filtered results.
-    - Selecting a message offers **View body** and **Draft reply**, reusing the existing preview/draft actions.
-    - VoiceOver-labeled and keyboard-navigable (aligns with item 28); respects the app's non-Dock, menu-bar-first UX.
-
 ## Low Priority
 
 30. **Slack approval channel**

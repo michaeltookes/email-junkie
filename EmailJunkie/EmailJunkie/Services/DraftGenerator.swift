@@ -25,8 +25,10 @@ enum DraftError: Error, Equatable {
 struct DraftGenerator {
     typealias Complete = (LLMRequest) async throws -> LLMResponse
 
-    /// Per-message character cap on the incoming body (bounds token cost).
+    /// Character cap on the sender's fresh message text (bounds token cost).
     var maxIncomingChars = 4000
+    /// Character cap on the quoted thread history included for context.
+    var maxThreadChars = 3000
 
     func makeDraft(
         replyingTo context: ReplyContext,
@@ -36,7 +38,10 @@ struct DraftGenerator {
     ) async throws -> String {
         let request = LLMRequest(
             system: Self.systemPrompt(voiceProfile: voiceProfile),
-            messages: [LLMMessage(role: .user, content: Self.userPrompt(context, maxChars: maxIncomingChars))],
+            messages: [LLMMessage(
+                role: .user,
+                content: Self.userPrompt(context, maxChars: maxIncomingChars, maxThreadChars: maxThreadChars)
+            )],
             model: model,
             maxTokens: 1024,
             temperature: 0.7
@@ -55,24 +60,38 @@ struct DraftGenerator {
         the user received, as if the user wrote it themselves. Output ONLY the \
         reply body — no subject line, no "Subject:" prefix, no quoted original \
         text, and no meta commentary like "Here's a draft". Match the intent of \
-        the incoming email and keep the reply appropriate in length and tone.
+        the incoming email and keep the reply appropriate in length and tone. \
+        You may be given earlier messages in the thread as context — use them to \
+        inform your reply, but reply only to the latest message and do not quote \
+        the earlier messages back.
         """
         let voice = voiceProfile?.promptBlock()
             ?? "Write in a natural, concise, and professional tone."
         return base + "\n\n" + voice
     }
 
-    private static func userPrompt(_ context: ReplyContext, maxChars: Int) -> String {
+    private static func userPrompt(_ context: ReplyContext, maxChars: Int, maxThreadChars: Int) -> String {
         let sender = senderLine(context)
-        let body = String(context.body.prefix(maxChars))
-        return """
-        Reply to this email:
+        let thread = EmailThreadParser.split(context.body)
+        let latest = String(thread.latest.prefix(maxChars))
+        var prompt = """
+        Reply to the latest message in this email thread:
 
         From: \(sender)
         Subject: \(context.subject)
 
-        \(body)
+        \(latest)
         """
+        let history = EmailThreadParser.readableHistory(fromQuoted: thread.quotedHistory, maxChars: maxThreadChars)
+        if !history.isEmpty {
+            prompt += """
+
+
+            --- Earlier in this thread (context only — do not quote it back) ---
+            \(history)
+            """
+        }
+        return prompt
     }
 
     private static func senderLine(_ context: ReplyContext) -> String {

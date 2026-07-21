@@ -190,8 +190,9 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Folder-resolution logic is unit-tested (SPECIAL-USE parsing + provider fallback table); connection is live-verified against a real `att.net` account.
 
 42. **High-volume inbox cleanup & bulk triage**
-    A monitoring + bulk-cleanup mechanism for mailboxes drowning in unread junk (e.g. an `att.net` inbox with tens of thousands of unread), built to never load the whole mailbox at once.
-    *As a user with a huge, neglected inbox, I want to see what's piling up and bulk-archive/delete the junk safely, so that the account becomes usable again without my mail client crashing.*
+    A monitoring + bulk-cleanup mechanism for mailboxes drowning in unread junk, built to never load the whole mailbox at once. **Provider-agnostic — applies to every connected account, Gmail included, not just Yahoo/AT&T.**
+    *As a user with one or more huge, neglected inboxes (a Gmail account and an `att.net` account both rising), I want to see what's piling up and bulk-archive/delete the junk safely, so that each account becomes usable again without my mail client crashing.*
+    - **All connected accounts:** the feature is not tied to a provider — it runs on any mailbox reachable over the IMAP path (Gmail, Yahoo/AT&T, other IMAP). The same overload happens on a rising Gmail inbox (e.g. opening it alongside the `att.net` account crashes the client), so cleanup must cover Gmail too. Ties to multiple-account support (item 33) for per-account attribution.
     - **Never bulk-download:** all counting and selection run server-side on top of the item-39/40 search+paging engine (UID SEARCH + bounded FETCH), so a mailbox with tens of thousands of messages is handled in pages — the same architecture that avoids the whole-mailbox loads that crash heavier clients.
     - **Monitoring view:** summarize the mailbox — total/unread counts, and breakdowns by sender/domain and by age — so the biggest sources of clutter are obvious.
     - **Bulk actions over a filter:** select by criteria (sender/domain, older-than, unread, bulk/list mail) and apply a bulk **mark-read**, **archive**, or **delete** via IMAP `UID STORE`/`UID MOVE`/`UID EXPUNGE`, executed in bounded batches with progress.

@@ -43,15 +43,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ **Live-verified against a real Anthropic key (2026-07-19):** "Test Connection" succeeded and the verified model (`claude-sonnet-4-6`) persisted.
    - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy). (Local-model adapter is item 16.)
 
-7. **Draft generation engine** — *in progress*
-   Produce a reply draft from the incoming message, thread context, and voice profile.
-   *As Priya, I want a draft reply generated from the incoming message, its thread, and my voice profile, so that I usually only need to approve it.*
-   - ✅ `DraftGenerator` builds a reply prompt from the incoming message and injects the voice profile via `VoiceProfile.promptBlock()` (neutral fallback when none); output cleaned (strips stray `Subject:` lines). Pure core + injected completion, unit-tested.
-   - ✅ Provider errors/rate limits surfaced via `AppState.draftMessage(for:)` — no silent failures.
-   - ✅ Draft tied to its source message (UID + UIDVALIDITY, subject, sender, `Re:` subject) for correct send later. On-demand "Draft reply" action + preview sheet in Settings.
-   - ✅ **Live-verified against a real inbox message (2026-07-19):** generated a reply in the user's voice that addressed the incoming message; source Message-ID capture for `In-Reply-To`/`References` threading confirmed working (see item 9).
-   - ⬜ **Remaining:** incorporate full **thread/quote context** (currently only the single incoming message body); inline editing is item 19; low-confidence "needs info" handling is item 13.
-
 9. **Send / save-as-draft (user-configurable)** — *in progress (send + save-as-draft + toggle done; live-verify remaining)*
    On approval, either send immediately or create a Gmail draft, per a setting.
    *As Priya, I want to choose whether approval sends immediately or just saves a Gmail draft, so that I can match my own comfort/trust level.*

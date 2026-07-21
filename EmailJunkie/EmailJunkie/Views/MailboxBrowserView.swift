@@ -278,17 +278,21 @@ private struct MailboxBrowserRow: View {
             .accessibilityLabel("View body")
 
             Button {
-                guard let sourceMailbox else { return }
+                guard let sourceMailbox, canDraftReply else { return }
                 onGenerateDraft(message, sourceMailbox)
             } label: {
                 Image(systemName: "arrowshape.turn.up.left")
             }
             .buttonStyle(.borderless)
-            .help("Draft reply")
-            .disabled(sourceMailbox == nil || appState.isGeneratingDraft || !appState.canGenerateDraft)
+            .help(canDraftReply ? "Draft reply" : "Draft reply is unavailable for this folder")
+            .disabled(!canDraftReply || appState.isGeneratingDraft || !appState.canGenerateDraft)
             .accessibilityLabel("Draft reply")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    private var canDraftReply: Bool {
+        sourceMailbox?.supportsReplyDrafting == true
     }
 }

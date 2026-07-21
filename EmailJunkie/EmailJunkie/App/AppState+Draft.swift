@@ -14,13 +14,12 @@ extension AppState {
     @discardableResult
     func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async -> Draft? {
         let requestGeneration = nextDraftGeneration()
-        bodyError = nil
-        draftError = nil
-        draftSavedMessage = nil
-        draftSentMessage = nil
-        generatedDraft = nil
-        isGeneratingDraft = false
+        resetDraftPreviewForGeneration()
 
+        guard mailbox.supportsReplyDrafting else {
+            draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return nil
+        }
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             draftError = "Connect an AI provider first (Test Connection above)."
             return nil
@@ -82,6 +81,9 @@ extension AppState {
     /// other. Throws on missing configuration or provider/LLM errors.
     @discardableResult
     func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws -> Bool {
+        guard mailbox.supportsReplyDrafting else {
+            throw DraftError.unsupportedSourceMailbox
+        }
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             throw DraftError.emptyDraft
         }
@@ -137,6 +139,12 @@ extension AppState {
 
     func resetDraftPreviewForLLMChange() {
         _ = nextDraftGeneration()
+        clearDraftPreview()
+        isGeneratingDraft = false
+    }
+
+    private func resetDraftPreviewForGeneration() {
+        bodyError = nil
         clearDraftPreview()
         isGeneratingDraft = false
     }
@@ -392,6 +400,8 @@ extension AppState {
             return "This draft was generated for a different email account."
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
+        case DraftError.unsupportedSourceMailbox:
+            return "Draft replies are only available for incoming mail."
         case DraftDispatchError.noRecipient:
             return "This draft has no recipient address to send to."
         case is LLMError:

@@ -57,6 +57,23 @@ final class AppStateDraftTests: XCTestCase {
         XCTAssertEqual(llm.lastAPIKey, "sk-live")
     }
 
+    func testGenerateDraftRejectsSentAndDraftMailboxes() async {
+        let (appState, llm) = makeConnectedAppState()
+        let provider = appState.mailProvider as? FakeAppMailProvider
+
+        let sentDraft = await appState.generateDraft(for: inboxMessage(), mailbox: .sent)
+        let sentError = appState.draftError
+        let draftsDraft = await appState.generateDraft(for: inboxMessage(), mailbox: .drafts)
+
+        XCTAssertNil(sentDraft)
+        XCTAssertNil(draftsDraft)
+        XCTAssertEqual(sentError, "Draft replies are only available for incoming mail.")
+        XCTAssertEqual(appState.draftError, "Draft replies are only available for incoming mail.")
+        XCTAssertEqual(provider?.bodyFetchCallCount, 0)
+        XCTAssertNil(llm.lastRequest)
+        XCTAssertFalse(appState.isGeneratingDraft)
+    }
+
     func testGenerateDraftIgnoresResultAfterAccountChanges() async {
         let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
         let persistence = AppStateMemoryPersistence(settings: Settings(

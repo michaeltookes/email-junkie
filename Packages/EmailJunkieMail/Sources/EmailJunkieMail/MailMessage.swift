@@ -67,4 +67,16 @@ public enum Mailbox: Sendable, Equatable, Hashable {
         case .named(let name): return name
         }
     }
+
+    /// Whether a fetched row has enough envelope context to generate a reply
+    /// safely. Sent and Drafts rows currently only preserve `From`/`Reply-To`,
+    /// which points back at the connected account for outgoing mail.
+    public var supportsReplyDrafting: Bool {
+        switch self {
+        case .sent, .drafts:
+            return false
+        case .inbox, .allMail, .named:
+            return true
+        }
+    }
 }

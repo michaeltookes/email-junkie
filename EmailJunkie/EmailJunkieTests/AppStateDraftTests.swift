@@ -38,8 +38,13 @@ final class AppStateDraftTests: XCTestCase {
         let (appState, llm) = makeConnectedAppState()
         XCTAssertTrue(appState.canGenerateDraft)
 
-        await appState.generateDraft(for: inboxMessage())
+        let draft = await appState.generateDraft(for: inboxMessage())
 
+        XCTAssertEqual(draft?.id, 5)
+        XCTAssertEqual(draft?.body, "Sure, Thursday works!")
+        XCTAssertEqual(draft?.replySubject, "Re: Lunch?")
+        XCTAssertEqual(draft?.sourceFrom?.email, "alice@x.com")
+        XCTAssertEqual(draft?.sourceReplyTo?.email, "team@x.com")
         XCTAssertEqual(appState.generatedDraft?.id, 5)
         XCTAssertEqual(appState.generatedDraft?.body, "Sure, Thursday works!")
         XCTAssertEqual(appState.generatedDraft?.replySubject, "Re: Lunch?")

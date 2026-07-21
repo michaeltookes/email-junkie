@@ -6,6 +6,8 @@ import SwiftUI
 /// stays responsive on large, poorly-organized mailboxes.
 struct MailboxBrowserView: View {
     @EnvironmentObject var appState: AppState
+    @State private var openedBody: MailBodyPreview?
+    @State private var generatedDraft: Draft?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,12 +23,12 @@ struct MailboxBrowserView: View {
                 await appState.runMailboxSearch()
             }
         }
-        .sheet(item: $appState.openedBody) { preview in
+        .sheet(item: $openedBody, onDismiss: { appState.openedBody = nil }, content: { preview in
             MessageBodyView(preview: preview)
-        }
-        .sheet(item: $appState.generatedDraft) { draft in
+        })
+        .sheet(item: $generatedDraft, onDismiss: { appState.generatedDraft = nil }, content: { draft in
             DraftView(draft: draft).environmentObject(appState)
-        }
+        })
     }
 
     // MARK: - Controls
@@ -130,7 +132,13 @@ struct MailboxBrowserView: View {
                     ForEach(appState.browser.results) { message in
                         MailboxBrowserRow(
                             message: message,
-                            sourceMailbox: appState.browser.resultQuery?.mailbox
+                            sourceMailbox: appState.browser.resultQuery?.mailbox,
+                            onPreviewBody: { message, mailbox in
+                                previewBody(for: message, mailbox: mailbox)
+                            },
+                            onGenerateDraft: { message, mailbox in
+                                generateDraft(for: message, mailbox: mailbox)
+                            }
                         )
                         Divider()
                     }
@@ -208,6 +216,22 @@ struct MailboxBrowserView: View {
         Task { await appState.runMailboxSearch() }
     }
 
+    private func previewBody(for message: MailMessage, mailbox: Mailbox) {
+        Task {
+            if let preview = await appState.previewBody(for: message, mailbox: mailbox) {
+                openedBody = preview
+            }
+        }
+    }
+
+    private func generateDraft(for message: MailMessage, mailbox: Mailbox) {
+        Task {
+            if let draft = await appState.generateDraft(for: message, mailbox: mailbox) {
+                generatedDraft = draft
+            }
+        }
+    }
+
     private func centered<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content().frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -226,6 +250,8 @@ struct MailboxBrowserView: View {
 private struct MailboxBrowserRow: View {
     let message: MailMessage
     let sourceMailbox: Mailbox?
+    let onPreviewBody: (MailMessage, Mailbox) -> Void
+    let onGenerateDraft: (MailMessage, Mailbox) -> Void
     @EnvironmentObject var appState: AppState
 
     var body: some View {
@@ -242,7 +268,7 @@ private struct MailboxBrowserRow: View {
             Spacer()
             Button {
                 guard let sourceMailbox else { return }
-                Task { await appState.previewBody(for: message, mailbox: sourceMailbox) }
+                onPreviewBody(message, sourceMailbox)
             } label: {
                 Image(systemName: "doc.text")
             }
@@ -253,7 +279,7 @@ private struct MailboxBrowserRow: View {
 
             Button {
                 guard let sourceMailbox else { return }
-                Task { await appState.generateDraft(for: message, mailbox: sourceMailbox) }
+                onGenerateDraft(message, sourceMailbox)
             } label: {
                 Image(systemName: "arrowshape.turn.up.left")
             }

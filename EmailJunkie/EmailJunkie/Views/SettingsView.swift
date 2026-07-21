@@ -7,6 +7,8 @@ import SwiftUI
 /// (Gmail account, AI provider, send behavior).
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+    @State private var openedBody: MailBodyPreview?
+    @State private var generatedDraft: Draft?
 
     var body: some View {
         Form {
@@ -104,7 +106,11 @@ struct SettingsView: View {
 
                     ForEach(appState.recentMessages) { message in
                         Button {
-                            Task { await appState.previewBody(for: message) }
+                            Task {
+                                if let preview = await appState.previewBody(for: message) {
+                                    openedBody = preview
+                                }
+                            }
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -129,7 +135,11 @@ struct SettingsView: View {
                         .disabled(appState.isFetchingBody)
 
                         Button {
-                            Task { await appState.generateDraft(for: message) }
+                            Task {
+                                if let draft = await appState.generateDraft(for: message) {
+                                    generatedDraft = draft
+                                }
+                            }
                         } label: {
                             Label("Draft reply", systemImage: "arrowshape.turn.up.left")
                                 .font(.caption)
@@ -266,12 +276,12 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 420, height: 420)
-        .sheet(item: $appState.openedBody) { preview in
+        .sheet(item: $openedBody, onDismiss: { appState.openedBody = nil }, content: { preview in
             MessageBodyView(preview: preview)
-        }
-        .sheet(item: $appState.generatedDraft) { draft in
+        })
+        .sheet(item: $generatedDraft, onDismiss: { appState.generatedDraft = nil }, content: { draft in
             DraftView(draft: draft).environmentObject(appState)
-        }
+        })
     }
 
     private var llmModelBinding: Binding<String> {

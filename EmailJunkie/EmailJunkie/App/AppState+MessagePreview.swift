@@ -48,7 +48,8 @@ extension AppState {
     }
 
     /// Fetches and reduces a single message's body to readable text for preview.
-    func previewBody(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+    @discardableResult
+    func previewBody(for message: MailMessage, mailbox: Mailbox = .inbox) async -> MailBodyPreview? {
         let requestGeneration = nextBodyPreviewGeneration()
         bodyError = nil
         openedBody = nil
@@ -57,7 +58,7 @@ extension AppState {
         let credentials = mailCredentials
         guard credentials.isComplete else {
             bodyError = "Connect an account first."
-            return
+            return nil
         }
 
         isFetchingBody = true
@@ -74,15 +75,18 @@ extension AppState {
                 uid: message.id,
                 expectedUIDValidity: message.uidValidity
             )
-            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
-            openedBody = MailBodyPreview(
+            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return nil }
+            let preview = MailBodyPreview(
                 id: message.id,
                 subject: message.subject,
                 text: MailBodyText.plainText(from: raw)
             )
+            openedBody = preview
+            return preview
         } catch {
-            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return }
+            guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return nil }
             bodyError = Self.message(for: error)
+            return nil
         }
     }
 

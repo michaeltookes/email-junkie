@@ -11,7 +11,8 @@ extension AppState {
     }
 
     /// Fetches a message's body and generates a reply draft in the user's voice.
-    func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async {
+    @discardableResult
+    func generateDraft(for message: MailMessage, mailbox: Mailbox = .inbox) async -> Draft? {
         let requestGeneration = nextDraftGeneration()
         bodyError = nil
         draftError = nil
@@ -22,12 +23,12 @@ extension AppState {
 
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             draftError = "Connect an AI provider first (Test Connection above)."
-            return
+            return nil
         }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             draftError = "Connect an email account first."
-            return
+            return nil
         }
 
         isGeneratingDraft = true
@@ -44,7 +45,9 @@ extension AppState {
                 uid: message.id,
                 expectedUIDValidity: message.uidValidity
             )
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
             let context = ReplyContext(
                 senderName: message.from?.name,
                 senderEmail: message.from?.email,
@@ -52,22 +55,18 @@ extension AppState {
                 body: MailBodyText.plainText(from: data)
             )
             let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
-            generatedDraft = Draft(
-                id: message.id,
-                sourceUIDValidity: message.uidValidity,
-                sourceSubject: message.subject,
-                sourceFrom: message.from,
-                sourceReplyTo: message.replyTo,
-                sourceMessageID: message.messageID,
-                replySubject: Self.replySubject(for: message.subject),
-                body: body,
-                model: llmConfiguration.model,
-                generatedAt: Date()
-            )
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
+            let draft = Self.draftPreview(for: message, body: body, llmConfiguration: llmConfiguration)
+            generatedDraft = draft
+            return draft
         } catch {
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else { return }
+            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
+                return nil
+            }
             draftError = Self.draftMessage(for: error)
+            return nil
         }
     }
 
@@ -146,6 +145,25 @@ extension AppState {
             provider: llmProviderKind,
             model: resolvedLLMModel,
             apiKey: key
+        )
+    }
+
+    private static func draftPreview(
+        for message: MailMessage,
+        body: String,
+        llmConfiguration: DraftLLMConfiguration
+    ) -> Draft {
+        Draft(
+            id: message.id,
+            sourceUIDValidity: message.uidValidity,
+            sourceSubject: message.subject,
+            sourceFrom: message.from,
+            sourceReplyTo: message.replyTo,
+            sourceMessageID: message.messageID,
+            replySubject: replySubject(for: message.subject),
+            body: body,
+            model: llmConfiguration.model,
+            generatedAt: Date()
         )
     }
 

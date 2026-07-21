@@ -180,6 +180,24 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Signing secrets are handled securely via encrypted CI secrets.
     - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
 
+41. **Yahoo / AT&T (att.net) & provider-agnostic mailbox support**
+    Make the IMAP path work correctly on non-Gmail hosts (Yahoo-backed AT&T `att.net`, Yahoo, other IMAP), primarily by resolving special folders per provider instead of assuming Gmail's `[Gmail]/…` paths.
+    *As a user with a Yahoo/AT&T (`att.net`) address, I want to connect with an app password and have Sent/Drafts/search work correctly, so that email-junkie handles my mailbox without Gmail-only assumptions.*
+    - The connection primitives are already provider-agnostic: the **IMAP host is user-settable** (Settings + onboarding) and the **SMTP host auto-derives** (`imap.` → `smtp.`), so `imap.mail.att.net` / `imap.mail.yahoo.com` already connect and send. This item covers what's *not* yet generic.
+    - **Special-folder resolution:** `Mailbox.sent`/`.drafts`/`.allMail` currently hardcode Gmail paths (`[Gmail]/Sent Mail`, `[Gmail]/Drafts`, `[Gmail]/All Mail`), which break voice sampling, save-as-draft (`APPEND`), and the browser's All-Mail target on Yahoo/AT&T (which use `Sent`, `Draft`, `Bulk Mail`, and have no All-Mail equivalent). Resolve special folders per account — ideally via IMAP `LIST` with `\Sent`/`\Drafts`/`\Junk`/`\All` SPECIAL-USE attributes (RFC 6154), falling back to a per-provider name table, then to a user override.
+    - **Setup guidance:** document that Yahoo needs a generated **app password** and AT&T needs a **secure mail key** (2FA), and surface a host suggestion from the address domain (`@att.net` → `imap.mail.att.net`, `@yahoo.com` → `imap.mail.yahoo.com`) so users don't guess.
+    - Gracefully handle providers lacking a folder (e.g. no All-Mail): search falls back to INBOX or the account's broadest available folder rather than erroring.
+    - Folder-resolution logic is unit-tested (SPECIAL-USE parsing + provider fallback table); connection is live-verified against a real `att.net` account.
+
+42. **High-volume inbox cleanup & bulk triage**
+    A monitoring + bulk-cleanup mechanism for mailboxes drowning in unread junk (e.g. an `att.net` inbox with tens of thousands of unread), built to never load the whole mailbox at once.
+    *As a user with a huge, neglected inbox, I want to see what's piling up and bulk-archive/delete the junk safely, so that the account becomes usable again without my mail client crashing.*
+    - **Never bulk-download:** all counting and selection run server-side on top of the item-39/40 search+paging engine (UID SEARCH + bounded FETCH), so a mailbox with tens of thousands of messages is handled in pages — the same architecture that avoids the whole-mailbox loads that crash heavier clients.
+    - **Monitoring view:** summarize the mailbox — total/unread counts, and breakdowns by sender/domain and by age — so the biggest sources of clutter are obvious.
+    - **Bulk actions over a filter:** select by criteria (sender/domain, older-than, unread, bulk/list mail) and apply a bulk **mark-read**, **archive**, or **delete** via IMAP `UID STORE`/`UID MOVE`/`UID EXPUNGE`, executed in bounded batches with progress.
+    - **Safety:** a preview + explicit confirm before any destructive action, a bounded/undoable first pass (prefer archive/Trash over permanent expunge), and never touch anything outside the chosen filter.
+    - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question to confirm with the user: default to archive-to-Trash vs. permanent delete, and whether any cleanup should ever run automatically vs. manual-only.
+
 ## Low Priority
 
 30. **Slack approval channel**

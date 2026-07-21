@@ -35,6 +35,9 @@ struct DraftView: View {
     let draft: Draft
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var isDispatching = false
+    @State private var dispatchConfirmation: String?
+    @State private var dispatchError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -63,18 +66,18 @@ struct DraftView: View {
             }
             Divider()
             HStack {
-                if let confirmation = appState.draftSentMessage ?? appState.draftSavedMessage {
+                if let confirmation = dispatchConfirmation {
                     Label(confirmation, systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundStyle(.green)
-                } else if let error = appState.draftError {
+                } else if let error = dispatchError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
                 Spacer()
                 Button {
-                    Task { await appState.approveGeneratedDraft() }
+                    Task { await approveDisplayedDraft() }
                 } label: {
                     if isBusy {
                         ProgressView().controlSize(.small)
@@ -89,11 +92,25 @@ struct DraftView: View {
         .frame(width: 480, height: 460)
     }
 
+    private func approveDisplayedDraft() async {
+        guard !isDispatching else { return }
+        dispatchConfirmation = nil
+        dispatchError = nil
+        isDispatching = true
+        defer { isDispatching = false }
+
+        do {
+            dispatchConfirmation = try await appState.approveDraftPreview(draft)
+        } catch {
+            dispatchError = AppState.draftMessage(for: error)
+        }
+    }
+
     private var isBusy: Bool {
-        appState.isSavingDraft || appState.isSendingDraft
+        isDispatching
     }
 
     private var isDone: Bool {
-        appState.draftSavedMessage != nil || appState.draftSentMessage != nil
+        dispatchConfirmation != nil
     }
 }

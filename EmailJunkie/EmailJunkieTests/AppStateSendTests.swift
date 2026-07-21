@@ -74,6 +74,32 @@ final class AppStateSendTests: XCTestCase {
         XCTAssertTrue(rfc822.contains("In-Reply-To: <orig@example.com>"))
     }
 
+    func testPreviewApprovalSendsDisplayedDraftWhenGeneratedDraftChanges() async throws {
+        var displayedDraft = draft()
+        displayedDraft.id = 5
+        displayedDraft.sourceFrom = MailAddress(name: "Alice", email: "alice@example.com")
+        displayedDraft.replySubject = "Re: Alice"
+        displayedDraft.body = "Reply to Alice"
+
+        var otherWindowDraft = draft()
+        otherWindowDraft.id = 9
+        otherWindowDraft.sourceFrom = MailAddress(name: "Bob", email: "bob@example.com")
+        otherWindowDraft.replySubject = "Re: Bob"
+        otherWindowDraft.body = "Reply to Bob"
+
+        let (appState, provider) = makeAppState(sendBehavior: .autoSend, draft: otherWindowDraft)
+
+        let confirmation = try await appState.approveDraftPreview(displayedDraft)
+
+        XCTAssertEqual(confirmation, "Sent.")
+        XCTAssertEqual(provider.sentEnvelope?.recipients, ["alice@example.com"])
+        XCTAssertEqual(appState.generatedDraft, otherWindowDraft)
+        let rfc822 = String(data: provider.sentRFC822 ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(rfc822.contains("Subject: Re: Alice"))
+        XCTAssertFalse(rfc822.contains("Subject: Re: Bob"))
+        XCTAssertFalse(rfc822.contains("bob@example.com"))
+    }
+
     func testApproveWithAutoSendIgnoresSecondApprovalWhileSendInFlight() async {
         let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
         let persistence = AppStateMemoryPersistence(settings: Settings(

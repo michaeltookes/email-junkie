@@ -232,6 +232,27 @@ extension AppState {
         }
     }
 
+    /// Dispatches a preview sheet's displayed draft without reading mutable
+    /// global preview state. The sheet owns its own progress/error UI.
+    func approveDraftPreview(_ draft: Draft) async throws -> String {
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+
+        switch sendBehavior {
+        case .autoSend:
+            try await performSend(draft, credentials: credentials)
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            return "Sent."
+        case .saveAsDraft:
+            try await performSave(draft, credentials: credentials)
+            return "Saved to your Drafts."
+        }
+    }
+
     /// Sends the current generated draft immediately over SMTP.
     func sendGeneratedDraft() async {
         guard !isSendingDraft, !isSavingDraft else { return }
@@ -349,6 +370,8 @@ extension AppState {
 
     static func draftMessage(for error: Error) -> String {
         switch error {
+        case DraftDispatchError.missingCredentials:
+            return "Connect an email account first."
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
         case DraftDispatchError.noRecipient:
@@ -363,6 +386,8 @@ extension AppState {
 
 /// Errors dispatching an approved draft to send/save.
 enum DraftDispatchError: Error, Equatable {
+    /// No connected mail account is available for dispatch.
+    case missingCredentials
     /// The draft has no resolvable recipient address.
     case noRecipient
 }

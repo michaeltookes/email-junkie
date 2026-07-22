@@ -18,7 +18,7 @@ extension IMAPMailProvider {
         let host = credentials.host
         let email = credentials.email
         let password = credentials.appPassword
-        let mailboxName = mailbox.imapName
+        let mailboxName = mailbox.imapName(using: credentials.mailboxNaming)
 
         let bootstrap = ClientBootstrap(group: group)
             .connectTimeout(timeout)

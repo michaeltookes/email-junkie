@@ -197,8 +197,18 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        settle(.failure(MailError.connectionFailed(String(describing: error))))
+        settle(.failure(Self.mapped(error)))
         context.close(promise: nil)
+    }
+
+    /// A too-many-results overflow (the `* SEARCH` line exceeded NIO-IMAP's frame
+    /// cap) surfaces as a decoder `PayloadTooLargeError`; map it to a clear,
+    /// actionable error rather than a generic connection failure (item 45).
+    static func mapped(_ error: Error) -> MailError {
+        if error is ByteToMessageDecoderError.PayloadTooLargeError {
+            return .resultTooLarge
+        }
+        return .connectionFailed(String(describing: error))
     }
 
     func channelInactive(context: ChannelHandlerContext) {

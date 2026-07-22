@@ -302,4 +302,38 @@ final class IMAPSearchTests: XCTestCase {
         }
         _ = try? channel.finish()
     }
+
+    // MARK: - Oversized result (item 45)
+
+    func testPayloadTooLargeMapsToResultTooLarge() {
+        XCTAssertEqual(
+            IMAPSearchHandler.mapped(ByteToMessageDecoderError.PayloadTooLargeError()),
+            .resultTooLarge
+        )
+    }
+
+    func testOtherErrorsStayConnectionFailures() {
+        guard case .connectionFailed = IMAPSearchHandler.mapped(MailError.commandFailed("x")) else {
+            return XCTFail("non-overflow errors must remain connectionFailed")
+        }
+    }
+
+    func testHugeSearchResponseSurfacesResultTooLarge() throws {
+        let (channel, future) = try makeChannel()
+        try advanceThroughSelect(channel)
+
+        // A `* SEARCH …` line longer than NIO-IMAP's 8 KB frame cap: what a huge
+        // mailbox returns for an unbounded UID SEARCH. The decoder throws
+        // PayloadTooLargeError, which must map to the actionable .resultTooLarge.
+        let uids = (1...2000).map(String.init).joined(separator: " ")
+        XCTAssertThrowsError(try feed(channel, "* SEARCH \(uids)\r\n")) { error in
+            XCTAssertTrue(error is ByteToMessageDecoderError.PayloadTooLargeError)
+        }
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .resultTooLarge = error as? MailError else {
+                return XCTFail("expected resultTooLarge, got \(error)")
+            }
+        }
+        _ = try? channel.finish()
+    }
 }

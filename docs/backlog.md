@@ -180,15 +180,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Signing secrets are handled securely via encrypted CI secrets.
     - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
 
-41. **Yahoo / AT&T (att.net) & provider-agnostic mailbox support**
-    Make the IMAP path work correctly on non-Gmail hosts (Yahoo-backed AT&T `att.net`, Yahoo, other IMAP), primarily by resolving special folders per provider instead of assuming Gmail's `[Gmail]/…` paths.
-    *As a user with a Yahoo/AT&T (`att.net`) address, I want to connect with an app password and have Sent/Drafts/search work correctly, so that email-junkie handles my mailbox without Gmail-only assumptions.*
-    - The connection primitives are already provider-agnostic: the **IMAP host is user-settable** (Settings + onboarding) and the **SMTP host auto-derives** (`imap.` → `smtp.`), so `imap.mail.att.net` / `imap.mail.yahoo.com` already connect and send. This item covers what's *not* yet generic.
-    - **Special-folder resolution:** `Mailbox.sent`/`.drafts`/`.allMail` currently hardcode Gmail paths (`[Gmail]/Sent Mail`, `[Gmail]/Drafts`, `[Gmail]/All Mail`), which break voice sampling, save-as-draft (`APPEND`), and the browser's All-Mail target on Yahoo/AT&T (which use `Sent`, `Draft`, `Bulk Mail`, and have no All-Mail equivalent). Resolve special folders per account — ideally via IMAP `LIST` with `\Sent`/`\Drafts`/`\Junk`/`\All` SPECIAL-USE attributes (RFC 6154), falling back to a per-provider name table, then to a user override.
-    - **Setup guidance:** document that Yahoo needs a generated **app password** and AT&T needs a **secure mail key** (2FA), and surface a host suggestion from the address domain (`@att.net` → `imap.mail.att.net`, `@yahoo.com` → `imap.mail.yahoo.com`) so users don't guess.
-    - Gracefully handle providers lacking a folder (e.g. no All-Mail): search falls back to INBOX or the account's broadest available folder rather than erroring.
-    - Folder-resolution logic is unit-tested (SPECIAL-USE parsing + provider fallback table); connection is live-verified against a real `att.net` account.
-
 42. **High-volume inbox cleanup & bulk triage**
     A monitoring + bulk-cleanup mechanism for mailboxes drowning in unread junk, built to never load the whole mailbox at once. **Provider-agnostic — applies to every connected account, Gmail included, not just Yahoo/AT&T.**
     *As a user with one or more huge, neglected inboxes (a Gmail account and an `att.net` account both rising), I want to see what's piling up and bulk-archive/delete the junk safely, so that each account becomes usable again without my mail client crashing.*

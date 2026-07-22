@@ -167,6 +167,7 @@ private struct OnboardingAccountStep: View {
                 TextField("Email address", text: $appState.mailEmail)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
                 SecureField("App password", text: $appState.mailAppPassword)
                     .textFieldStyle(.roundedBorder)
 

@@ -35,6 +35,10 @@ public struct MailAccountCredentials: Equatable, Sendable {
         !email.isEmpty && !appPassword.isEmpty && !host.isEmpty && port > 0
     }
 
+    /// The special-folder layout (Sent/Drafts/All-Mail/Junk) for this account's
+    /// IMAP host, so operations target the right folder on non-Gmail providers.
+    public var mailboxNaming: MailboxNaming { MailboxNaming.forHost(host) }
+
     /// Derives an SMTP submission host from an IMAP host by swapping a leading
     /// `imap.` for `smtp.`; other hosts are returned unchanged.
     static func derivedSMTPHost(from host: String) -> String {

@@ -50,6 +50,7 @@ struct SettingsView: View {
                 } else {
                     TextField("Email address", text: $appState.mailEmail)
                         .textContentType(.username)
+                        .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
                     SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {

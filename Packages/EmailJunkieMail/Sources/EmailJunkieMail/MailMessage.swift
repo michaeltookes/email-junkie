@@ -57,13 +57,31 @@ public enum Mailbox: Sendable, Equatable, Hashable {
     /// A provider-specific mailbox path (e.g. a custom IMAP folder).
     case named(String)
 
-    /// The IMAP mailbox name. Sent/Drafts/All Mail default to Gmail's paths.
+    /// A stable identity/label for the mailbox, used for persisted source-mailbox
+    /// tags, processed-message keys, and reply-dispatch guards. Special folders
+    /// use Gmail's canonical paths as opaque, provider-independent identifiers.
+    ///
+    /// This is NOT necessarily the live server folder — to `SELECT`/`APPEND`
+    /// against a real account, use `imapName(using:)` so non-Gmail providers
+    /// (Yahoo/AT&T) resolve to their own folder names.
     public var imapName: String {
         switch self {
         case .inbox: return "INBOX"
         case .sent: return "[Gmail]/Sent Mail"
         case .drafts: return "[Gmail]/Drafts"
         case .allMail: return "[Gmail]/All Mail"
+        case .named(let name): return name
+        }
+    }
+
+    /// The live IMAP folder name for this account's special-folder `naming`.
+    /// `.allMail` falls back to `INBOX` when the provider has no all-mail folder.
+    public func imapName(using naming: MailboxNaming) -> String {
+        switch self {
+        case .inbox: return "INBOX"
+        case .sent: return naming.sent
+        case .drafts: return naming.drafts
+        case .allMail: return naming.allMail ?? "INBOX"
         case .named(let name): return name
         }
     }

@@ -52,7 +52,9 @@ struct MailboxBrowserView: View {
                 Text("Inbox").tag(Mailbox.inbox)
                 Text("Sent").tag(Mailbox.sent)
                 Text("Drafts").tag(Mailbox.drafts)
-                Text("All Mail").tag(Mailbox.allMail)
+                if appState.supportsAllMailFolder {
+                    Text("All Mail").tag(Mailbox.allMail)
+                }
             }
             .labelsHidden()
             .frame(width: 130)

@@ -17,12 +17,27 @@ public struct MailboxNaming: Equatable, Sendable {
     public var allMail: String?
     /// The spam/junk folder, when known.
     public var junk: String?
+    /// The Trash / Deleted-Messages folder that deleted mail is moved to. Bulk
+    /// "delete" moves to Trash (recoverable) rather than permanently expunging.
+    public var trash: String
+    /// The folder that "archive" moves mail out of the inbox into. On Gmail this
+    /// is All Mail (moving there simply removes the `INBOX` label = archive).
+    public var archive: String
 
-    public init(sent: String, drafts: String, allMail: String?, junk: String? = nil) {
+    public init(
+        sent: String,
+        drafts: String,
+        allMail: String?,
+        junk: String? = nil,
+        trash: String = "Trash",
+        archive: String = "Archive"
+    ) {
         self.sent = sent
         self.drafts = drafts
         self.allMail = allMail
         self.junk = junk
+        self.trash = trash
+        self.archive = archive
     }
 
     /// Gmail's special-folder layout (the historical default).
@@ -30,7 +45,9 @@ public struct MailboxNaming: Equatable, Sendable {
         sent: "[Gmail]/Sent Mail",
         drafts: "[Gmail]/Drafts",
         allMail: "[Gmail]/All Mail",
-        junk: "[Gmail]/Spam"
+        junk: "[Gmail]/Spam",
+        trash: "[Gmail]/Trash",
+        archive: "[Gmail]/All Mail"
     )
 
     /// Yahoo-family layout, which also covers AT&T (`att.net`), AOL, and other
@@ -39,7 +56,9 @@ public struct MailboxNaming: Equatable, Sendable {
         sent: "Sent",
         drafts: "Draft",
         allMail: nil,
-        junk: "Bulk Mail"
+        junk: "Bulk Mail",
+        trash: "Trash",
+        archive: "Archive"
     )
 
     /// iCloud/Me/Mac layout. iCloud uses a non-generic Sent folder name and has
@@ -48,7 +67,9 @@ public struct MailboxNaming: Equatable, Sendable {
         sent: "Sent Messages",
         drafts: "Drafts",
         allMail: nil,
-        junk: "Junk"
+        junk: "Junk",
+        trash: "Deleted Messages",
+        archive: "Archive"
     )
 
     /// A conservative layout for unrecognized IMAP providers.
@@ -56,7 +77,9 @@ public struct MailboxNaming: Equatable, Sendable {
         sent: "Sent",
         drafts: "Drafts",
         allMail: nil,
-        junk: "Junk"
+        junk: "Junk",
+        trash: "Trash",
+        archive: "Archive"
     )
 
     /// Whether this account exposes an all-mail folder (drives whether an

@@ -54,6 +54,10 @@ public enum Mailbox: Sendable, Equatable, Hashable {
     /// Gmail's "All Mail" — every message regardless of folder/label. Useful as
     /// the broadest target when searching for a specific message.
     case allMail
+    /// The Trash / Deleted-Messages folder. Bulk "delete" moves here (recoverable).
+    case trash
+    /// The Archive folder. Bulk "archive" moves here (out of the inbox).
+    case archive
     /// A provider-specific mailbox path (e.g. a custom IMAP folder).
     case named(String)
 
@@ -70,6 +74,8 @@ public enum Mailbox: Sendable, Equatable, Hashable {
         case .sent: return "[Gmail]/Sent Mail"
         case .drafts: return "[Gmail]/Drafts"
         case .allMail: return "[Gmail]/All Mail"
+        case .trash: return "[Gmail]/Trash"
+        case .archive: return "[Gmail]/All Mail"
         case .named(let name): return name
         }
     }
@@ -82,6 +88,8 @@ public enum Mailbox: Sendable, Equatable, Hashable {
         case .sent: return naming.sent
         case .drafts: return naming.drafts
         case .allMail: return naming.allMail ?? "INBOX"
+        case .trash: return naming.trash
+        case .archive: return naming.archive
         case .named(let name): return name
         }
     }
@@ -93,7 +101,7 @@ public enum Mailbox: Sendable, Equatable, Hashable {
         switch self {
         case .sent, .drafts:
             return false
-        case .inbox, .allMail, .named:
+        case .inbox, .allMail, .trash, .archive, .named:
             return true
         }
     }

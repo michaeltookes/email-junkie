@@ -60,6 +60,22 @@ final class MailboxNamingTests: XCTestCase {
         XCTAssertEqual(Mailbox.allMail.imapName(using: .icloud), "INBOX", "no all-mail on iCloud")
     }
 
+    func testResolvesTrashPerProvider() {
+        XCTAssertEqual(Mailbox.trash.imapName(using: .gmail), "[Gmail]/Trash")
+        XCTAssertEqual(Mailbox.trash.imapName(using: .yahoo), "Trash")
+        XCTAssertEqual(Mailbox.trash.imapName(using: .icloud), "Deleted Messages")
+        XCTAssertEqual(Mailbox.trash.imapName(using: .generic), "Trash")
+    }
+
+    func testResolvesArchivePerProvider() {
+        // Gmail has no distinct Archive folder — moving to All Mail removes the
+        // INBOX label, which is Gmail's archive semantics.
+        XCTAssertEqual(Mailbox.archive.imapName(using: .gmail), "[Gmail]/All Mail")
+        XCTAssertEqual(Mailbox.archive.imapName(using: .yahoo), "Archive")
+        XCTAssertEqual(Mailbox.archive.imapName(using: .icloud), "Archive")
+        XCTAssertEqual(Mailbox.archive.imapName(using: .generic), "Archive")
+    }
+
     // MARK: - credentials integration
 
     func testCredentialsDeriveNamingFromHost() {

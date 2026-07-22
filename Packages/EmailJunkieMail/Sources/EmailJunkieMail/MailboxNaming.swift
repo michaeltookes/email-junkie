@@ -4,10 +4,11 @@ import Foundation
 /// All-Mail, Junk).
 ///
 /// IMAP has no universal names for these: Gmail uses `[Gmail]/Sent Mail`,
-/// Yahoo/AT&T use `Sent` / `Draft` / `Bulk Mail` and have no all-mail folder at
-/// all. So the correct folder is resolved per account (from the IMAP host)
-/// rather than hardcoded to Gmail. A future enhancement can discover these from
-/// the server via IMAP `LIST` SPECIAL-USE attributes (RFC 6154).
+/// Yahoo/AT&T use `Sent` / `Draft` / `Bulk Mail`, while iCloud uses
+/// `Sent Messages` for sent mail. Most non-Gmail providers have no all-mail
+/// folder at all. So the correct folder is resolved per account (from the IMAP
+/// host) rather than hardcoded to Gmail. A future enhancement can discover these
+/// from the server via IMAP `LIST` SPECIAL-USE attributes (RFC 6154).
 public struct MailboxNaming: Equatable, Sendable {
     public var sent: String
     public var drafts: String
@@ -41,6 +42,15 @@ public struct MailboxNaming: Equatable, Sendable {
         junk: "Bulk Mail"
     )
 
+    /// iCloud/Me/Mac layout. iCloud uses a non-generic Sent folder name and has
+    /// no all-mail folder.
+    public static let icloud = MailboxNaming(
+        sent: "Sent Messages",
+        drafts: "Drafts",
+        allMail: nil,
+        junk: "Junk"
+    )
+
     /// A conservative layout for unrecognized IMAP providers.
     public static let generic = MailboxNaming(
         sent: "Sent",
@@ -56,12 +66,15 @@ public struct MailboxNaming: Equatable, Sendable {
     /// Resolves the special-folder layout for an IMAP host, falling back to the
     /// generic layout for unrecognized hosts.
     public static func forHost(_ host: String) -> MailboxNaming {
-        let lowered = host.lowercased()
+        let lowered = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lowered.contains("gmail") || lowered.contains("googlemail") {
             return .gmail
         }
         if yahooBackedFragments.contains(where: lowered.contains) {
             return .yahoo
+        }
+        if icloudHostSuffixes.contains(where: lowered.hasSuffix) {
+            return .icloud
         }
         return .generic
     }
@@ -70,5 +83,10 @@ public struct MailboxNaming: Equatable, Sendable {
     private static let yahooBackedFragments = [
         "yahoo", "att.net", "mail.att", "aol", "ymail", "rocketmail",
         "sbcglobal", "bellsouth"
+    ]
+
+    /// Host suffixes that identify an iCloud-backed provider.
+    private static let icloudHostSuffixes = [
+        "mail.me.com", "mail.icloud.com"
     ]
 }

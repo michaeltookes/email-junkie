@@ -17,9 +17,16 @@ final class MailboxNamingTests: XCTestCase {
         XCTAssertEqual(MailboxNaming.forHost("imap.aol.com"), .yahoo)
     }
 
+    func testICloudHostsResolveToICloudLayout() {
+        XCTAssertEqual(MailboxNaming.forHost("imap.mail.me.com"), .icloud)
+        XCTAssertEqual(MailboxNaming.forHost("IMAP.MAIL.ME.COM"), .icloud, "case-insensitive")
+        XCTAssertEqual(MailboxNaming.forHost("p99-imap.mail.icloud.com"), .icloud)
+    }
+
     func testUnknownHostResolvesToGenericLayout() {
         XCTAssertEqual(MailboxNaming.forHost("imap.fastmail.com"), .generic)
         XCTAssertEqual(MailboxNaming.forHost("mail.example.org"), .generic)
+        XCTAssertEqual(MailboxNaming.forHost("imap.some-mac.com"), .generic)
     }
 
     // MARK: - allMail support
@@ -27,6 +34,7 @@ final class MailboxNamingTests: XCTestCase {
     func testGmailSupportsAllMailButYahooDoesNot() {
         XCTAssertTrue(MailboxNaming.gmail.supportsAllMail)
         XCTAssertFalse(MailboxNaming.yahoo.supportsAllMail)
+        XCTAssertFalse(MailboxNaming.icloud.supportsAllMail)
         XCTAssertFalse(MailboxNaming.generic.supportsAllMail)
     }
 
@@ -35,7 +43,9 @@ final class MailboxNamingTests: XCTestCase {
     func testResolvesSpecialFoldersPerProvider() {
         XCTAssertEqual(Mailbox.sent.imapName(using: .gmail), "[Gmail]/Sent Mail")
         XCTAssertEqual(Mailbox.sent.imapName(using: .yahoo), "Sent")
+        XCTAssertEqual(Mailbox.sent.imapName(using: .icloud), "Sent Messages")
         XCTAssertEqual(Mailbox.drafts.imapName(using: .yahoo), "Draft")
+        XCTAssertEqual(Mailbox.drafts.imapName(using: .icloud), "Drafts")
         XCTAssertEqual(Mailbox.drafts.imapName(using: .generic), "Drafts")
     }
 
@@ -47,6 +57,7 @@ final class MailboxNamingTests: XCTestCase {
     func testAllMailFallsBackToInboxWhenProviderHasNone() {
         XCTAssertEqual(Mailbox.allMail.imapName(using: .gmail), "[Gmail]/All Mail")
         XCTAssertEqual(Mailbox.allMail.imapName(using: .yahoo), "INBOX", "no all-mail on Yahoo → INBOX")
+        XCTAssertEqual(Mailbox.allMail.imapName(using: .icloud), "INBOX", "no all-mail on iCloud")
     }
 
     // MARK: - credentials integration
@@ -56,5 +67,7 @@ final class MailboxNamingTests: XCTestCase {
         XCTAssertEqual(att.mailboxNaming, .yahoo)
         let gmail = MailAccountCredentials(email: "me@gmail.com", appPassword: "x")
         XCTAssertEqual(gmail.mailboxNaming, .gmail)
+        let icloud = MailAccountCredentials(email: "me@icloud.com", appPassword: "x", host: "imap.mail.me.com")
+        XCTAssertEqual(icloud.mailboxNaming, .icloud)
     }
 }

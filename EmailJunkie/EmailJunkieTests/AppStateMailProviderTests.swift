@@ -19,6 +19,9 @@ final class AppStateMailProviderTests: XCTestCase {
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@yahoo.com"), "imap.mail.yahoo.com")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "Me@GMAIL.com"), "imap.gmail.com")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@sbcglobal.net"), "imap.mail.att.net")
+        XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@icloud.com"), "imap.mail.me.com")
+        XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@me.com"), "imap.mail.me.com")
+        XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@mac.com"), "imap.mail.me.com")
     }
 
     func testSuggestsNothingForUnknownOrMalformed() {
@@ -53,6 +56,16 @@ final class AppStateMailProviderTests: XCTestCase {
         XCTAssertEqual(app.mailHost, "imap.gmail.com")
     }
 
+    func testICloudSuggestionUsesICloudMailboxLayout() {
+        let app = makeAppState()
+        app.mailHost = "imap.gmail.com"
+        app.mailEmail = "me@icloud.com"
+        app.applySuggestedHostIfDefault()
+        XCTAssertEqual(app.mailHost, "imap.mail.me.com")
+        XCTAssertEqual(app.connectedMailboxNaming, .icloud)
+        XCTAssertFalse(app.supportsAllMailFolder, "iCloud has no all-mail folder")
+    }
+
     // MARK: - supportsAllMailFolder
 
     func testAllMailSupportTracksProvider() {
@@ -61,5 +74,7 @@ final class AppStateMailProviderTests: XCTestCase {
         XCTAssertTrue(app.supportsAllMailFolder)
         app.mailHost = "imap.mail.att.net"
         XCTAssertFalse(app.supportsAllMailFolder, "Yahoo/AT&T has no all-mail folder")
+        app.mailHost = "imap.mail.me.com"
+        XCTAssertFalse(app.supportsAllMailFolder, "iCloud has no all-mail folder")
     }
 }

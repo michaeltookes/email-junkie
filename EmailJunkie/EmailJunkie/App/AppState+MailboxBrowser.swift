@@ -110,16 +110,15 @@ extension AppState {
         }
 
         do {
-            let result = try await mailProvider.searchMessages(
-                credentials,
-                mailbox: query.mailbox,
-                criteria: query.criteria,
-                offset: 0,
-                limit: Self.mailboxBrowserPageSize
-            )
+            let result = try await fetchBrowserPage(query, credentials: credentials, offset: 0)
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.results = result.messages
-            browser.resultQuery = query.capped(at: result.messages.map(\.id).max())
+            // The unfiltered view pages by offset (sequence numbers), so its
+            // query needs no UID ceiling; filtered search pins a UID high-water
+            // mark so later pages stay stable as new mail arrives.
+            browser.resultQuery = query.criteria.isEmpty
+                ? query
+                : query.capped(at: result.messages.map(\.id).max())
             browser.hasMore = result.hasMore
             browser.totalMatches = result.totalMatches
         } catch {
@@ -133,10 +132,23 @@ extension AppState {
     func loadMoreMailboxResults() async {
         guard browser.hasMore, !browser.isSearching, !browser.isLoadingMore else { return }
         guard let query = browser.resultQuery else { return }
-        guard let pageQuery = query.nextPage(after: browser.results.last?.id) else {
-            browser.hasMore = false
-            return
+
+        // Unfiltered view pages by offset (bounded sequence fetch, item 45);
+        // filtered search pages by lowering the UID ceiling.
+        let pageQuery: MailboxBrowserQuery
+        let offset: Int
+        if query.criteria.isEmpty {
+            pageQuery = query
+            offset = browser.results.count
+        } else {
+            guard let next = query.nextPage(after: browser.results.last?.id) else {
+                browser.hasMore = false
+                return
+            }
+            pageQuery = next
+            offset = 0
         }
+
         let requestGeneration = browserGeneration
         let loadedCount = browser.results.count
 
@@ -152,22 +164,45 @@ extension AppState {
         }
 
         do {
-            let result = try await mailProvider.searchMessages(
-                credentials,
-                mailbox: pageQuery.mailbox,
-                criteria: pageQuery.criteria,
-                offset: 0,
-                limit: Self.mailboxBrowserPageSize
-            )
+            let result = try await fetchBrowserPage(pageQuery, credentials: credentials, offset: offset)
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = nil
             browser.results.append(contentsOf: result.messages)
             browser.hasMore = result.hasMore
-            browser.totalMatches = loadedCount + result.totalMatches
+            browser.totalMatches = query.criteria.isEmpty
+                ? result.totalMatches
+                : loadedCount + result.totalMatches
         } catch {
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = Self.message(for: error)
         }
+    }
+
+    /// Fetches one browser page, choosing the bounded sequence-fetch path for the
+    /// unfiltered "recent mail" view (item 45 — never issues an unbounded
+    /// `UID SEARCH`) and UID-search paging for filtered queries. `offset` is only
+    /// used by the unfiltered path; filtered paging is driven by the query's own
+    /// UID ceiling.
+    private func fetchBrowserPage(
+        _ query: MailboxBrowserQuery,
+        credentials: MailAccountCredentials,
+        offset: Int
+    ) async throws -> MailSearchResult {
+        if query.criteria.isEmpty {
+            return try await mailProvider.fetchMessagePage(
+                credentials,
+                mailbox: query.mailbox,
+                offset: offset,
+                limit: Self.mailboxBrowserPageSize
+            )
+        }
+        return try await mailProvider.searchMessages(
+            credentials,
+            mailbox: query.mailbox,
+            criteria: query.criteria,
+            offset: 0,
+            limit: Self.mailboxBrowserPageSize
+        )
     }
 
     func nextBrowserGeneration() -> Int {

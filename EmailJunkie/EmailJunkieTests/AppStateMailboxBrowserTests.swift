@@ -57,7 +57,9 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertFalse(appState.browser.isSearching)
         XCTAssertNil(appState.browser.error)
         XCTAssertEqual(appState.browser.resultQuery?.mailbox, .inbox)
-        XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria(maximumUID: 129))
+        // The unfiltered view pages by offset (bounded sequence fetch, item 45),
+        // so its query carries no UID ceiling.
+        XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria())
         XCTAssertEqual(provider.lastOffset, 0)
     }
 
@@ -72,8 +74,9 @@ final class AppStateMailboxBrowserTests: XCTestCase {
 
         XCTAssertEqual(appState.browser.results.count, 30)
         XCTAssertFalse(appState.browser.hasMore)
-        XCTAssertEqual(provider.lastCriteria?.maximumUID, 104)
-        XCTAssertEqual(provider.lastOffset, 0)
+        // Unfiltered pagination advances by offset, not a UID ceiling.
+        XCTAssertEqual(provider.lastOffset, 25)
+        XCTAssertNil(provider.lastCriteria?.maximumUID)
         XCTAssertEqual(provider.searchCallCount, 2)
         // No duplicates: ids are unique and contiguous.
         XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
@@ -102,6 +105,9 @@ final class AppStateMailboxBrowserTests: XCTestCase {
     func testLoadMoreUsesStableUIDWindowWhenNewMessagesArrive() async {
         let provider = PagingSearchMailProvider(allMessages: messages(30))
         let appState = makeAppState(provider: provider)
+        // A filter engages the UID-ceiling paging path (the unfiltered view
+        // pages by offset instead — item 45).
+        appState.browser.keyword = "mail"
         await appState.runMailboxSearch()
 
         provider.allMessages.insert(
@@ -129,6 +135,8 @@ final class AppStateMailboxBrowserTests: XCTestCase {
     func testLoadMoreUsesCursorWhenLoadedMessageIsDeleted() async {
         let provider = PagingSearchMailProvider(allMessages: messages(30))
         let appState = makeAppState(provider: provider)
+        // A filter engages the UID-ceiling paging path (item 45).
+        appState.browser.keyword = "mail"
         await appState.runMailboxSearch()
 
         provider.allMessages.removeAll { $0.id == 120 }

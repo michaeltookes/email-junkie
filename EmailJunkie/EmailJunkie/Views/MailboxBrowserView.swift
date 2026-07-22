@@ -58,6 +58,9 @@ struct MailboxBrowserView: View {
             }
             .labelsHidden()
             .frame(width: 130)
+            // Switching folders reloads immediately, like any mail client —
+            // otherwise the old folder's results linger until the user re-searches.
+            .onChange(of: appState.browser.mailbox) { runSearch() }
             Button("Search") { runSearch() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(appState.browser.isSearching)

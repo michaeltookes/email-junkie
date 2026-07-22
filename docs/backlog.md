@@ -94,6 +94,15 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9).
     - Any folder-name mismatch found is fixed in `MailboxNaming` before item 42 ships.
 
+45. **Large-mailbox search exceeds IMAP frame limit (`PayloadTooLargeError`)** — *bug; blocks browsing/cleanup on big inboxes*
+    The mailbox browser fails on very large mailboxes because `UID SEARCH` returns every matching UID on a single response line, which exceeds swift-nio-imap's fixed 8 KB frame buffer. Found live on a real att.net inbox: "Couldn't reach the mail server. (PayloadTooLargeError())" on the default view.
+    *As a user with a huge inbox (att.net, a big Gmail), I want to browse and search it without the connection erroring, so that the app is usable on exactly the mailboxes it exists to rescue.*
+    - **Root cause:** `IMAPSearchHandler` issues `UID SEARCH <criteria>`; the server's `* SEARCH …` reply lists all matched UIDs on one line. Above ~1,000 UIDs (~8 KB) NIO's frame decoder throws `PayloadTooLargeError`. `IMAPClientHandler` hardcodes `maximumBufferSize = IMAPDefaults.lineLengthLimit` (8192) and does **not** expose it, so the fix cannot simply be "raise the limit."
+    - **Default recent view:** when no filter is set, skip SEARCH entirely — `SELECT` to read `EXISTS` (total count) and `FETCH` the newest page by sequence-number range. Bounded to page size; works at any mailbox size.
+    - **Filtered / broad search & bulk selection:** page the matched set without ever requesting an unbounded SEARCH — e.g. windowed `UID SEARCH` over descending UID ranges (or ESEARCH `RETURN (COUNT)`/`PARTIAL` where supported), accumulating one page at a time.
+    - **Counts:** the total-match count must come from a bounded call (`EXISTS`, ESEARCH `COUNT`, or windowed accumulation), never from materializing all UIDs.
+    - **Prerequisite for item 42:** bulk actions select large sets server-side, so this bounded-selection engine must land first. Ties to items 39/40.
+
 ## Medium Priority
 
 16. **Local model support**

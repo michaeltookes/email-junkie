@@ -114,7 +114,11 @@ extension AppState {
                 criteria: previewQuery.criteria,
                 action: action,
                 selectionCap: Self.bulkSelectionCap,
-                onProgress: nil
+                // Batches complete on a NIO event loop, so hop back to the main
+                // actor before touching published state.
+                onProgress: { [weak self] progress in
+                    Task { @MainActor in self?.bulk.progress = progress }
+                }
             )
             bulk.progress = MailBulkProgress(
                 processed: result.affectedCount,

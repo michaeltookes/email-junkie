@@ -83,6 +83,9 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
         lastAppliedMailbox = mailbox
         lastAppliedCriteria = criteria
         lastAppliedAction = action
-        return try applyResult.get()
+        let result = try applyResult.get()
+        // Mirror the real provider: report progress as batches land.
+        onProgress?(MailBulkProgress(processed: result.affectedCount, total: result.affectedCount))
+        return result
     }
 }

@@ -206,15 +206,15 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Signing secrets are handled securely via encrypted CI secrets.
     - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
 
-42. **High-volume inbox cleanup & bulk triage**
-    A monitoring + bulk-cleanup mechanism for mailboxes drowning in unread junk, built to never load the whole mailbox at once. **Provider-agnostic — applies to every connected account, Gmail included, not just Yahoo/AT&T.**
-    *As a user with one or more huge, neglected inboxes (a Gmail account and an `att.net` account both rising), I want to see what's piling up and bulk-archive/delete the junk safely, so that each account becomes usable again without my mail client crashing.*
-    - **All connected accounts:** the feature is not tied to a provider — it runs on any mailbox reachable over the IMAP path (Gmail, Yahoo/AT&T, other IMAP). The same overload happens on a rising Gmail inbox (e.g. opening it alongside the `att.net` account crashes the client), so cleanup must cover Gmail too. Ties to multiple-account support (item 33) for per-account attribution.
-    - **Never bulk-download:** all counting and selection run server-side on top of the item-39/40 search+paging engine (UID SEARCH + bounded FETCH), so a mailbox with tens of thousands of messages is handled in pages — the same architecture that avoids the whole-mailbox loads that crash heavier clients.
-    - **Monitoring view:** summarize the mailbox — total/unread counts, and breakdowns by sender/domain and by age — so the biggest sources of clutter are obvious.
-    - **Bulk actions over a filter:** select by criteria (sender/domain, older-than, unread, bulk/list mail) and apply a bulk **mark-read**, **archive**, or **delete** via IMAP `UID STORE`/`UID MOVE`/`UID EXPUNGE`, executed in bounded batches with progress.
-    - **Safety:** a preview + explicit confirm before any destructive action, a bounded/undoable first pass (prefer archive/Trash over permanent expunge), and never touch anything outside the chosen filter.
-    - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question to confirm with the user: default to archive-to-Trash vs. permanent delete, and whether any cleanup should ever run automatically vs. manual-only.
+46. **Mailbox monitoring view (clutter breakdown by sender and age)**
+    A summary of what is actually piling up in a mailbox, so the biggest sources of clutter are obvious before cleaning. Split out of item 42, which delivered the bulk-cleanup engine but deliberately deferred this reporting view.
+    *As a user with a huge, neglected inbox, I want to see which senders and which date ranges account for most of my unread mail, so that I know what to clean up instead of guessing at filters.*
+    - **Total/unread counts** for the selected mailbox, obtained without downloading it.
+    - **Breakdown by sender/domain** — the top senders by message count, so a single newsletter flooding the inbox is immediately visible.
+    - **Breakdown by age** — buckets (e.g. last 7 days, 30 days, this year, older) so stale mail is easy to spot.
+    - **Never bulk-download:** counting must reuse item 42's bounded `SequenceWindow` walk (or IMAP `ESEARCH COUNT` where supported) so a mailbox of any size stays safe. A partial/capped scan must be labelled as such rather than presented as exact.
+    - **One-click hand-off:** selecting a row (a sender, or an age bucket) fills the browser's filter so item 42's preview + confirm cleanup can act on it directly.
+    - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question still outstanding from item 42: whether any cleanup should ever run automatically vs. manual-only.
 
 ## Low Priority
 

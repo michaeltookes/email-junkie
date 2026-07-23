@@ -368,6 +368,33 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertEqual(try future.wait().affectedCount, 2)
     }
 
+    func testApplyWithPreviewSelectionHonorsSelectionCap() throws {
+        let selection = MailBulkSelection(uidValidity: 123456, uids: [25, 24, 23])
+        let (channel, future) = try makeChannel(
+            action: .markRead,
+            selectionCap: 2,
+            selection: selection
+        )
+        let validation = try advanceThroughSelect(channel, exists: 5)
+
+        XCTAssertTrue(validation.contains("UID SEARCH"), validation)
+        XCTAssertTrue(validation.contains("25"), validation)
+        XCTAssertTrue(validation.contains("24"), validation)
+        XCTAssertFalse(validation.contains("23"), validation)
+
+        let store = try feedUIDValidation(channel, uids: [25, 24])
+        XCTAssertTrue(store.contains("UID STORE"), store)
+        XCTAssertTrue(store.contains("25"), store)
+        XCTAssertTrue(store.contains("24"), store)
+        XCTAssertFalse(store.contains("23"), store)
+
+        try feed(channel, "B0 OK STORE completed\r\n")
+        let outcome = try future.wait()
+        XCTAssertEqual(outcome.matchCount, 2)
+        XCTAssertEqual(outcome.affectedCount, 2)
+        XCTAssertTrue(outcome.isPartial)
+    }
+
     func testExpungeDuringUIDValidationDropsMissingUIDsBeforeCounting() throws {
         let recorder = ProgressRecorder()
         let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21])

@@ -227,6 +227,8 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
     /// Applies the exact UID set approved by a preview instead of rerunning the
     /// live filter, so newly arrived matching mail is not swept into the run.
+    /// `finishSelection` still de-duplicates and enforces `selectionCap` for
+    /// supplied UID sets before anything is mutated.
     private func beginProvidedSelection(
         _ selection: MailBulkSelection,
         context: ChannelHandlerContext

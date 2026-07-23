@@ -28,11 +28,14 @@ final class IMAPBulkCleanupTests: XCTestCase {
             password: "pw",
             mailboxName: mailbox,
             destinationName: destination,
-            criteria: criteria,
-            action: action,
-            sampleLimit: sampleLimit,
-            selectionCap: selectionCap,
-            onProgress: onProgress,
+            request: IMAPBulkCleanupRequest(
+                mailbox: .inbox,
+                criteria: criteria,
+                action: action,
+                sampleLimit: sampleLimit,
+                selectionCap: selectionCap,
+                onProgress: onProgress
+            ),
             promise: promise
         )
         try channel.pipeline.syncOperations.addHandlers([IMAPClientHandler(), handler])

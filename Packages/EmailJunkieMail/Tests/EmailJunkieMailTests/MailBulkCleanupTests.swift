@@ -35,7 +35,7 @@ final class MailBulkCleanupTests: XCTestCase {
             [
                 Tuple(lower: 701, upper: 1200),
                 Tuple(lower: 201, upper: 700),
-                Tuple(lower: 1, upper: 200),
+                Tuple(lower: 1, upper: 200)
             ]
         )
     }

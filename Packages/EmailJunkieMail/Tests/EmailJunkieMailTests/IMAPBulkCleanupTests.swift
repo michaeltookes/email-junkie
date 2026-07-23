@@ -251,6 +251,21 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertTrue(outcome.isPartial, "the user must be told this is a lower bound")
     }
 
+    func testExactSelectionCapAfterFinalWindowIsNotPartial() throws {
+        let (channel, future) = try makeChannel(sampleLimit: 0, selectionCap: 2)
+        try advanceThroughSelect(channel, exists: 2)
+
+        try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12)]
+        )
+
+        let outcome = try future.wait()
+        XCTAssertEqual(outcome.matchCount, 2)
+        XCTAssertFalse(outcome.isPartial)
+    }
+
     func testUIDResolutionIgnoresFetchesOutsideTheActiveSearchWindow() throws {
         let (channel, future) = try makeChannel(sampleLimit: 0)
         try advanceThroughSelect(channel, exists: 5)

@@ -41,6 +41,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     private var sampleLimit: Int { request.sampleLimit }
     private var selectionCap: Int { request.selectionCap }
     private var onProgress: (@Sendable (MailBulkProgress) -> Void)? { request.onProgress }
+    private var hasUnscannedSelectionWindows: Bool { windowIndex < windows.count }
 
     private let loginTag = "A1"
     private let selectTag = "A2"
@@ -240,7 +241,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     /// scanned or the selection cap is reached.
     private func continueSelection(context: ChannelHandlerContext) {
         if matchedUIDs.count >= selectionCap {
-            isPartial = isPartial || windowIndex < windows.count
+            isPartial = isPartial || hasUnscannedSelectionWindows
             finishSelection(context: context)
             return
         }

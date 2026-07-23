@@ -251,6 +251,38 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertEqual(outcome.matchCount, 1)
     }
 
+    func testExpungeDuringSearchRequiresFreshPreview() throws {
+        let (channel, future) = try makeChannel(sampleLimit: 0)
+        try advanceThroughSelect(channel, exists: 5)
+
+        try feed(channel, "* 2 EXPUNGE\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .commandFailed(let detail) = error as? MailError else {
+                return XCTFail("expected commandFailed, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("mailbox changed"), detail)
+        }
+        _ = try? channel.finish()
+    }
+
+    func testExpungeDuringUIDResolutionRequiresFreshPreview() throws {
+        let (channel, future) = try makeChannel(sampleLimit: 0)
+        try advanceThroughSelect(channel, exists: 5)
+        let resolve = try feedSearch(channel, windowIndex: 0, sequenceNumbers: [1])
+        XCTAssertTrue(resolve.contains("FETCH"), resolve)
+
+        try feed(channel, "* 1 EXPUNGE\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .commandFailed(let detail) = error as? MailError else {
+                return XCTFail("expected commandFailed, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("mailbox changed"), detail)
+        }
+        _ = try? channel.finish()
+    }
+
     // MARK: - Mark read
 
     func testMarkReadStoresSeenFlagOverMatchesOnly() throws {

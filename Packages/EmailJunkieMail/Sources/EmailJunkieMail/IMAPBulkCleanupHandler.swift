@@ -122,6 +122,11 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     private func handleUntagged(_ payload: ResponsePayload, context: ChannelHandlerContext) {
         captureUIDValidity(from: payload)
 
+        if isMailboxMutation(payload), step == .search || step == .resolve {
+            failMailboxChangedDuringSelection(context: context)
+            return
+        }
+
         switch step {
         case .greeting:
             send(.login(username: email, password: password), tag: loginTag, context: context)
@@ -184,6 +189,22 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         windowIndex = 0
         step = .search
         continueSelection(context: context)
+    }
+
+    private func isMailboxMutation(_ payload: ResponsePayload) -> Bool {
+        switch payload {
+        case .messageData(.expunge), .messageData(.vanished), .messageData(.vanishedEarlier):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func failMailboxChangedDuringSelection(context: ChannelHandlerContext) {
+        settle(.failure(MailError.commandFailed(
+            "The mailbox changed while preparing the cleanup. Preview again before running cleanup."
+        )))
+        finish(context: context)
     }
 
     /// Applies the exact UID set approved by a preview instead of rerunning the

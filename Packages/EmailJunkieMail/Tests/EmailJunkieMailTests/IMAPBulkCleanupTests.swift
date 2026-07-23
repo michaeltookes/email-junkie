@@ -305,6 +305,24 @@ final class IMAPBulkCleanupTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    /// A move action with no destination folder must fail loudly rather than
+    /// silently degrading into "mark read" — the user asked to move mail, and
+    /// quietly doing something else would misreport what happened.
+    func testMoveWithoutDestinationFailsInsteadOfMarkingRead() throws {
+        let (channel, future) = try makeChannel(action: .moveToTrash, destination: nil)
+        try advanceThroughSelect(channel, exists: 5)
+        try feed(channel, "* SEARCH 11\r\n")
+        let after = try feed(channel, "S0 OK SEARCH completed\r\n")
+
+        XCTAssertFalse(after.contains("STORE"), after)
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .commandFailed = error as? MailError else {
+                return XCTFail("expected commandFailed, got \(error)")
+            }
+        }
+        _ = try? channel.finish()
+    }
+
     func testDecoderOverflowStillMapsToResultTooLarge() throws {
         let (channel, future) = try makeChannel()
         try advanceThroughSelect(channel, exists: 5)

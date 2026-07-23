@@ -156,6 +156,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
                 windowIndex += 1
                 continueSelection(context: context)
             } else if step == .apply {
+                // Guard the index rather than trusting tag ordering: an
+                // unsolicited or duplicated tagged response would otherwise
+                // index past the last batch and crash the app.
+                guard batchIndex < batches.count else { return }
                 affectedCount += batches[batchIndex].count
                 onProgress?(MailBulkProgress(processed: affectedCount, total: matchedUIDs.count))
                 batchIndex += 1
@@ -234,15 +238,29 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             batchIndex += 1
             return continueApply(context: context)
         }
+        guard let command = command(for: set) else {
+            settle(.failure(MailError.commandFailed(
+                "No destination folder is configured for this cleanup action."
+            )))
+            return finish(context: context)
+        }
         step = .apply
-        send(command(for: set), tag: "B\(batchIndex)", context: context)
+        send(command, tag: "B\(batchIndex)", context: context)
     }
 
-    private func command(for set: MessageIdentifierSetNonEmpty<UID>) -> Command {
-        guard let destinationName else {
+    /// Keys off the action rather than the presence of a destination: a move
+    /// action that somehow arrived without a destination folder must fail
+    /// loudly, not silently degrade into marking the batch read.
+    private func command(for set: MessageIdentifierSetNonEmpty<UID>) -> Command? {
+        switch action {
+        case .markRead:
             return .uidStore(.set(set), [], .flags(.add(silent: true, list: [.seen])))
+        case .archive, .moveToTrash:
+            guard let destinationName else { return nil }
+            return .uidMove(.set(set), MailboxName(ByteBuffer(string: destinationName)))
+        case nil:
+            return nil
         }
-        return .uidMove(.set(set), MailboxName(ByteBuffer(string: destinationName)))
     }
 
     // MARK: - Settling

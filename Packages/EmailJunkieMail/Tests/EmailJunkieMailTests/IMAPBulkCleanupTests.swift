@@ -17,6 +17,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         action: MailBulkAction? = nil,
         sampleLimit: Int = 25,
         selectionCap: Int = 5_000,
+        selection: MailBulkSelection? = nil,
         mailbox: String = "INBOX",
         destination: String? = nil,
         onProgress: (@Sendable (MailBulkProgress) -> Void)? = nil
@@ -32,6 +33,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
                 mailbox: .inbox,
                 criteria: criteria,
                 action: action,
+                selection: selection,
                 sampleLimit: sampleLimit,
                 selectionCap: selectionCap,
                 onProgress: onProgress
@@ -192,6 +194,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let outcome = try future.wait()
         XCTAssertEqual(outcome.matchCount, 3)
         XCTAssertEqual(outcome.sample.map(\.id), [13, 12, 11])
+        XCTAssertEqual(outcome.selection, MailBulkSelection(uidValidity: 123456, uids: [13, 12, 11]))
         XCTAssertEqual(outcome.affectedCount, 0)
     }
 
@@ -269,6 +272,35 @@ final class IMAPBulkCleanupTests: XCTestCase {
         try feed(channel, "B0 OK STORE completed\r\n")
         let outcome = try future.wait()
         XCTAssertEqual(outcome.affectedCount, 2)
+    }
+
+    func testApplyWithPreviewSelectionSkipsLiveSearch() throws {
+        let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21])
+        let (channel, future) = try makeChannel(action: .markRead, selection: selection)
+        let out = try advanceThroughSelect(channel, exists: 5)
+
+        XCTAssertTrue(out.contains("UID STORE"), out)
+        XCTAssertFalse(out.contains("SEARCH"), out)
+        XCTAssertTrue(out.contains("22"), out)
+        XCTAssertTrue(out.contains("21"), out)
+
+        try feed(channel, "B0 OK STORE completed\r\n")
+        XCTAssertEqual(try future.wait().affectedCount, 2)
+    }
+
+    func testApplyWithStalePreviewSelectionRequiresFreshPreview() throws {
+        let selection = MailBulkSelection(uidValidity: 999, uids: [22])
+        let (channel, future) = try makeChannel(action: .markRead, selection: selection)
+        let out = try advanceThroughSelect(channel, exists: 5)
+
+        XCTAssertFalse(out.contains("UID STORE"), out)
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .commandFailed(let detail) = error as? MailError else {
+                return XCTFail("expected commandFailed, got \(error)")
+            }
+            XCTAssertTrue(detail.contains("Preview again"), detail)
+        }
+        _ = try? channel.finish()
     }
 
     func testNoMatchesAppliesNothing() throws {

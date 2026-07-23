@@ -23,6 +23,24 @@ final class AppStateBulkCleanupTests: XCTestCase {
         }
     }
 
+    private func preview(
+        matchCount: Int,
+        sample: [MailMessage] = [],
+        isPartial: Bool = false
+    ) -> MailBulkPreview {
+        return MailBulkPreview(
+            matchCount: matchCount,
+            sample: sample,
+            isPartial: isPartial,
+            selection: selection(matchCount: matchCount)
+        )
+    }
+
+    private func selection(matchCount: Int) -> MailBulkSelection {
+        let uids = (0..<matchCount).map { UInt32(1_000 + $0) }.reversed()
+        return MailBulkSelection(uidValidity: 1, uids: Array(uids))
+    }
+
     private func makeAppState(provider: MailProvider, connected: Bool = true) -> AppState {
         let secrets = connected
             ? InMemorySecretStore(seed: [.mailAppPassword: "app-pw"])
@@ -44,7 +62,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testPreviewReportsMatchesWithoutApplying() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 120, sample: sample(3), isPartial: false))
+            previewResult: .success(preview(matchCount: 120, sample: sample(3)))
         )
         let appState = makeAppState(provider: provider)
 
@@ -58,7 +76,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testPreviewUsesTheCurrentFilter() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 5, sample: [], isPartial: false))
+            previewResult: .success(preview(matchCount: 5))
         )
         let appState = makeAppState(provider: provider)
         appState.browser.mailbox = .inbox
@@ -74,7 +92,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testPreviewIsBoundedBySelectionCap() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 5, sample: [], isPartial: false))
+            previewResult: .success(preview(matchCount: 5))
         )
         let appState = makeAppState(provider: provider)
 
@@ -127,7 +145,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testApplyUsesThePreviewedFilterNotLiveInputs() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)),
+            previewResult: .success(preview(matchCount: 9)),
             applyResult: .success(MailBulkResult(action: .moveToTrash, affectedCount: 9))
         )
         let appState = makeAppState(provider: provider)
@@ -140,6 +158,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
         XCTAssertEqual(provider.applyCallCount, 1)
         XCTAssertEqual(provider.lastAppliedCriteria?.from, "spam@junk.com")
         XCTAssertEqual(provider.lastAppliedAction, .moveToTrash)
+        XCTAssertEqual(provider.lastAppliedSelection, selection(matchCount: 9))
     }
 
     /// The core safety property: approving a preview approves *that* set of
@@ -147,7 +166,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
     /// rather than silently deleting a different set.
     func testChangingTheFilterAfterPreviewBlocksTheRun() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)),
+            previewResult: .success(preview(matchCount: 9)),
             applyResult: .success(MailBulkResult(action: .moveToTrash, affectedCount: 9))
         )
         let appState = makeAppState(provider: provider)
@@ -168,7 +187,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testChangingTheFolderAfterPreviewBlocksTheRun() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false))
+            previewResult: .success(preview(matchCount: 9))
         )
         let appState = makeAppState(provider: provider)
 
@@ -181,7 +200,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testChangingTheAccountAfterPreviewBlocksTheRun() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)),
+            previewResult: .success(preview(matchCount: 9)),
             applyResult: .success(MailBulkResult(action: .moveToTrash, affectedCount: 9))
         )
         let appState = makeAppState(provider: provider)
@@ -201,7 +220,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testDisconnectingAccountClearsBulkApproval() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false))
+            previewResult: .success(preview(matchCount: 9))
         )
         let appState = makeAppState(provider: provider)
 
@@ -223,7 +242,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
         appState.mailEmail = "other@gmail.com"
         appState.mailAppPassword = "other-pw"
-        provider.completePreview(with: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)))
+        provider.completePreview(with: .success(preview(matchCount: 9)))
         await previewTask.value
 
         XCTAssertNil(appState.bulk.preview)
@@ -233,7 +252,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testApplyCallbacksAfterAccountChangeAreIgnored() async {
         let provider = SuspendedBulkCleanupMailProvider(
-            previewResult: MailBulkPreview(matchCount: 9, sample: [], isPartial: false),
+            previewResult: preview(matchCount: 9),
             applyResult: MailBulkResult(action: .markRead, affectedCount: 9)
         )
         let appState = makeAppState(provider: provider)
@@ -262,7 +281,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testSuccessfulApplyReportsCountAndClearsPreview() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 42, sample: [], isPartial: false)),
+            previewResult: .success(preview(matchCount: 42)),
             applyResult: .success(MailBulkResult(action: .markRead, affectedCount: 42))
         )
         let appState = makeAppState(provider: provider)
@@ -278,7 +297,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
 
     func testApplyFailureSurfacesMessageAndDoesNotClaimSuccess() async {
         let provider = BulkCleanupMailProvider(
-            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)),
+            previewResult: .success(preview(matchCount: 9)),
             applyResult: .failure(.commandFailed("MOVE not supported"))
         )
         let appState = makeAppState(provider: provider)

@@ -18,6 +18,7 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
     private(set) var lastAppliedMailbox: Mailbox?
     private(set) var lastAppliedCriteria: MailSearchCriteria?
     private(set) var lastAppliedAction: MailBulkAction?
+    private(set) var lastAppliedSelection: MailBulkSelection?
     private(set) var lastSelectionCap: Int?
 
     init(
@@ -81,6 +82,7 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
         mailbox: Mailbox,
         criteria: MailSearchCriteria,
         action: MailBulkAction,
+        selection: MailBulkSelection?,
         selectionCap: Int,
         onProgress: (@Sendable (MailBulkProgress) -> Void)?
     ) async throws -> MailBulkResult {
@@ -89,6 +91,7 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
         lastAppliedMailbox = mailbox
         lastAppliedCriteria = criteria
         lastAppliedAction = action
+        lastAppliedSelection = selection
         let result = try applyResult.get()
         // Mirror the real provider: report progress as batches land.
         onProgress?(MailBulkProgress(processed: result.affectedCount, total: result.affectedCount))
@@ -195,6 +198,7 @@ final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable 
         mailbox: Mailbox,
         criteria: MailSearchCriteria,
         action: MailBulkAction,
+        selection: MailBulkSelection?,
         selectionCap: Int,
         onProgress: (@Sendable (MailBulkProgress) -> Void)?
     ) async throws -> MailBulkResult {

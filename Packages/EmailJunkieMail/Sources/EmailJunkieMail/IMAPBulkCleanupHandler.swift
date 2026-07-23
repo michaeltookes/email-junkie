@@ -148,7 +148,11 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             captureUIDValidity(from: tagged.state)
-            beginSelection(context: context)
+            if let selection = request.selection, action != nil {
+                beginProvidedSelection(selection, context: context)
+            } else {
+                beginSelection(context: context)
+            }
         case sampleTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             settlePreview(context: context)
@@ -180,6 +184,24 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         windowIndex = 0
         step = .search
         continueSelection(context: context)
+    }
+
+    /// Applies the exact UID set approved by a preview instead of rerunning the
+    /// live filter, so newly arrived matching mail is not swept into the run.
+    private func beginProvidedSelection(
+        _ selection: MailBulkSelection,
+        context: ChannelHandlerContext
+    ) {
+        if let expectedUIDValidity = selection.uidValidity {
+            guard let selectedUIDValidity, expectedUIDValidity == selectedUIDValidity else {
+                settle(.failure(MailError.commandFailed(
+                    "The mailbox changed since the preview. Preview again before running cleanup."
+                )))
+                return finish(context: context)
+            }
+        }
+        matchedUIDs = selection.uids
+        finishSelection(context: context)
     }
 
     /// Issues the next bounded `SEARCH`, or moves on once every window has been
@@ -291,6 +313,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             matchCount: matchedUIDs.count,
             sample: sample.sorted { $0.id > $1.id },
             isPartial: isPartial,
+            selection: MailBulkSelection(uidValidity: selectedUIDValidity, uids: matchedUIDs),
             affectedCount: 0
         )))
         finish(context: context)
@@ -301,6 +324,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             matchCount: matchedUIDs.count,
             sample: [],
             isPartial: isPartial,
+            selection: nil,
             affectedCount: affectedCount
         )))
         finish(context: context)

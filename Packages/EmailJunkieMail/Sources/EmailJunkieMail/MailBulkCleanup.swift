@@ -87,6 +87,19 @@ enum SequenceWindow {
     }
 }
 
+/// The concrete UID set selected by a bulk preview.
+public struct MailBulkSelection: Sendable, Equatable {
+    /// UIDVALIDITY captured from the selected mailbox when available.
+    public var uidValidity: UInt32?
+    /// UIDs selected by the preview, newest first and capped by selection limit.
+    public var uids: [UInt32]
+
+    public init(uidValidity: UInt32?, uids: [UInt32]) {
+        self.uidValidity = uidValidity
+        self.uids = uids
+    }
+}
+
 /// What a bulk action *would* do, shown to the user before anything is changed.
 ///
 /// Selection is bounded, so a preview may stop early on a very large match set;
@@ -101,11 +114,19 @@ public struct MailBulkPreview: Sendable, Equatable {
     /// True when scanning stopped at the selection cap, so `matchCount` is a
     /// lower bound rather than the exact total.
     public var isPartial: Bool
+    /// The concrete UID set approved by the preview.
+    public var selection: MailBulkSelection?
 
-    public init(matchCount: Int, sample: [MailMessage], isPartial: Bool) {
+    public init(
+        matchCount: Int,
+        sample: [MailMessage],
+        isPartial: Bool,
+        selection: MailBulkSelection? = nil
+    ) {
         self.matchCount = matchCount
         self.sample = sample
         self.isPartial = isPartial
+        self.selection = selection
     }
 
     /// Nothing matched the filter.

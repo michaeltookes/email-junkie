@@ -91,6 +91,7 @@ public protocol MailProvider: Sendable {
         mailbox: Mailbox,
         criteria: MailSearchCriteria,
         action: MailBulkAction,
+        selection: MailBulkSelection?,
         selectionCap: Int,
         onProgress: (@Sendable (MailBulkProgress) -> Void)?
     ) async throws -> MailBulkResult
@@ -231,10 +232,32 @@ public extension MailProvider {
         mailbox: Mailbox,
         criteria: MailSearchCriteria,
         action: MailBulkAction,
+        selection: MailBulkSelection?,
         selectionCap: Int,
         onProgress: (@Sendable (MailBulkProgress) -> Void)?
     ) async throws -> MailBulkResult {
         throw MailError.commandFailed("This provider does not support bulk cleanup.")
+    }
+
+    /// Convenience for callers that intentionally want a live selection rather
+    /// than applying a previewed UID set.
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        try await applyBulkCleanup(
+            credentials,
+            mailbox: mailbox,
+            criteria: criteria,
+            action: action,
+            selection: nil,
+            selectionCap: selectionCap,
+            onProgress: onProgress
+        )
     }
 }
 

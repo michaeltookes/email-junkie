@@ -13,6 +13,8 @@ struct IMAPBulkCleanupRequest: Sendable {
     var criteria: MailSearchCriteria
     /// The action to apply, or `nil` for a read-only preview.
     var action: MailBulkAction?
+    /// Concrete preview selection to apply. When set, apply skips live search.
+    var selection: MailBulkSelection?
     /// How many matches to fetch envelopes for (preview only).
     var sampleLimit: Int
     /// Ceiling on how many messages one pass selects.
@@ -30,6 +32,8 @@ struct IMAPBulkOutcome: Sendable, Equatable {
     var sample: [MailMessage]
     /// True when selection stopped at the cap, so `matchCount` is a lower bound.
     var isPartial: Bool
+    /// Concrete UID set selected by the preview, if this was a preview pass.
+    var selection: MailBulkSelection?
     /// How many messages the action was actually applied to (0 for a preview).
     var affectedCount: Int
 }
@@ -61,6 +65,7 @@ extension IMAPMailProvider {
             mailbox: mailbox,
             criteria: criteria,
             action: nil,
+            selection: nil,
             sampleLimit: sampleLimit,
             selectionCap: selectionCap,
             onProgress: nil
@@ -68,7 +73,8 @@ extension IMAPMailProvider {
         return MailBulkPreview(
             matchCount: outcome.matchCount,
             sample: outcome.sample,
-            isPartial: outcome.isPartial
+            isPartial: outcome.isPartial,
+            selection: outcome.selection
         )
     }
 
@@ -82,6 +88,7 @@ extension IMAPMailProvider {
         mailbox: Mailbox,
         criteria: MailSearchCriteria,
         action: MailBulkAction,
+        selection: MailBulkSelection? = nil,
         selectionCap: Int = IMAPMailProvider.bulkSelectionCap,
         onProgress: (@Sendable (MailBulkProgress) -> Void)? = nil
     ) async throws -> MailBulkResult {
@@ -89,6 +96,7 @@ extension IMAPMailProvider {
             mailbox: mailbox,
             criteria: criteria,
             action: action,
+            selection: selection,
             sampleLimit: 0,
             selectionCap: selectionCap,
             onProgress: onProgress
@@ -102,7 +110,13 @@ extension IMAPMailProvider {
     ) async throws -> IMAPBulkOutcome {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
         guard request.selectionCap > 0 else {
-            return IMAPBulkOutcome(matchCount: 0, sample: [], isPartial: false, affectedCount: 0)
+            return IMAPBulkOutcome(
+                matchCount: 0,
+                sample: [],
+                isPartial: false,
+                selection: nil,
+                affectedCount: 0
+            )
         }
 
         let naming = credentials.mailboxNaming

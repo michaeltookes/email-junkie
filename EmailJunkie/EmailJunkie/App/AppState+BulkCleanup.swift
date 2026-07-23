@@ -4,13 +4,13 @@ import Foundation
 /// State for the bulk-cleanup panel (item 42): the chosen action, the preview of
 /// what it would affect, and progress while it runs.
 ///
-/// `previewQuery` and `previewAccount` are the safety anchors. The user approves
-/// a *specific* preview for a *specific* account, so the apply step replays that
-/// context rather than reading only the live search controls.
+/// `previewQuery`, `previewAccount`, and `preview.selection` are the safety
+/// anchors. The user approves a *specific* UID set for a *specific* account, so
+/// apply does not sweep in mail that matched after preview.
 struct BulkCleanupState: Equatable {
     var action: MailBulkAction = .markRead
     var preview: MailBulkPreview?
-    /// The query `preview` was produced from; apply uses exactly this.
+    /// The query `preview` was produced from; apply must still match it.
     var previewQuery: MailboxBrowserQuery?
     /// The non-secret account identity `preview` was produced from.
     var previewAccount: BulkCleanupAccountIdentity?
@@ -131,6 +131,7 @@ extension AppState {
                 mailbox: applyContext.previewQuery.mailbox,
                 criteria: applyContext.previewQuery.criteria,
                 action: action,
+                selection: applyContext.preview.selection,
                 selectionCap: Self.bulkSelectionCap,
                 // Batches complete on a NIO event loop, so hop back to the main
                 // actor before touching published state.
@@ -216,6 +217,11 @@ extension AppState {
         }
         guard preview.matchCount > 0 else {
             bulk.error = "Nothing matches that filter."
+            return nil
+        }
+        guard preview.selection != nil else {
+            bulk.reset()
+            bulk.error = "Preview the cleanup again before running cleanup."
             return nil
         }
         return BulkCleanupApplyContext(

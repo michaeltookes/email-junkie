@@ -5,6 +5,7 @@ import NIOIMAP
 import XCTest
 @testable import EmailJunkieMail
 
+// swiftlint:disable file_length type_body_length
 /// Drives `IMAPBulkCleanupHandler` through the real IMAP decoder with an
 /// `EmbeddedChannel` (item 42). Covers the windowed selection walk, the preview
 /// path, and the batched mark-read / move paths — including the safety
@@ -367,6 +368,29 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertEqual(try future.wait().affectedCount, 2)
     }
 
+    func testExpungeDuringUIDValidationDropsMissingUIDsBeforeCounting() throws {
+        let recorder = ProgressRecorder()
+        let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21])
+        let (channel, future) = try makeChannel(
+            action: .markRead,
+            selection: selection,
+            onProgress: { recorder.append($0) }
+        )
+        let validation = try advanceThroughSelect(channel, exists: 5)
+        XCTAssertTrue(validation.contains("UID SEARCH"), validation)
+
+        try feed(channel, "* 1 EXPUNGE\r\n")
+        let store = try feedUIDValidation(channel, uids: [22])
+
+        XCTAssertTrue(store.contains("UID STORE"), store)
+        XCTAssertTrue(store.contains("22"), store)
+        XCTAssertFalse(store.contains("21"), store)
+
+        try feed(channel, "B0 OK STORE completed\r\n")
+        XCTAssertEqual(try future.wait().affectedCount, 1)
+        XCTAssertEqual(recorder.values, [MailBulkProgress(processed: 1, total: 1)])
+    }
+
     func testApplyWithStalePreviewSelectionRequiresFreshPreview() throws {
         let selection = MailBulkSelection(uidValidity: 999, uids: [22])
         let (channel, future) = try makeChannel(action: .markRead, selection: selection)
@@ -576,3 +600,4 @@ final class IMAPBulkCleanupTests: XCTestCase {
         }
     }
 }
+// swiftlint:enable file_length type_body_length

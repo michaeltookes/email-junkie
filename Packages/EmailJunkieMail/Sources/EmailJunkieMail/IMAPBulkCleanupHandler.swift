@@ -4,7 +4,7 @@ import NIOIMAP
 
 /// Drives the bulk-cleanup conversation:
 ///
-/// `LOGIN → SELECT → UID SEARCH (one bounded window at a time) → [sample FETCH |
+/// `LOGIN → SELECT → SEARCH sequence windows → FETCH UIDs → [sample FETCH |
 /// UID STORE/MOVE in batches] → LOGOUT`
 ///
 /// Selection is deliberately completed before any mutation: a `UID MOVE`
@@ -14,11 +14,12 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     typealias InboundIn = Response
 
     enum Step {
-        case greeting, login, select, search, sample, apply, done
+        case greeting, login, select, search, resolve, sample, apply, done
     }
 
     /// Accumulates one FETCH response; `IMAPBulkCleanupHandler+Envelope` fills it.
     struct PartialMessage {
+        var sequenceNumber: UInt32?
         var uid: UInt32?
         var from: MailAddress?
         var replyTo: MailAddress?
@@ -53,6 +54,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
     private var windows: [(lower: UInt32, upper: UInt32)] = []
     private var windowIndex = 0
+    private var pendingSequenceNumbers: [UInt32] = []
     private var matchedUIDs: [UInt32] = []
     private var isPartial = false
 
@@ -130,7 +132,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             }
         case .search:
             if case .mailboxData(.search(let ids, _)) = payload {
-                matchedUIDs.append(contentsOf: ids.map(\.rawValue))
+                pendingSequenceNumbers.append(contentsOf: ids.map(\.rawValue))
             }
         default:
             break
@@ -153,6 +155,9 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         default:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             if step == .search {
+                resolveCurrentWindow(context: context)
+            } else if step == .resolve {
+                pendingSequenceNumbers.removeAll()
                 windowIndex += 1
                 continueSelection(context: context)
             } else if step == .apply {
@@ -177,8 +182,8 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         continueSelection(context: context)
     }
 
-    /// Issues the next bounded `UID SEARCH`, or moves on once every window has
-    /// been scanned or the selection cap is reached.
+    /// Issues the next bounded `SEARCH`, or moves on once every window has been
+    /// scanned or the selection cap is reached.
     private func continueSelection(context: ChannelHandlerContext) {
         if matchedUIDs.count >= selectionCap {
             isPartial = isPartial || windowIndex < windows.count
@@ -197,15 +202,31 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             .sequenceNumbers(.range(range)),
             IMAPSearchHandler.searchKey(for: criteria)
         ])
+        pendingSequenceNumbers.removeAll()
         step = .search
-        send(.uidSearch(key: key), tag: "S\(windowIndex)", context: context)
+        send(.search(key: key), tag: "S\(windowIndex)", context: context)
+    }
+
+    private func resolveCurrentWindow(context: ChannelHandlerContext) {
+        guard let set = Self.sequenceIdentifierSet(for: pendingSequenceNumbers) else {
+            windowIndex += 1
+            continueSelection(context: context)
+            return
+        }
+        step = .resolve
+        send(.fetch(.set(set), [.uid], []), tag: "F\(windowIndex)", context: context)
+    }
+
+    func recordResolvedUID(_ uid: UInt32, for sequenceNumber: UInt32?) {
+        guard let sequenceNumber, pendingSequenceNumbers.contains(sequenceNumber) else { return }
+        matchedUIDs.append(uid)
     }
 
     /// Selection is complete: either sample the matches (preview) or start
     /// applying the action in bounded batches.
     private func finishSelection(context: ChannelHandlerContext) {
         // Newest first, and never act on more than the user was shown.
-        matchedUIDs.sort(by: >)
+        matchedUIDs = Array(Set(matchedUIDs)).sorted(by: >)
         if matchedUIDs.count > selectionCap {
             isPartial = true
             matchedUIDs = Array(matchedUIDs.prefix(selectionCap))

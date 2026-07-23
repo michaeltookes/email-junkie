@@ -9,12 +9,16 @@ extension IMAPBulkCleanupHandler {
 
     func handleFetch(_ response: FetchResponse) {
         switch response {
-        case .start:
-            current = PartialMessage()
+        case .start(let sequenceNumber):
+            current = PartialMessage(sequenceNumber: sequenceNumber.rawValue)
+        case .startUID(let uid):
+            current = PartialMessage(uid: uid.rawValue)
         case .simpleAttribute(let attribute):
             apply(attribute)
         case .finish:
-            if let message = current, let uid = message.uid, message.hasEnvelope {
+            if let message = current, let uid = message.uid, step == .resolve {
+                recordResolvedUID(uid, for: message.sequenceNumber)
+            } else if let message = current, let uid = message.uid, message.hasEnvelope {
                 sample.append(
                     MailMessage(
                         id: uid,
@@ -76,6 +80,17 @@ extension IMAPBulkCleanupHandler {
         }
         guard !ranges.isEmpty else { return nil }
         return MessageIdentifierSetNonEmpty(set: MessageIdentifierSet<UID>(ranges))
+    }
+
+    /// Builds a sequence-number set for the UID-resolution FETCH that follows
+    /// each regular SEARCH window.
+    static func sequenceIdentifierSet(for numbers: [UInt32]) -> MessageIdentifierSetNonEmpty<SequenceNumber>? {
+        let ranges = numbers.compactMap { raw -> MessageIdentifierRange<SequenceNumber>? in
+            guard let number = SequenceNumber(exactly: raw) else { return nil }
+            return MessageIdentifierRange<SequenceNumber>(number...number)
+        }
+        guard !ranges.isEmpty else { return nil }
+        return MessageIdentifierSetNonEmpty(set: MessageIdentifierSet<SequenceNumber>(ranges))
     }
 
     func isOK(_ state: TaggedResponse.State) -> Bool {

@@ -71,6 +71,7 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
         return try previewResult.get()
     }
 
+    // swiftlint:disable:next function_parameter_count
     func applyBulkCleanup(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,

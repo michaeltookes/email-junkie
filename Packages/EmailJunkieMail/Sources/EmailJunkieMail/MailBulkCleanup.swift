@@ -45,17 +45,18 @@ public enum MailBulkAction: Sendable, Equatable, Hashable, CaseIterable {
 /// Pure windowing math for bounded bulk selection.
 ///
 /// A bulk filter can match tens of thousands of messages, but a single
-/// `UID SEARCH` returns every matching UID on one response line — which
-/// overflows NIO-IMAP's 8 KB frame cap and fails the whole operation (item 45).
+/// IMAP `SEARCH` returns every matching sequence number on one response line,
+/// and `UID SEARCH` has the same shape for UIDs. Either can overflow
+/// NIO-IMAP's 8 KB frame cap and fail the whole operation (item 45).
 ///
 /// So selection walks the mailbox in bounded slices instead: each slice searches
 /// only a fixed span of sequence numbers, so the server's reply is bounded by
 /// construction no matter how large the mailbox is.
 enum SequenceWindow {
     /// Max sequence numbers searched per window. A window can return at most one
-    /// UID per message, and UIDs on a large mailbox run ~7-8 digits plus a
-    /// separator, so 500 keeps the worst-case `* SEARCH` line near 4 KB — a wide
-    /// margin under the 8 KB frame cap.
+    /// identifier per message, and identifiers on a large mailbox run ~7-8
+    /// digits plus a separator, so 500 keeps the worst-case `* SEARCH` line near
+    /// 4 KB — a wide margin under the 8 KB frame cap.
     static let defaultSize = 500
 
     /// Splits a mailbox of `total` messages into `[lower, upper]` sequence

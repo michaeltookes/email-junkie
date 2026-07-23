@@ -53,7 +53,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
     }
 
     /// Drives greeting → login → select with `exists` messages in the mailbox,
-    /// returning the outbound the SELECT's OK triggered (the first UID SEARCH).
+    /// returning the outbound the SELECT's OK triggered (the first SEARCH).
     @discardableResult
     private func advanceThroughSelect(_ channel: EmbeddedChannel, exists: Int) throws -> String {
         try feed(channel, "* OK Service Ready\r\n")
@@ -68,15 +68,50 @@ final class IMAPBulkCleanupTests: XCTestCase {
             + "\"\(subject)\" ((\"Sender\" NIL \"\(from)\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL))\r\n"
     }
 
+    @discardableResult
+    private func feedSearch(
+        _ channel: EmbeddedChannel,
+        windowIndex: Int,
+        sequenceNumbers: [UInt32]
+    ) throws -> String {
+        let ids = sequenceNumbers.map(String.init).joined(separator: " ")
+        let response = ids.isEmpty ? "* SEARCH\r\n" : "* SEARCH \(ids)\r\n"
+        try feed(channel, response)
+        return try feed(channel, "S\(windowIndex) OK SEARCH completed\r\n")
+    }
+
+    @discardableResult
+    private func feedUIDResolution(
+        _ channel: EmbeddedChannel,
+        windowIndex: Int,
+        mappings: [(sequence: UInt32, uid: UInt32)]
+    ) throws -> String {
+        for mapping in mappings {
+            try feed(channel, "* \(mapping.sequence) FETCH (UID \(mapping.uid))\r\n")
+        }
+        return try feed(channel, "F\(windowIndex) OK FETCH completed\r\n")
+    }
+
+    @discardableResult
+    private func resolveWindow(
+        _ channel: EmbeddedChannel,
+        windowIndex: Int,
+        mappings: [(sequence: UInt32, uid: UInt32)]
+    ) throws -> String {
+        try feedSearch(channel, windowIndex: windowIndex, sequenceNumbers: mappings.map { $0.sequence })
+        return try feedUIDResolution(channel, windowIndex: windowIndex, mappings: mappings)
+    }
+
     // MARK: - Windowed selection
 
-    func testSearchIsBoundedToASequenceWindowRatherThanTheWholeMailbox() throws {
+    func testSearchIsBoundedToASequenceWindowRatherThanAUIDWindow() throws {
         let (channel, _) = try makeChannel()
         let search = try advanceThroughSelect(channel, exists: 1200)
 
         // Newest window first, and bounded — never an unqualified "SEARCH ALL",
         // which is what overflows the frame cap on a huge mailbox (item 45).
-        XCTAssertTrue(search.contains("UID SEARCH"), search)
+        XCTAssertTrue(search.contains("SEARCH"), search)
+        XCTAssertFalse(search.contains("UID SEARCH"), search)
         XCTAssertTrue(search.contains("701:1200"), search)
         XCTAssertFalse(search.contains(" 1:1200"), search)
     }
@@ -85,21 +120,21 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel()
         try advanceThroughSelect(channel, exists: 1200)
 
-        try feed(channel, "* SEARCH 900\r\n")
-        let second = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let firstResolve = try feedSearch(channel, windowIndex: 0, sequenceNumbers: [900])
+        XCTAssertTrue(firstResolve.contains("FETCH"), firstResolve)
+        let second = try feedUIDResolution(channel, windowIndex: 0, mappings: [(sequence: 900, uid: 1900)])
         XCTAssertTrue(second.contains("201:700"), second)
 
-        try feed(channel, "* SEARCH 300\r\n")
-        let third = try feed(channel, "S1 OK SEARCH completed\r\n")
+        try feedSearch(channel, windowIndex: 1, sequenceNumbers: [300])
+        let third = try feedUIDResolution(channel, windowIndex: 1, mappings: [(sequence: 300, uid: 1300)])
         XCTAssertTrue(third.contains("1:200"), third)
 
-        try feed(channel, "* SEARCH 100\r\n")
-        try feed(channel, "S2 OK SEARCH completed\r\n")
+        try resolveWindow(channel, windowIndex: 2, mappings: [(sequence: 100, uid: 1100)])
 
         // All three windows contributed; preview then samples them.
-        try feed(channel, envelope(uid: 900, seq: 900, subject: "c", from: "c"))
-        try feed(channel, envelope(uid: 300, seq: 300, subject: "b", from: "b"))
-        try feed(channel, envelope(uid: 100, seq: 100, subject: "a", from: "a"))
+        try feed(channel, envelope(uid: 1900, seq: 900, subject: "c", from: "c"))
+        try feed(channel, envelope(uid: 1300, seq: 300, subject: "b", from: "b"))
+        try feed(channel, envelope(uid: 1100, seq: 100, subject: "a", from: "a"))
         try feed(channel, "A3 OK FETCH completed\r\n")
 
         let outcome = try future.wait()
@@ -111,7 +146,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel()
         let out = try advanceThroughSelect(channel, exists: 0)
 
-        XCTAssertFalse(out.contains("UID SEARCH"), out)
+        XCTAssertFalse(out.contains("SEARCH"), out)
         let outcome = try future.wait()
         XCTAssertEqual(outcome.matchCount, 0)
         XCTAssertTrue(outcome.sample.isEmpty)
@@ -122,6 +157,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, _) = try makeChannel(criteria: MailSearchCriteria(from: "spam@junk.com", readState: .unreadOnly))
         let search = try advanceThroughSelect(channel, exists: 10)
 
+        XCTAssertFalse(search.contains("UID SEARCH"), search)
         XCTAssertTrue(search.contains("1:10"), search)
         XCTAssertTrue(search.contains("FROM"), search)
         XCTAssertTrue(search.contains("spam@junk.com"), search)
@@ -134,13 +170,19 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel()
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12 13\r\n")
-        let afterSearch = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let resolve = try feedSearch(channel, windowIndex: 0, sequenceNumbers: [1, 2, 3])
+        XCTAssertTrue(resolve.contains("FETCH"), resolve)
+        XCTAssertFalse(resolve.contains("UID FETCH"), resolve)
+        let afterResolve = try feedUIDResolution(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12), (sequence: 3, uid: 13)]
+        )
 
         // A preview must only ever read — never STORE or MOVE.
-        XCTAssertTrue(afterSearch.contains("UID FETCH"), afterSearch)
-        XCTAssertFalse(afterSearch.contains("STORE"), afterSearch)
-        XCTAssertFalse(afterSearch.contains("MOVE"), afterSearch)
+        XCTAssertTrue(afterResolve.contains("UID FETCH"), afterResolve)
+        XCTAssertFalse(afterResolve.contains("STORE"), afterResolve)
+        XCTAssertFalse(afterResolve.contains("MOVE"), afterResolve)
 
         try feed(channel, envelope(uid: 13, seq: 3, subject: "newest", from: "a@b.com"))
         try feed(channel, envelope(uid: 12, seq: 2, subject: "middle", from: "a@b.com"))
@@ -157,8 +199,16 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, _) = try makeChannel(sampleLimit: 2)
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12 13 14\r\n")
-        let fetch = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let fetch = try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [
+                (sequence: 1, uid: 11),
+                (sequence: 2, uid: 12),
+                (sequence: 3, uid: 13),
+                (sequence: 4, uid: 14)
+            ]
+        )
 
         // Only the two newest UIDs are fetched for display.
         XCTAssertTrue(fetch.contains("14"), fetch)
@@ -170,12 +220,32 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(sampleLimit: 0, selectionCap: 2)
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12 13 14\r\n")
-        try feed(channel, "S0 OK SEARCH completed\r\n")
+        try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [
+                (sequence: 1, uid: 11),
+                (sequence: 2, uid: 12),
+                (sequence: 3, uid: 13),
+                (sequence: 4, uid: 14)
+            ]
+        )
 
         let outcome = try future.wait()
         XCTAssertEqual(outcome.matchCount, 2, "must not select beyond the cap")
         XCTAssertTrue(outcome.isPartial, "the user must be told this is a lower bound")
+    }
+
+    func testUIDResolutionIgnoresFetchesOutsideTheActiveSearchWindow() throws {
+        let (channel, future) = try makeChannel(sampleLimit: 0)
+        try advanceThroughSelect(channel, exists: 5)
+
+        try feedSearch(channel, windowIndex: 0, sequenceNumbers: [1])
+        try feed(channel, "* 2 FETCH (UID 99)\r\n")
+        try feedUIDResolution(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
+
+        let outcome = try future.wait()
+        XCTAssertEqual(outcome.matchCount, 1)
     }
 
     // MARK: - Mark read
@@ -184,8 +254,11 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .markRead)
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12\r\n")
-        let store = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let store = try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12)]
+        )
 
         XCTAssertTrue(store.contains("UID STORE"), store)
         XCTAssertTrue(store.contains("\\Seen"), store)
@@ -202,8 +275,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .markRead)
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH\r\n")
-        let after = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let after = try feedSearch(channel, windowIndex: 0, sequenceNumbers: [])
 
         XCTAssertFalse(after.contains("UID STORE"), after)
         let outcome = try future.wait()
@@ -216,8 +288,11 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: "Trash")
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12\r\n")
-        let move = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let move = try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12)]
+        )
 
         XCTAssertTrue(move.contains("UID MOVE"), move)
         XCTAssertTrue(move.contains("Trash"), move)
@@ -230,8 +305,11 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .archive, destination: "[Gmail]/All Mail")
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11\r\n")
-        let move = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let move = try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 1, uid: 11)]
+        )
 
         XCTAssertTrue(move.contains("UID MOVE"), move)
         XCTAssertTrue(move.contains("All Mail"), move)
@@ -247,13 +325,23 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, _) = try makeChannel(action: .moveToTrash, destination: "Trash")
         try advanceThroughSelect(channel, exists: 1200)
 
-        try feed(channel, "* SEARCH 900\r\n")
-        let afterFirstWindow = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let afterFirstWindow = try feedSearch(channel, windowIndex: 0, sequenceNumbers: [900])
         XCTAssertFalse(
             afterFirstWindow.contains("MOVE"),
             "moved mail before finishing the scan — later windows would be misnumbered"
         )
-        XCTAssertTrue(afterFirstWindow.contains("UID SEARCH"), afterFirstWindow)
+        XCTAssertTrue(afterFirstWindow.contains("FETCH"), afterFirstWindow)
+
+        let afterFirstResolve = try feedUIDResolution(
+            channel,
+            windowIndex: 0,
+            mappings: [(sequence: 900, uid: 1900)]
+        )
+        XCTAssertFalse(
+            afterFirstResolve.contains("MOVE"),
+            "moved mail before finishing the scan — later windows would be misnumbered"
+        )
+        XCTAssertTrue(afterFirstResolve.contains("SEARCH"), afterFirstResolve)
     }
 
     // MARK: - Progress
@@ -266,8 +354,15 @@ final class IMAPBulkCleanupTests: XCTestCase {
         )
         try advanceThroughSelect(channel, exists: 5)
 
-        try feed(channel, "* SEARCH 11 12 13\r\n")
-        try feed(channel, "S0 OK SEARCH completed\r\n")
+        try resolveWindow(
+            channel,
+            windowIndex: 0,
+            mappings: [
+                (sequence: 1, uid: 11),
+                (sequence: 2, uid: 12),
+                (sequence: 3, uid: 13)
+            ]
+        )
         try feed(channel, "B0 OK STORE completed\r\n")
 
         XCTAssertEqual(try future.wait().affectedCount, 3)
@@ -292,8 +387,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
     func testRejectedMoveExplainsMissingServerSupport() throws {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: "Trash")
         try advanceThroughSelect(channel, exists: 5)
-        try feed(channel, "* SEARCH 11\r\n")
-        try feed(channel, "S0 OK SEARCH completed\r\n")
+        try resolveWindow(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
         try feed(channel, "B0 BAD Unknown command\r\n")
 
         XCTAssertThrowsError(try future.wait()) { error in
@@ -311,8 +405,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
     func testMoveWithoutDestinationFailsInsteadOfMarkingRead() throws {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: nil)
         try advanceThroughSelect(channel, exists: 5)
-        try feed(channel, "* SEARCH 11\r\n")
-        let after = try feed(channel, "S0 OK SEARCH completed\r\n")
+        let after = try resolveWindow(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
 
         XCTAssertFalse(after.contains("STORE"), after)
         XCTAssertThrowsError(try future.wait()) { error in

@@ -51,6 +51,11 @@ struct MailboxBrowserState: Equatable {
     /// Query that produced `results`; used so pagination and row actions remain
     /// attached to those rows even if the editable controls change afterward.
     var resultQuery: MailboxBrowserQuery?
+    /// Mailbox size captured with the first unfiltered sequence page. Later
+    /// pages use this snapshot so new/deleted messages do not shift the range.
+    var sequenceSnapshotMessageCount: Int?
+    /// Next sequence-number page offset within `sequenceSnapshotMessageCount`.
+    var sequencePageOffset = 0
 
     /// The IMAP search criteria described by the current inputs.
     var criteria: MailSearchCriteria {
@@ -90,6 +95,8 @@ extension AppState {
         browser.error = nil
         browser.results = []
         browser.resultQuery = nil
+        browser.sequenceSnapshotMessageCount = nil
+        browser.sequencePageOffset = 0
         browser.hasMore = false
         browser.totalMatches = 0
         browser.isLoadingMore = false
@@ -114,11 +121,17 @@ extension AppState {
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.results = result.messages
             // The unfiltered view pages by offset (sequence numbers), so its
-            // query needs no UID ceiling; filtered search pins a UID high-water
-            // mark so later pages stay stable as new mail arrives.
-            browser.resultQuery = query.criteria.isEmpty
-                ? query
-                : query.capped(at: result.messages.map(\.id).max())
+            // query needs no UID ceiling. Instead, snapshot the mailbox size so
+            // later bounded FETCH ranges stay stable if messages arrive/delete.
+            if query.criteria.isEmpty {
+                browser.resultQuery = query
+                browser.sequenceSnapshotMessageCount = result.totalMatches
+                browser.sequencePageOffset = result.offset + Self.mailboxBrowserPageSize
+            } else {
+                // Filtered search pins a UID high-water mark so later pages stay
+                // stable as new matching mail arrives.
+                browser.resultQuery = query.capped(at: result.messages.map(\.id).max())
+            }
             browser.hasMore = result.hasMore
             browser.totalMatches = result.totalMatches
         } catch {
@@ -137,9 +150,11 @@ extension AppState {
         // filtered search pages by lowering the UID ceiling.
         let pageQuery: MailboxBrowserQuery
         let offset: Int
+        let snapshotMessageCount: Int?
         if query.criteria.isEmpty {
             pageQuery = query
-            offset = browser.results.count
+            offset = browser.sequencePageOffset
+            snapshotMessageCount = browser.sequenceSnapshotMessageCount
         } else {
             guard let next = query.nextPage(after: browser.results.last?.id) else {
                 browser.hasMore = false
@@ -147,6 +162,7 @@ extension AppState {
             }
             pageQuery = next
             offset = 0
+            snapshotMessageCount = nil
         }
 
         let requestGeneration = browserGeneration
@@ -164,14 +180,24 @@ extension AppState {
         }
 
         do {
-            let result = try await fetchBrowserPage(pageQuery, credentials: credentials, offset: offset)
+            let result = try await fetchBrowserPage(
+                pageQuery,
+                credentials: credentials,
+                offset: offset,
+                snapshotMessageCount: snapshotMessageCount
+            )
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = nil
-            browser.results.append(contentsOf: result.messages)
-            browser.hasMore = result.hasMore
-            browser.totalMatches = query.criteria.isEmpty
-                ? result.totalMatches
-                : loadedCount + result.totalMatches
+            if query.criteria.isEmpty {
+                appendUniqueBrowserResults(result.messages)
+                browser.sequencePageOffset = offset + Self.mailboxBrowserPageSize
+                browser.hasMore = result.hasMore
+                browser.totalMatches = browser.sequenceSnapshotMessageCount ?? result.totalMatches
+            } else {
+                browser.results.append(contentsOf: result.messages)
+                browser.hasMore = result.hasMore
+                browser.totalMatches = loadedCount + result.totalMatches
+            }
         } catch {
             guard isCurrentBrowserRequest(requestGeneration, credentials: credentials) else { return }
             browser.error = Self.message(for: error)
@@ -186,14 +212,16 @@ extension AppState {
     private func fetchBrowserPage(
         _ query: MailboxBrowserQuery,
         credentials: MailAccountCredentials,
-        offset: Int
+        offset: Int,
+        snapshotMessageCount: Int? = nil
     ) async throws -> MailSearchResult {
         if query.criteria.isEmpty {
             return try await mailProvider.fetchMessagePage(
                 credentials,
                 mailbox: query.mailbox,
                 offset: offset,
-                limit: Self.mailboxBrowserPageSize
+                limit: Self.mailboxBrowserPageSize,
+                snapshotMessageCount: snapshotMessageCount
             )
         }
         return try await mailProvider.searchMessages(
@@ -222,5 +250,25 @@ extension AppState {
         credentials: MailAccountCredentials
     ) -> Bool {
         browserGeneration == requestGeneration && mailCredentials == credentials
+    }
+
+    private func appendUniqueBrowserResults(_ messages: [MailMessage]) {
+        var seen = Set(browser.results.map(MailboxBrowserMessageIdentity.init))
+        let uniqueMessages = messages.filter { message in
+            seen.insert(MailboxBrowserMessageIdentity(message)).inserted
+        }
+        browser.results.append(contentsOf: uniqueMessages)
+    }
+}
+
+private struct MailboxBrowserMessageIdentity: Hashable {
+    let id: UInt32
+    let uidValidity: UInt32?
+    let messageID: String?
+
+    init(_ message: MailMessage) {
+        id = message.id
+        uidValidity = message.uidValidity
+        messageID = message.messageID
     }
 }

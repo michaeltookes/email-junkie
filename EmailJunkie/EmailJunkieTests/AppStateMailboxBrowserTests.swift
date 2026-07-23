@@ -60,7 +60,10 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         // The unfiltered view pages by offset (bounded sequence fetch, item 45),
         // so its query carries no UID ceiling.
         XCTAssertEqual(appState.browser.resultQuery?.criteria, MailSearchCriteria())
+        XCTAssertEqual(appState.browser.sequenceSnapshotMessageCount, 30)
+        XCTAssertEqual(appState.browser.sequencePageOffset, AppState.mailboxBrowserPageSize)
         XCTAssertEqual(provider.lastOffset, 0)
+        XCTAssertNil(provider.lastSnapshotMessageCount)
     }
 
     // MARK: - Pagination
@@ -76,9 +79,54 @@ final class AppStateMailboxBrowserTests: XCTestCase {
         XCTAssertFalse(appState.browser.hasMore)
         // Unfiltered pagination advances by offset, not a UID ceiling.
         XCTAssertEqual(provider.lastOffset, 25)
+        XCTAssertEqual(provider.lastSnapshotMessageCount, 30)
         XCTAssertNil(provider.lastCriteria?.maximumUID)
         XCTAssertEqual(provider.searchCallCount, 2)
+        XCTAssertEqual(appState.browser.sequencePageOffset, 50)
         // No duplicates: ids are unique and contiguous.
+        XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
+    }
+
+    func testUnfilteredLoadMoreUsesSequenceSnapshotWhenNewMessagesArrive() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+
+        await appState.runMailboxSearch()
+        provider.allMessages.insert(
+            MailMessage(
+                id: 130,
+                uidValidity: 1,
+                from: MailAddress(name: "New", email: "new@x.com"),
+                subject: "New mail",
+                date: "",
+                messageID: "<new@x.com>"
+            ),
+            at: 0
+        )
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertEqual(provider.lastOffset, 25)
+        XCTAssertEqual(provider.lastSnapshotMessageCount, 30)
+        XCTAssertEqual(appState.browser.totalMatches, 30)
+        XCTAssertEqual(appState.browser.results.count, 30)
+        XCTAssertFalse(appState.browser.results.contains { $0.id == 130 })
+        XCTAssertEqual(appState.browser.results.suffix(5).map(\.id), [104, 103, 102, 101, 100])
+        XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
+    }
+
+    func testUnfilteredLoadMoreUsesSequenceSnapshotWhenLoadedMessageIsDeleted() async {
+        let provider = PagingSearchMailProvider(allMessages: messages(30))
+        let appState = makeAppState(provider: provider)
+
+        await appState.runMailboxSearch()
+        provider.allMessages.removeAll { $0.id == 120 }
+        await appState.loadMoreMailboxResults()
+
+        XCTAssertEqual(provider.lastOffset, 25)
+        XCTAssertEqual(provider.lastSnapshotMessageCount, 30)
+        XCTAssertEqual(appState.browser.totalMatches, 30)
+        XCTAssertEqual(appState.browser.results.count, 30)
+        XCTAssertEqual(appState.browser.results.suffix(5).map(\.id), [104, 103, 102, 101, 100])
         XCTAssertEqual(Set(appState.browser.results.map(\.id)).count, 30)
     }
 

@@ -12,6 +12,7 @@ final class PagingSearchMailProvider: MailProvider, @unchecked Sendable {
     private(set) var lastMailbox: Mailbox?
     private(set) var lastOffset: Int?
     private(set) var lastLimit: Int?
+    private(set) var lastSnapshotMessageCount: Int?
 
     init(allMessages: [MailMessage]) {
         self.allMessages = allMessages
@@ -70,6 +71,49 @@ final class PagingSearchMailProvider: MailProvider, @unchecked Sendable {
             totalMatches: total,
             offset: offset,
             hasMore: end < total
+        )
+    }
+
+    func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
+    ) async throws -> MailSearchResult {
+        searchCallCount += 1
+        lastCriteria = MailSearchCriteria()
+        lastMailbox = mailbox
+        lastOffset = offset
+        lastLimit = limit
+        lastSnapshotMessageCount = snapshotMessageCount
+        if let searchError { throw searchError }
+
+        let currentTotal = allMessages.count
+        let pageTotal = snapshotMessageCount ?? currentTotal
+        guard pageTotal > 0, limit > 0, offset >= 0, offset < pageTotal else {
+            return MailSearchResult(messages: [], totalMatches: pageTotal, offset: offset, hasMore: false)
+        }
+
+        let upperSequence = pageTotal - offset
+        let lowerSequence = max(1, upperSequence - limit + 1)
+        let clampedUpperSequence = min(upperSequence, currentTotal)
+        guard lowerSequence <= clampedUpperSequence else {
+            return MailSearchResult(
+                messages: [],
+                totalMatches: pageTotal,
+                offset: offset,
+                hasMore: offset + limit < pageTotal
+            )
+        }
+
+        let startIndex = currentTotal - clampedUpperSequence
+        let endIndex = currentTotal - lowerSequence + 1
+        return MailSearchResult(
+            messages: Array(allMessages[startIndex..<endIndex]),
+            totalMatches: pageTotal,
+            offset: offset,
+            hasMore: offset + limit < pageTotal
         )
     }
 }

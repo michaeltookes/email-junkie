@@ -43,6 +43,22 @@ extension IMAPMailProvider {
         offset: Int,
         limit: Int
     ) async throws -> MailSearchResult {
+        try await fetchMessagePage(
+            credentials,
+            mailbox: mailbox,
+            offset: offset,
+            limit: limit,
+            snapshotMessageCount: nil
+        )
+    }
+
+    public func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
+    ) async throws -> MailSearchResult {
         guard credentials.isComplete else { throw MailError.incompleteCredentials }
         guard limit > 0, offset >= 0 else { return .empty(offset: max(0, offset)) }
 
@@ -65,6 +81,7 @@ extension IMAPMailProvider {
                         mailboxName: mailboxName,
                         offset: offset,
                         limit: limit,
+                        snapshotMessageCount: snapshotMessageCount,
                         promise: promise
                     )
                     return channel.pipeline.addHandlers([ssl, IMAPClientHandler(), handler])
@@ -145,6 +162,7 @@ final class IMAPMessagePageHandler: ChannelInboundHandler {
     private let mailboxName: String
     private let offset: Int
     private let limit: Int
+    private let snapshotMessageCount: Int?
     private let promise: EventLoopPromise<MailSearchResult>
 
     private let loginTag = "A1"
@@ -165,6 +183,7 @@ final class IMAPMessagePageHandler: ChannelInboundHandler {
         mailboxName: String,
         offset: Int,
         limit: Int,
+        snapshotMessageCount: Int?,
         promise: EventLoopPromise<MailSearchResult>
     ) {
         self.email = email
@@ -172,6 +191,7 @@ final class IMAPMessagePageHandler: ChannelInboundHandler {
         self.mailboxName = mailboxName
         self.offset = offset
         self.limit = limit
+        self.snapshotMessageCount = snapshotMessageCount
         self.promise = promise
     }
 
@@ -299,9 +319,22 @@ final class IMAPMessagePageHandler: ChannelInboundHandler {
     /// After SELECT, FETCH the bounded sequence range for this page, or finish
     /// immediately when the mailbox is empty or the page is past the end.
     private func fetchPageOrFinish(context: ChannelHandlerContext) {
-        guard let range = SequencePageRange.forPage(total: messageCount, offset: offset, limit: limit) else {
+        let pageTotal = snapshotMessageCount ?? messageCount
+        guard var range = SequencePageRange.forPage(total: pageTotal, offset: offset, limit: limit) else {
             settle(.success(MailSearchResult(
-                messages: [], totalMatches: messageCount, offset: offset, hasMore: false
+                messages: [], totalMatches: pageTotal, offset: offset, hasMore: false
+            )))
+            send(.logout, tag: logoutTag, context: context)
+            context.close(promise: nil)
+            return
+        }
+        range.upper = min(range.upper, UInt32(messageCount))
+        guard range.lower <= range.upper else {
+            settle(.success(MailSearchResult(
+                messages: [],
+                totalMatches: pageTotal,
+                offset: offset,
+                hasMore: SequencePageRange.hasMore(total: pageTotal, offset: offset, limit: limit)
             )))
             send(.logout, tag: logoutTag, context: context)
             context.close(promise: nil)
@@ -318,9 +351,13 @@ final class IMAPMessagePageHandler: ChannelInboundHandler {
     private func settleSuccess(context: ChannelHandlerContext) {
         settle(.success(MailSearchResult(
             messages: messages.sorted { $0.id > $1.id },
-            totalMatches: messageCount,
+            totalMatches: snapshotMessageCount ?? messageCount,
             offset: offset,
-            hasMore: SequencePageRange.hasMore(total: messageCount, offset: offset, limit: limit)
+            hasMore: SequencePageRange.hasMore(
+                total: snapshotMessageCount ?? messageCount,
+                offset: offset,
+                limit: limit
+            )
         )))
         step = .done
         send(.logout, tag: logoutTag, context: context)

@@ -4,15 +4,16 @@ import Foundation
 /// State for the bulk-cleanup panel (item 42): the chosen action, the preview of
 /// what it would affect, and progress while it runs.
 ///
-/// `previewQuery` is the safety anchor. The user approves a *specific* preview,
-/// so the apply step replays that query rather than reading the live search
-/// controls — otherwise editing a filter after previewing would silently change
-/// what gets deleted.
+/// `previewQuery` and `previewAccount` are the safety anchors. The user approves
+/// a *specific* preview for a *specific* account, so the apply step replays that
+/// context rather than reading only the live search controls.
 struct BulkCleanupState: Equatable {
     var action: MailBulkAction = .markRead
     var preview: MailBulkPreview?
     /// The query `preview` was produced from; apply uses exactly this.
     var previewQuery: MailboxBrowserQuery?
+    /// The non-secret account identity `preview` was produced from.
+    var previewAccount: BulkCleanupAccountIdentity?
     var isPreviewing = false
     var isApplying = false
     var progress: MailBulkProgress?
@@ -21,7 +22,7 @@ struct BulkCleanupState: Equatable {
 
     /// Whether a confirmed apply is currently allowed.
     var canApply: Bool {
-        guard let preview, previewQuery != nil else { return false }
+        guard let preview, previewQuery != nil, previewAccount != nil else { return false }
         return preview.matchCount > 0 && !isPreviewing && !isApplying
     }
 
@@ -29,9 +30,24 @@ struct BulkCleanupState: Equatable {
     mutating func reset() {
         preview = nil
         previewQuery = nil
+        previewAccount = nil
         progress = nil
         error = nil
         completionMessage = nil
+    }
+}
+
+/// Non-secret account identity used to bind a preview approval to the account
+/// that produced it, without retaining app-password material in UI state.
+struct BulkCleanupAccountIdentity: Equatable {
+    var email: String
+    var host: String
+    var port: Int
+
+    init(credentials: MailAccountCredentials) {
+        email = credentials.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        host = credentials.host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        port = credentials.port
     }
 }
 
@@ -67,9 +83,12 @@ extension AppState {
                 sampleLimit: Self.bulkPreviewSampleSize,
                 selectionCap: Self.bulkSelectionCap
             )
+            guard isCurrentBulkCleanupRequest(credentials: credentials) else { return }
             bulk.preview = preview
             bulk.previewQuery = query
+            bulk.previewAccount = BulkCleanupAccountIdentity(credentials: credentials)
         } catch {
+            guard isCurrentBulkCleanupRequest(credentials: credentials) else { return }
             bulk.error = Self.message(for: error)
         }
     }
@@ -80,8 +99,21 @@ extension AppState {
     /// approved a specific set of messages, so a changed filter must be
     /// re-previewed rather than silently acted on.
     func applyBulkCleanup() async {
-        guard let previewQuery = bulk.previewQuery, let preview = bulk.preview else {
+        guard let previewQuery = bulk.previewQuery,
+              let preview = bulk.preview,
+              let previewAccount = bulk.previewAccount else {
             bulk.error = "Preview the cleanup before running it."
+            return
+        }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            bulk.reset()
+            bulk.error = "Connect an account first."
+            return
+        }
+        guard previewAccount == BulkCleanupAccountIdentity(credentials: credentials) else {
+            bulk.reset()
+            bulk.error = "The connected account changed since the preview. Preview again before running cleanup."
             return
         }
         guard previewQuery == browser.query else {
@@ -91,12 +123,6 @@ extension AppState {
         }
         guard preview.matchCount > 0 else {
             bulk.error = "Nothing matches that filter."
-            return
-        }
-
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            bulk.error = "Connect an account first."
             return
         }
 
@@ -129,10 +155,15 @@ extension AppState {
             // result set is stale — reload it rather than showing phantom rows.
             bulk.preview = nil
             bulk.previewQuery = nil
+            bulk.previewAccount = nil
             await runMailboxSearch()
         } catch {
             bulk.error = Self.message(for: error)
         }
+    }
+
+    func resetBulkCleanupForAccountChange() {
+        bulk.reset()
     }
 
     /// Human-readable summary of a completed run.
@@ -160,5 +191,9 @@ extension AppState {
         case .moveToTrash:
             return "Move \(count) \(noun) to Trash? You can recover them from Trash."
         }
+    }
+
+    private func isCurrentBulkCleanupRequest(credentials: MailAccountCredentials) -> Bool {
+        mailCredentials == credentials
     }
 }

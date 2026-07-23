@@ -179,6 +179,58 @@ final class AppStateBulkCleanupTests: XCTestCase {
         XCTAssertEqual(provider.applyCallCount, 0, "must not clean a folder the user never previewed")
     }
 
+    func testChangingTheAccountAfterPreviewBlocksTheRun() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)),
+            applyResult: .success(MailBulkResult(action: .moveToTrash, affectedCount: 9))
+        )
+        let appState = makeAppState(provider: provider)
+
+        await appState.previewBulkCleanup()
+        appState.mailEmail = "other@gmail.com"
+        appState.mailAppPassword = "other-pw"
+        await appState.applyBulkCleanup()
+
+        XCTAssertEqual(provider.applyCallCount, 0, "must not clean an account the user never previewed")
+        XCTAssertNil(appState.bulk.preview)
+        XCTAssertEqual(
+            appState.bulk.error,
+            "The connected account changed since the preview. Preview again before running cleanup."
+        )
+    }
+
+    func testDisconnectingAccountClearsBulkApproval() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false))
+        )
+        let appState = makeAppState(provider: provider)
+
+        await appState.previewBulkCleanup()
+        XCTAssertTrue(appState.bulk.canApply)
+
+        appState.disconnectMail()
+
+        XCTAssertNil(appState.bulk.preview)
+        XCTAssertFalse(appState.bulk.canApply)
+    }
+
+    func testPreviewResultAfterAccountChangeIsIgnored() async {
+        let provider = SuspendedBulkCleanupMailProvider()
+        let appState = makeAppState(provider: provider)
+
+        let previewTask = Task { await appState.previewBulkCleanup() }
+        await fulfillment(of: [provider.didStartPreview], timeout: 1)
+
+        appState.mailEmail = "other@gmail.com"
+        appState.mailAppPassword = "other-pw"
+        provider.completePreview(with: .success(MailBulkPreview(matchCount: 9, sample: [], isPartial: false)))
+        await previewTask.value
+
+        XCTAssertNil(appState.bulk.preview)
+        XCTAssertFalse(appState.bulk.canApply)
+        XCTAssertEqual(provider.applyCallCount, 0)
+    }
+
     func testSuccessfulApplyReportsCountAndClearsPreview() async {
         let provider = BulkCleanupMailProvider(
             previewResult: .success(MailBulkPreview(matchCount: 42, sample: [], isPartial: false)),

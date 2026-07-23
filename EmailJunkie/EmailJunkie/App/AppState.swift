@@ -137,6 +137,12 @@ final class AppState: ObservableObject {
     /// value so `AppState` stays compact; SwiftUI binds into individual fields.
     @Published var browser = MailboxBrowserState()
 
+    // MARK: - Bulk Cleanup (item 42)
+
+    /// Chosen bulk action, preview of what it would affect, and run progress.
+    /// Grouped into one value so `AppState` stays compact.
+    @Published var bulk = BulkCleanupState()
+
     // MARK: - Inbox Watcher
 
     /// Drafts the watcher has produced and enqueued, awaiting approval (item 8).
@@ -190,6 +196,7 @@ final class AppState: ObservableObject {
     var bodyPreviewGeneration = 0
     var draftGeneration = 0
     var browserGeneration = 0
+    var bulkGeneration = 0
 
     // MARK: - Initialization
 

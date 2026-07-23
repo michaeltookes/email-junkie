@@ -323,6 +323,15 @@ public struct MailSearchCriteria: Sendable, Equatable {
     private static func isBlank(_ value: String?) -> Bool {
         (value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
     }
+
+    /// Narrows a filter to messages that can still be changed by `markRead`.
+    /// Returns `nil` when the caller explicitly asked for already-read mail.
+    public func markReadCandidateCriteria() -> MailSearchCriteria? {
+        guard readState != .readOnly else { return nil }
+        var criteria = self
+        criteria.readState = .unreadOnly
+        return criteria
+    }
 }
 
 /// One page of mailbox-search results.

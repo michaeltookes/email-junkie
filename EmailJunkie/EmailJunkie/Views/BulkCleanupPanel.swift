@@ -143,7 +143,9 @@ struct BulkCleanupPanel: View {
     private func summaryText(_ preview: MailBulkPreview) -> String {
         let noun = preview.matchCount == 1 ? "message" : "messages"
         let count = preview.isPartial ? "At least \(preview.matchCount)" : "\(preview.matchCount)"
-        return "\(count) \(noun) match — \(appState.bulk.action.verb.lowercased()) will apply to all of them."
+        let action = appState.bulk.previewAction ?? appState.bulk.action
+        let qualifier = action == .markRead ? "unread " : ""
+        return "\(count) \(qualifier)\(noun) match — \(action.verb.lowercased()) will apply to all of them."
     }
 
     private func displaySubject(_ message: MailMessage) -> String {

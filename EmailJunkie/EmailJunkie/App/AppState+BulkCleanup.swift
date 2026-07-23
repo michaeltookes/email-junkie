@@ -12,6 +12,8 @@ struct BulkCleanupState: Equatable {
     var preview: MailBulkPreview?
     /// The query `preview` was produced from; apply must still match it.
     var previewQuery: MailboxBrowserQuery?
+    /// The action `preview` was produced for; action-specific eligibility can differ.
+    var previewAction: MailBulkAction?
     /// The non-secret account identity `preview` was produced from.
     var previewAccount: BulkCleanupAccountIdentity?
     var isPreviewing = false
@@ -22,7 +24,7 @@ struct BulkCleanupState: Equatable {
 
     /// Whether a confirmed apply is currently allowed.
     var canApply: Bool {
-        guard let preview, previewQuery != nil, previewAccount != nil else { return false }
+        guard let preview, previewQuery != nil, previewAction == action, previewAccount != nil else { return false }
         return preview.matchCount > 0 && !isPreviewing && !isApplying
     }
 
@@ -30,6 +32,7 @@ struct BulkCleanupState: Equatable {
     mutating func reset() {
         preview = nil
         previewQuery = nil
+        previewAction = nil
         previewAccount = nil
         progress = nil
         error = nil
@@ -53,6 +56,7 @@ struct BulkCleanupAccountIdentity: Equatable {
 
 private struct BulkCleanupApplyContext {
     var previewQuery: MailboxBrowserQuery
+    var criteria: MailSearchCriteria
     var preview: MailBulkPreview
     var previewAccount: BulkCleanupAccountIdentity
     var credentials: MailAccountCredentials
@@ -72,11 +76,16 @@ extension AppState {
     func previewBulkCleanup() async {
         let requestGeneration = nextBulkGeneration()
         let query = browser.query
+        let action = bulk.action
         bulk.reset()
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
             bulk.error = "Connect an account first."
+            return
+        }
+        guard let criteria = Self.bulkCleanupCriteria(for: query.criteria, action: action) else {
+            bulk.error = "Mark read only applies to unread messages."
             return
         }
 
@@ -91,13 +100,14 @@ extension AppState {
             let preview = try await mailProvider.previewBulkCleanup(
                 credentials,
                 mailbox: query.mailbox,
-                criteria: query.criteria,
+                criteria: criteria,
                 sampleLimit: Self.bulkPreviewSampleSize,
                 selectionCap: Self.bulkSelectionCap
             )
             guard isCurrentBulkCleanupRequest(requestGeneration, credentials: credentials) else { return }
             bulk.preview = preview
             bulk.previewQuery = query
+            bulk.previewAction = action
             bulk.previewAccount = BulkCleanupAccountIdentity(credentials: credentials)
         } catch {
             guard isCurrentBulkCleanupRequest(requestGeneration, credentials: credentials) else { return }
@@ -129,7 +139,7 @@ extension AppState {
             let result = try await mailProvider.applyBulkCleanup(
                 applyContext.credentials,
                 mailbox: applyContext.previewQuery.mailbox,
-                criteria: applyContext.previewQuery.criteria,
+                criteria: applyContext.criteria,
                 action: action,
                 selection: applyContext.preview.selection,
                 selectionCap: Self.bulkSelectionCap,
@@ -195,6 +205,7 @@ extension AppState {
     private func validatedBulkApplyContext() -> BulkCleanupApplyContext? {
         guard let previewQuery = bulk.previewQuery,
               let preview = bulk.preview,
+              let previewAction = bulk.previewAction,
               let previewAccount = bulk.previewAccount else {
             bulk.error = "Preview the cleanup before running it."
             return nil
@@ -215,6 +226,16 @@ extension AppState {
             bulk.error = "The search changed since the preview. Preview again before running cleanup."
             return nil
         }
+        guard previewAction == bulk.action else {
+            bulk.reset()
+            bulk.error = "The cleanup action changed since the preview. Preview again before running cleanup."
+            return nil
+        }
+        guard let criteria = Self.bulkCleanupCriteria(for: previewQuery.criteria, action: previewAction) else {
+            bulk.reset()
+            bulk.error = "Mark read only applies to unread messages."
+            return nil
+        }
         guard preview.matchCount > 0 else {
             bulk.error = "Nothing matches that filter."
             return nil
@@ -226,10 +247,19 @@ extension AppState {
         }
         return BulkCleanupApplyContext(
             previewQuery: previewQuery,
+            criteria: criteria,
             preview: preview,
             previewAccount: previewAccount,
             credentials: credentials
         )
+    }
+
+    private static func bulkCleanupCriteria(
+        for criteria: MailSearchCriteria,
+        action: MailBulkAction
+    ) -> MailSearchCriteria? {
+        guard action == .markRead else { return criteria }
+        return criteria.markReadCandidateCriteria()
     }
 
     private func updateBulkApplyProgress(
@@ -251,6 +281,7 @@ extension AppState {
         // result set is stale — reload it rather than showing phantom rows.
         bulk.preview = nil
         bulk.previewQuery = nil
+        bulk.previewAction = nil
         bulk.previewAccount = nil
         await runMailboxSearch()
     }

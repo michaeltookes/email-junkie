@@ -336,6 +336,28 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertEqual(outcome.affectedCount, 2)
     }
 
+    func testLiveMarkReadSelectionOnlySearchesUnreadMatches() throws {
+        let (channel, _) = try makeChannel(action: .markRead)
+        let search = try advanceThroughSelect(channel, exists: 5)
+
+        XCTAssertTrue(search.contains("SEARCH"), search)
+        XCTAssertTrue(search.contains("UNSEEN"), search)
+        XCTAssertFalse(search.contains(" SEEN"), search)
+    }
+
+    func testLiveMarkReadReadOnlyFilterAppliesNothing() throws {
+        let (channel, future) = try makeChannel(
+            criteria: MailSearchCriteria(readState: .readOnly),
+            action: .markRead
+        )
+        let out = try advanceThroughSelect(channel, exists: 5)
+
+        XCTAssertFalse(out.contains("SEARCH"), out)
+        XCTAssertFalse(out.contains("STORE"), out)
+        let outcome = try future.wait()
+        XCTAssertEqual(outcome.affectedCount, 0)
+    }
+
     func testApplyWithPreviewSelectionRevalidatesUIDsAndSkipsLiveSearch() throws {
         let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21])
         let (channel, future) = try makeChannel(action: .markRead, selection: selection)

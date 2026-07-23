@@ -101,6 +101,33 @@ final class AppStateBulkCleanupTests: XCTestCase {
         XCTAssertEqual(provider.lastSelectionCap, AppState.bulkSelectionCap)
     }
 
+    func testMarkReadPreviewNarrowsAllFilterToUnreadMatches() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 5))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.bulk.action = .markRead
+        appState.browser.readState = .any
+
+        await appState.previewBulkCleanup()
+
+        XCTAssertEqual(provider.lastPreviewCriteria?.readState, .unreadOnly)
+    }
+
+    func testMarkReadPreviewRejectsReadOnlyFilter() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 5))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.bulk.action = .markRead
+        appState.browser.readState = .readOnly
+
+        await appState.previewBulkCleanup()
+
+        XCTAssertEqual(provider.previewCallCount, 0)
+        XCTAssertEqual(appState.bulk.error, "Mark read only applies to unread messages.")
+    }
+
     func testPreviewWithoutAccountReportsClearError() async {
         let provider = BulkCleanupMailProvider()
         let appState = makeAppState(provider: provider, connected: false)
@@ -159,6 +186,41 @@ final class AppStateBulkCleanupTests: XCTestCase {
         XCTAssertEqual(provider.lastAppliedCriteria?.from, "spam@junk.com")
         XCTAssertEqual(provider.lastAppliedAction, .moveToTrash)
         XCTAssertEqual(provider.lastAppliedSelection, selection(matchCount: 9))
+    }
+
+    func testMarkReadApplyUsesUnreadPreviewCriteria() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 9)),
+            applyResult: .success(MailBulkResult(action: .markRead, affectedCount: 9))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.bulk.action = .markRead
+        appState.browser.readState = .any
+
+        await appState.previewBulkCleanup()
+        await appState.applyBulkCleanup()
+
+        XCTAssertEqual(provider.lastAppliedCriteria?.readState, .unreadOnly)
+    }
+
+    func testChangingCleanupActionAfterPreviewBlocksTheRun() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 9)),
+            applyResult: .success(MailBulkResult(action: .archive, affectedCount: 9))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.bulk.action = .markRead
+
+        await appState.previewBulkCleanup()
+        appState.bulk.action = .archive
+        await appState.applyBulkCleanup()
+
+        XCTAssertEqual(provider.applyCallCount, 0)
+        XCTAssertNil(appState.bulk.preview)
+        XCTAssertEqual(
+            appState.bulk.error,
+            "The cleanup action changed since the preview. Preview again before running cleanup."
+        )
     }
 
     /// The core safety property: approving a preview approves *that* set of

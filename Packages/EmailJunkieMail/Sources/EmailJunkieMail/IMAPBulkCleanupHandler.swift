@@ -42,6 +42,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     private var selectionCap: Int { request.selectionCap }
     private var onProgress: (@Sendable (MailBulkProgress) -> Void)? { request.onProgress }
     private var hasUnscannedSelectionWindows: Bool { windowIndex < windows.count }
+    private var liveSelectionCriteria: MailSearchCriteria? {
+        guard action == .markRead else { return criteria }
+        return criteria.markReadCandidateCriteria()
+    }
 
     private let loginTag = "A1"
     private let selectTag = "A2"
@@ -203,6 +207,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     // MARK: - Selection
 
     private func beginSelection(context: ChannelHandlerContext) {
+        guard liveSelectionCriteria != nil else {
+            finishSelection(context: context)
+            return
+        }
         windows = SequenceWindow.windows(total: messageCount)
         windowIndex = 0
         step = .search
@@ -263,7 +271,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         )
         let key: SearchKey = .and([
             .sequenceNumbers(.range(range)),
-            IMAPSearchHandler.searchKey(for: criteria)
+            IMAPSearchHandler.searchKey(for: liveSelectionCriteria ?? criteria)
         ])
         pendingSequenceNumbers.removeAll()
         step = .search

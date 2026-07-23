@@ -136,6 +136,27 @@ final class MailBulkCleanupTests: XCTestCase {
         XCTAssertEqual(MailBulkProgress(processed: 25, total: 100).fraction, 0.25, accuracy: 0.0001)
     }
 
+    // MARK: - Mark-read candidates
+
+    func testMarkReadCandidatesNarrowAnyFilterToUnread() {
+        let narrowed = MailSearchCriteria(from: "alerts@example.com")
+            .markReadCandidateCriteria()
+
+        XCTAssertEqual(narrowed?.from, "alerts@example.com")
+        XCTAssertEqual(narrowed?.readState, .unreadOnly)
+    }
+
+    func testMarkReadCandidatesKeepUnreadFilter() {
+        let narrowed = MailSearchCriteria(readState: .unreadOnly)
+            .markReadCandidateCriteria()
+
+        XCTAssertEqual(narrowed?.readState, .unreadOnly)
+    }
+
+    func testMarkReadCandidatesRejectReadOnlyFilter() {
+        XCTAssertNil(MailSearchCriteria(readState: .readOnly).markReadCandidateCriteria())
+    }
+
     /// `(UInt32, UInt32)` tuples are not `Equatable`, so wrap them for assertions.
     private struct Tuple: Equatable {
         var lower: UInt32

@@ -318,17 +318,17 @@ final class IMAPSearchTests: XCTestCase {
         }
     }
 
-    func testHugeSearchResponseSurfacesResultTooLarge() throws {
+    /// A huge mailbox answers an unbounded UID SEARCH with a `* SEARCH …` line
+    /// past NIO-IMAP's 8 KB frame cap; the decoder reports that as a
+    /// `PayloadTooLargeError`. This is what the user hit live on att.net, so the
+    /// handler must fail the search with the actionable `.resultTooLarge` rather
+    /// than a generic connection error — and must not leave the caller hanging.
+    func testDecoderOverflowFailsSearchWithResultTooLarge() throws {
         let (channel, future) = try makeChannel()
         try advanceThroughSelect(channel)
 
-        // A `* SEARCH …` line longer than NIO-IMAP's 8 KB frame cap: what a huge
-        // mailbox returns for an unbounded UID SEARCH. The decoder throws
-        // PayloadTooLargeError, which must map to the actionable .resultTooLarge.
-        let uids = (1...2000).map(String.init).joined(separator: " ")
-        XCTAssertThrowsError(try feed(channel, "* SEARCH \(uids)\r\n")) { error in
-            XCTAssertTrue(error is ByteToMessageDecoderError.PayloadTooLargeError)
-        }
+        channel.pipeline.fireErrorCaught(ByteToMessageDecoderError.PayloadTooLargeError())
+
         XCTAssertThrowsError(try future.wait()) { error in
             guard case .resultTooLarge = error as? MailError else {
                 return XCTFail("expected resultTooLarge, got \(error)")

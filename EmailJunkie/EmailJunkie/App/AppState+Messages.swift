@@ -16,6 +16,9 @@ extension AppState {
             return "Couldn't reach the mail server. (\(detail))"
         case MailError.commandFailed(let detail):
             return "The mail server rejected a request. (\(detail))"
+        case MailError.resultTooLarge:
+            return "Too many messages matched to list at once. Narrow your search "
+                + "(a specific sender, keyword, or date) and try again."
         case KeychainError.unexpectedStatus(let status):
             return "Keychain returned status \(status)."
         case KeychainError.dataEncodingFailed:

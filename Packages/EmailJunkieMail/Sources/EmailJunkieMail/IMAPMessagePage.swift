@@ -4,23 +4,65 @@ import NIOIMAP
 import NIOPosix
 import NIOSSL
 
+/// Pure paging math for the sequence-number-based "recent messages" view.
+///
+/// IMAP sequence numbers are contiguous `1...EXISTS` in arrival order, so the
+/// newest messages have the highest numbers. Paging newest-first means fetching
+/// a bounded sequence range per page — never asking the server for every UID at
+/// once (which overflows NIO-IMAP's 8 KB frame cap on large mailboxes).
+enum SequencePageRange {
+    /// The 1-based sequence range `[lower, upper]` to FETCH for the page at
+    /// `offset` (0 = newest page) of `total` messages, each page up to `limit`.
+    /// Returns `nil` when the page is empty (no messages, or `offset` past the
+    /// end).
+    static func forPage(total: Int, offset: Int, limit: Int) -> (lower: UInt32, upper: UInt32)? {
+        guard total > 0, limit > 0, offset >= 0, offset < total else { return nil }
+        let upper = total - offset
+        let lower = max(1, upper - limit + 1)
+        return (UInt32(lower), UInt32(upper))
+    }
+
+    /// Whether more pages remain after the page at `offset`.
+    static func hasMore(total: Int, offset: Int, limit: Int) -> Bool {
+        guard total > 0, limit > 0, offset >= 0 else { return false }
+        return offset + limit < total
+    }
+}
+
 extension IMAPMailProvider {
-    /// Searches a mailbox server-side and returns one page of results.
+    /// Fetches one page of a mailbox's messages by sequence number (newest
+    /// first), returning the page plus the mailbox's total message count.
     ///
-    /// Drives `LOGIN → SELECT → UID SEARCH → UID FETCH (envelopes) → LOGOUT`.
-    /// The `SEARCH` runs on the server, so even very large mailboxes only ever
-    /// return matching UIDs; a bounded page of those UIDs is then fetched.
-    public func searchMessages(
+    /// Drives `LOGIN → SELECT → FETCH (bounded sequence range) → LOGOUT`. Unlike
+    /// `searchMessages`, this issues no `UID SEARCH`, so the server never returns
+    /// an unbounded list of UIDs — the "recent mail" view stays usable on
+    /// mailboxes of any size (item 45).
+    public func fetchMessagePage(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        criteria: MailSearchCriteria,
         offset: Int,
         limit: Int
     ) async throws -> MailSearchResult {
-        guard credentials.isComplete else { throw MailError.incompleteCredentials }
-        guard limit > 0 else { return .empty(offset: offset) }
+        try await fetchMessagePage(
+            credentials,
+            mailbox: mailbox,
+            offset: offset,
+            limit: limit,
+            snapshotMessageCount: nil
+        )
+    }
 
-        let attempts = IMAPSearchAttempts()
+    public func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
+    ) async throws -> MailSearchResult {
+        guard credentials.isComplete else { throw MailError.incompleteCredentials }
+        guard limit > 0, offset >= 0 else { return .empty(offset: max(0, offset)) }
+
+        let attempts = IMAPMessagePageAttempts()
         let sslContext = try NIOSSLContext(configuration: TLSConfiguration.makeClientConfiguration())
         let host = credentials.host
         let email = credentials.email
@@ -33,13 +75,13 @@ extension IMAPMailProvider {
                 do {
                     let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
                     let promise = attempts.makePromise(for: channel)
-                    let handler = IMAPSearchHandler(
+                    let handler = IMAPMessagePageHandler(
                         email: email,
                         password: password,
                         mailboxName: mailboxName,
-                        criteria: criteria,
                         offset: offset,
                         limit: limit,
+                        snapshotMessageCount: snapshotMessageCount,
                         promise: promise
                     )
                     return channel.pipeline.addHandlers([ssl, IMAPClientHandler(), handler])
@@ -54,9 +96,9 @@ extension IMAPMailProvider {
         } catch {
             throw MailError.connectionFailed(String(describing: error))
         }
-        guard let searchFuture = attempts.future(for: channel) else {
+        guard let pageFuture = attempts.future(for: channel) else {
             try? await channel.close().get()
-            throw MailError.connectionFailed("The mail connection could not start searching.")
+            throw MailError.connectionFailed("The mail connection could not start fetching.")
         }
 
         let timeoutTask = channel.eventLoop.scheduleTask(in: timeout) {
@@ -65,7 +107,7 @@ extension IMAPMailProvider {
         defer { timeoutTask.cancel() }
 
         do {
-            let result = try await searchFuture.get()
+            let result = try await pageFuture.get()
             try? await channel.close().get()
             return result
         } catch {
@@ -75,9 +117,9 @@ extension IMAPMailProvider {
     }
 }
 
-/// Tracks search futures per channel (mirrors the fetch/verify trackers) so
+/// Tracks message-page futures per channel (mirrors the fetch/search trackers) so
 /// Happy Eyeballs attempts can't settle the winning channel's result.
-final class IMAPSearchAttempts: @unchecked Sendable {
+final class IMAPMessagePageAttempts: @unchecked Sendable {
     private let lock = NSLock()
     private var futures: [ObjectIdentifier: EventLoopFuture<MailSearchResult>] = [:]
 
@@ -96,34 +138,13 @@ final class IMAPSearchAttempts: @unchecked Sendable {
     }
 }
 
-/// Pure paging over the matched UID set — split out so the offset/limit and
-/// "newest first" ordering can be unit-tested without a channel.
-enum MailSearchPaging {
-    /// Returns the requested page of `matchedUIDs` newest first (highest UID
-    /// first), the total match count, and whether more pages remain. A negative
-    /// or out-of-range `offset`, or a non-positive `limit`, yields an empty page.
-    static func page(
-        matchedUIDs: [UInt32],
-        offset: Int,
-        limit: Int
-    ) -> (page: [UInt32], total: Int, hasMore: Bool) {
-        let total = matchedUIDs.count
-        guard limit > 0, offset >= 0, offset < total else {
-            return ([], total, false)
-        }
-        let sortedDesc = matchedUIDs.sorted(by: >)
-        let end = min(offset + limit, total)
-        return (Array(sortedDesc[offset..<end]), total, end < total)
-    }
-}
-
-/// Drives LOGIN → SELECT → UID SEARCH → UID FETCH (envelope) → LOGOUT and
-/// completes `promise` with one page of results, newest first.
-final class IMAPSearchHandler: ChannelInboundHandler {
+/// Drives LOGIN → SELECT → FETCH (one bounded sequence range) → LOGOUT and
+/// completes `promise` with the page plus the total message count (`EXISTS`).
+final class IMAPMessagePageHandler: ChannelInboundHandler {
     typealias InboundIn = Response
 
     private enum Step {
-        case greeting, login, select, search, fetch, done
+        case greeting, login, select, fetch, done
     }
 
     private struct PartialMessage {
@@ -139,24 +160,20 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     private let email: String
     private let password: String
     private let mailboxName: String
-    private let criteria: MailSearchCriteria
     private let offset: Int
     private let limit: Int
-    private let calendar: Calendar
+    private let snapshotMessageCount: Int?
     private let promise: EventLoopPromise<MailSearchResult>
 
     private let loginTag = "A1"
     private let selectTag = "A2"
-    private let searchTag = "A3"
-    private let fetchTag = "A4"
-    private let logoutTag = "A5"
+    private let fetchTag = "A3"
+    private let logoutTag = "A4"
 
     private var step: Step = .greeting
     private var settled = false
+    private var messageCount = 0
     private var selectedUIDValidity: UInt32?
-    private var matchedUIDs: [UInt32] = []
-    private var totalMatches = 0
-    private var hasMore = false
     private var messages: [MailMessage] = []
     private var current: PartialMessage?
 
@@ -164,19 +181,17 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         email: String,
         password: String,
         mailboxName: String,
-        criteria: MailSearchCriteria,
         offset: Int,
         limit: Int,
-        calendar: Calendar = .current,
+        snapshotMessageCount: Int?,
         promise: EventLoopPromise<MailSearchResult>
     ) {
         self.email = email
         self.password = password
         self.mailboxName = mailboxName
-        self.criteria = criteria
         self.offset = offset
         self.limit = limit
-        self.calendar = calendar
+        self.snapshotMessageCount = snapshotMessageCount
         self.promise = promise
     }
 
@@ -197,22 +212,12 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        settle(.failure(Self.mapped(error)))
+        settle(.failure(MailError.connectionFailed(String(describing: error))))
         context.close(promise: nil)
     }
 
-    /// A too-many-results overflow (the `* SEARCH` line exceeded NIO-IMAP's frame
-    /// cap) surfaces as a decoder `PayloadTooLargeError`; map it to a clear,
-    /// actionable error rather than a generic connection failure (item 45).
-    static func mapped(_ error: Error) -> MailError {
-        if error is ByteToMessageDecoderError.PayloadTooLargeError {
-            return .resultTooLarge
-        }
-        return .connectionFailed(String(describing: error))
-    }
-
     func channelInactive(context: ChannelHandlerContext) {
-        settle(.failure(MailError.connectionFailed("The connection closed before the search completed.")))
+        settle(.failure(MailError.connectionFailed("The connection closed before the fetch completed.")))
         context.fireChannelInactive()
     }
 
@@ -225,9 +230,9 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         case .greeting:
             send(.login(username: email, password: password), tag: loginTag, context: context)
             step = .login
-        case .search:
-            if case .mailboxData(.search(let ids, _)) = payload {
-                matchedUIDs.append(contentsOf: ids.map { $0.rawValue })
+        case .select:
+            if case .mailboxData(.exists(let count)) = payload {
+                messageCount = count
             }
         default:
             break
@@ -243,10 +248,6 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         case selectTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
             captureUIDValidity(from: tagged.state)
-            send(.uidSearch(key: Self.searchKey(for: criteria, calendar: calendar)), tag: searchTag, context: context)
-            step = .search
-        case searchTag:
-            guard isOK(tagged.state) else { return failTagged(tagged.state) }
             fetchPageOrFinish(context: context)
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
@@ -315,45 +316,48 @@ final class IMAPSearchHandler: ChannelInboundHandler {
 
     // MARK: - Commands
 
-    /// After SEARCH completes, page the matched UIDs and either FETCH that page
-    /// or finish immediately (empty match set / offset past the end).
+    /// After SELECT, FETCH the bounded sequence range for this page, or finish
+    /// immediately when the mailbox is empty or the page is past the end.
     private func fetchPageOrFinish(context: ChannelHandlerContext) {
-        let (page, total, more) = MailSearchPaging.page(
-            matchedUIDs: matchedUIDs, offset: offset, limit: limit
+        let pageTotal = snapshotMessageCount ?? messageCount
+        guard var range = SequencePageRange.forPage(total: pageTotal, offset: offset, limit: limit) else {
+            settle(.success(MailSearchResult(
+                messages: [], totalMatches: pageTotal, offset: offset, hasMore: false
+            )))
+            send(.logout, tag: logoutTag, context: context)
+            context.close(promise: nil)
+            return
+        }
+        range.upper = min(range.upper, UInt32(messageCount))
+        guard range.lower <= range.upper else {
+            settle(.success(MailSearchResult(
+                messages: [],
+                totalMatches: pageTotal,
+                offset: offset,
+                hasMore: SequencePageRange.hasMore(total: pageTotal, offset: offset, limit: limit)
+            )))
+            send(.logout, tag: logoutTag, context: context)
+            context.close(promise: nil)
+            return
+        }
+        let sequenceRange = MessageIdentifierRange<SequenceNumber>(
+            SequenceNumber(rawValue: range.lower)...SequenceNumber(rawValue: range.upper)
         )
-        totalMatches = total
-        hasMore = more
-
-        guard !page.isEmpty else {
-            settle(.success(MailSearchResult(
-                messages: [], totalMatches: total, offset: offset, hasMore: more
-            )))
-            send(.logout, tag: logoutTag, context: context)
-            context.close(promise: nil)
-            return
-        }
-
-        let ranges = page.map { MessageIdentifierRange<UID>(UID(rawValue: $0)) }
-        let set = MessageIdentifierSet<UID>(ranges)
-        guard let nonEmpty = MessageIdentifierSetNonEmpty(set: set) else {
-            settle(.success(MailSearchResult(
-                messages: [], totalMatches: total, offset: offset, hasMore: more
-            )))
-            send(.logout, tag: logoutTag, context: context)
-            context.close(promise: nil)
-            return
-        }
-
-        send(.uidFetch(.set(nonEmpty), [.uid, .envelope], []), tag: fetchTag, context: context)
+        let set = MessageIdentifierSetNonEmpty(range: sequenceRange)
+        send(.fetch(.set(set), [.uid, .envelope], []), tag: fetchTag, context: context)
         step = .fetch
     }
 
     private func settleSuccess(context: ChannelHandlerContext) {
         settle(.success(MailSearchResult(
             messages: messages.sorted { $0.id > $1.id },
-            totalMatches: totalMatches,
+            totalMatches: snapshotMessageCount ?? messageCount,
             offset: offset,
-            hasMore: hasMore
+            hasMore: SequencePageRange.hasMore(
+                total: snapshotMessageCount ?? messageCount,
+                offset: offset,
+                limit: limit
+            )
         )))
         step = .done
         send(.logout, tag: logoutTag, context: context)
@@ -363,78 +367,6 @@ final class IMAPSearchHandler: ChannelInboundHandler {
     private func send(_ command: Command, tag: String, context: ChannelHandlerContext) {
         let part = CommandStreamPart.tagged(TaggedCommand(tag: tag, command: command))
         context.writeAndFlush(NIOAny(IMAPClientHandler.Message.part(part)), promise: nil)
-    }
-
-    // MARK: - Criteria encoding
-
-    /// Translates search criteria into a single IMAP `SearchKey` (fields AND-ed;
-    /// `.all` when nothing is set). Blank text fields are dropped.
-    static func searchKey(for criteria: MailSearchCriteria, calendar: Calendar = .current) -> SearchKey {
-        let keys = textKeys(for: criteria) + dateKeys(for: criteria, calendar: calendar) + stateKeys(for: criteria)
-            + uidKeys(for: criteria)
-        switch keys.count {
-        case 0: return .all
-        case 1: return keys[0]
-        default: return .and(keys)
-        }
-    }
-
-    private static func textKeys(for criteria: MailSearchCriteria) -> [SearchKey] {
-        var keys: [SearchKey] = []
-        if let text = trimmed(criteria.text) { keys.append(.text(ByteBuffer(string: text))) }
-        if let from = trimmed(criteria.from) { keys.append(.from(ByteBuffer(string: from))) }
-        if let subject = trimmed(criteria.subject) { keys.append(.subject(ByteBuffer(string: subject))) }
-        return keys
-    }
-
-    private static func dateKeys(for criteria: MailSearchCriteria, calendar: Calendar) -> [SearchKey] {
-        var keys: [SearchKey] = []
-        if let since = criteria.since, let day = calendarDay(from: since, calendar: calendar) {
-            keys.append(.since(day))
-        }
-        if let before = criteria.before, let day = calendarDay(from: before, calendar: calendar) {
-            keys.append(.before(day))
-        }
-        return keys
-    }
-
-    private static func stateKeys(for criteria: MailSearchCriteria) -> [SearchKey] {
-        var keys: [SearchKey] = []
-        switch criteria.readState {
-        case .any: break
-        case .unreadOnly: keys.append(.unseen)
-        case .readOnly: keys.append(.seen)
-        }
-        if criteria.flaggedOnly { keys.append(.flagged) }
-        return keys
-    }
-
-    private static func uidKeys(for criteria: MailSearchCriteria) -> [SearchKey] {
-        guard let maximumUID = criteria.maximumUID, let upperBound = UID(exactly: maximumUID) else {
-            return []
-        }
-        return [.uid(.range(...upperBound))]
-    }
-
-    static func calendarDay(from date: Date, calendar: Calendar = .current) -> IMAPCalendarDay? {
-        let components = imapDateCalendar(from: calendar).dateComponents([.year, .month, .day], from: date)
-        guard let year = components.year, let month = components.month, let day = components.day else {
-            return nil
-        }
-        return IMAPCalendarDay(year: year, month: month, day: day)
-    }
-
-    private static func imapDateCalendar(from calendar: Calendar) -> Calendar {
-        var imapCalendar = Calendar(identifier: .gregorian)
-        imapCalendar.timeZone = calendar.timeZone
-        return imapCalendar
-    }
-
-    private static func trimmed(_ value: String?) -> String? {
-        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
-            return nil
-        }
-        return trimmed
     }
 
     // MARK: - Helpers

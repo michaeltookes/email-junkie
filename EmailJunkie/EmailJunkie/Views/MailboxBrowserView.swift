@@ -48,7 +48,7 @@ struct MailboxBrowserView: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { runSearch() }
                 .accessibilityLabel("Search keyword")
-            Picker("Folder", selection: $appState.browser.mailbox) {
+            Picker("Folder", selection: mailboxSelection) {
                 Text("Inbox").tag(Mailbox.inbox)
                 Text("Sent").tag(Mailbox.sent)
                 Text("Drafts").tag(Mailbox.drafts)
@@ -62,6 +62,19 @@ struct MailboxBrowserView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(appState.browser.isSearching)
         }
+    }
+
+    private var mailboxSelection: Binding<Mailbox> {
+        Binding(
+            get: { appState.browser.mailbox },
+            set: { mailbox in
+                guard appState.browser.mailbox != mailbox else { return }
+                appState.browser.mailbox = mailbox
+                // User-selected folders reload immediately, like any mail client;
+                // programmatic account resets only update the model.
+                runSearch()
+            }
+        )
     }
 
     private var filterRow: some View {

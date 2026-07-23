@@ -10,6 +10,10 @@ public enum MailError: Error, Equatable, Sendable {
     case authenticationFailed(String)
     /// An IMAP command (e.g. SELECT/FETCH) failed.
     case commandFailed(String)
+    /// The search matched too many messages to return in one response — the
+    /// server's reply exceeded the IMAP frame limit. The caller should narrow
+    /// the filter (or use the bounded bulk-selection path). See item 45.
+    case resultTooLarge
 }
 
 /// A mailbox backend. Exposes a connection check plus recent-message fetch;
@@ -51,6 +55,21 @@ public protocol MailProvider: Sendable {
         criteria: MailSearchCriteria,
         offset: Int,
         limit: Int
+    ) async throws -> MailSearchResult
+
+    /// Fetches one page of a mailbox's messages by sequence number (newest
+    /// first), returning the page plus the mailbox's total message count. When
+    /// `snapshotMessageCount` is set, the page range is calculated against that
+    /// first-page count so later pages do not shift when the live mailbox count
+    /// changes. Issues no `UID SEARCH`, so the unfiltered "recent mail" view
+    /// stays usable on mailboxes of any size (item 45). Throws `MailError` on
+    /// failure.
+    func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
     ) async throws -> MailSearchResult
 
     /// Appends a full RFC 822 message to `mailbox` via IMAP `APPEND`, tagging it
@@ -131,6 +150,43 @@ public extension MailProvider {
         limit: Int
     ) async throws -> MailSearchResult {
         throw MailError.commandFailed("This provider does not support searching mail.")
+    }
+
+    /// Default: fall back to `searchMessages` with empty criteria. `IMAPMailProvider`
+    /// overrides this with the bounded sequence-fetch path; other conformers get
+    /// behavior consistent with their search implementation.
+    func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult {
+        try await fetchMessagePage(
+            credentials,
+            mailbox: mailbox,
+            offset: offset,
+            limit: limit,
+            snapshotMessageCount: nil
+        )
+    }
+
+    /// Default: fall back to `searchMessages` with empty criteria. `IMAPMailProvider`
+    /// overrides this with the bounded sequence-fetch path; other conformers get
+    /// behavior consistent with their search implementation.
+    func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
+    ) async throws -> MailSearchResult {
+        try await searchMessages(
+            credentials,
+            mailbox: mailbox,
+            criteria: MailSearchCriteria(),
+            offset: offset,
+            limit: limit
+        )
     }
 }
 

@@ -98,10 +98,23 @@ final class BulkCleanupMailProvider: MailProvider, @unchecked Sendable {
 
 final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable {
     let didStartPreview = XCTestExpectation(description: "bulk cleanup preview started")
+    let didStartApply = XCTestExpectation(description: "bulk cleanup apply started")
+    private let immediatePreview: MailBulkPreview?
+    private let applyResult: MailBulkResult
     private let lock = NSLock()
     private var previewContinuation: CheckedContinuation<MailBulkPreview, Error>?
+    private var applyContinuation: CheckedContinuation<MailBulkResult, Error>?
+    private var applyProgress: (@Sendable (MailBulkProgress) -> Void)?
     private(set) var previewCallCount = 0
     private(set) var applyCallCount = 0
+
+    init(
+        previewResult: MailBulkPreview? = nil,
+        applyResult: MailBulkResult = MailBulkResult(action: .markRead, affectedCount: 0)
+    ) {
+        immediatePreview = previewResult
+        self.applyResult = applyResult
+    }
 
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
 
@@ -141,6 +154,9 @@ final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable 
         selectionCap: Int
     ) async throws -> MailBulkPreview {
         previewCallCount += 1
+        if let immediatePreview {
+            return immediatePreview
+        }
         return try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             previewContinuation = continuation
@@ -157,6 +173,22 @@ final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable 
         continuation?.resume(with: result)
     }
 
+    func reportApplyProgress(_ progress: MailBulkProgress) {
+        lock.lock()
+        let applyProgress = applyProgress
+        lock.unlock()
+        applyProgress?(progress)
+    }
+
+    func completeApply(with result: Result<MailBulkResult, Error>? = nil) {
+        lock.lock()
+        let continuation = applyContinuation
+        applyContinuation = nil
+        applyProgress = nil
+        lock.unlock()
+        continuation?.resume(with: result ?? .success(applyResult))
+    }
+
     // swiftlint:disable:next function_parameter_count
     func applyBulkCleanup(
         _ credentials: MailAccountCredentials,
@@ -167,6 +199,12 @@ final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable 
         onProgress: (@Sendable (MailBulkProgress) -> Void)?
     ) async throws -> MailBulkResult {
         applyCallCount += 1
-        return MailBulkResult(action: action, affectedCount: 0)
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            applyContinuation = continuation
+            applyProgress = onProgress
+            lock.unlock()
+            didStartApply.fulfill()
+        }
     }
 }

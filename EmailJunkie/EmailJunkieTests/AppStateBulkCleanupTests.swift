@@ -231,6 +231,35 @@ final class AppStateBulkCleanupTests: XCTestCase {
         XCTAssertEqual(provider.applyCallCount, 0)
     }
 
+    func testApplyCallbacksAfterAccountChangeAreIgnored() async {
+        let provider = SuspendedBulkCleanupMailProvider(
+            previewResult: MailBulkPreview(matchCount: 9, sample: [], isPartial: false),
+            applyResult: MailBulkResult(action: .markRead, affectedCount: 9)
+        )
+        let appState = makeAppState(provider: provider)
+
+        await appState.previewBulkCleanup()
+        let applyTask = Task { await appState.applyBulkCleanup() }
+        await fulfillment(of: [provider.didStartApply], timeout: 1)
+
+        appState.mailEmail = "other@gmail.com"
+        appState.mailAppPassword = "other-pw"
+        appState.resetMessagePreviewForAccountChange()
+
+        provider.reportApplyProgress(MailBulkProgress(processed: 4, total: 9))
+        await Task.yield()
+        provider.completeApply()
+        await applyTask.value
+        await Task.yield()
+
+        XCTAssertEqual(provider.applyCallCount, 1)
+        XCTAssertNil(appState.bulk.progress)
+        XCTAssertNil(appState.bulk.completionMessage)
+        XCTAssertNil(appState.bulk.error)
+        XCTAssertFalse(appState.bulk.isApplying)
+        XCTAssertFalse(appState.browser.hasSearched, "stale account A completion must not reload account B")
+    }
+
     func testSuccessfulApplyReportsCountAndClearsPreview() async {
         let provider = BulkCleanupMailProvider(
             previewResult: .success(MailBulkPreview(matchCount: 42, sample: [], isPartial: false)),

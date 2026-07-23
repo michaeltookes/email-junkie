@@ -196,6 +196,7 @@ final class AppState: ObservableObject {
     var bodyPreviewGeneration = 0
     var draftGeneration = 0
     var browserGeneration = 0
+    var bulkGeneration = 0
 
     // MARK: - Initialization
 

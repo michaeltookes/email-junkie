@@ -51,6 +51,13 @@ struct BulkCleanupAccountIdentity: Equatable {
     }
 }
 
+private struct BulkCleanupApplyContext {
+    var previewQuery: MailboxBrowserQuery
+    var preview: MailBulkPreview
+    var previewAccount: BulkCleanupAccountIdentity
+    var credentials: MailAccountCredentials
+}
+
 /// Bulk-cleanup actions on `AppState` (item 42). Kept in a separate file so
 /// `AppState` stays within the file/type length limits.
 extension AppState {
@@ -63,6 +70,7 @@ extension AppState {
 
     /// Scans the mailbox for what the current filter would affect. Read-only.
     func previewBulkCleanup() async {
+        let requestGeneration = nextBulkGeneration()
         let query = browser.query
         bulk.reset()
 
@@ -73,7 +81,11 @@ extension AppState {
         }
 
         bulk.isPreviewing = true
-        defer { bulk.isPreviewing = false }
+        defer {
+            if bulkGeneration == requestGeneration {
+                bulk.isPreviewing = false
+            }
+        }
 
         do {
             let preview = try await mailProvider.previewBulkCleanup(
@@ -83,12 +95,12 @@ extension AppState {
                 sampleLimit: Self.bulkPreviewSampleSize,
                 selectionCap: Self.bulkSelectionCap
             )
-            guard isCurrentBulkCleanupRequest(credentials: credentials) else { return }
+            guard isCurrentBulkCleanupRequest(requestGeneration, credentials: credentials) else { return }
             bulk.preview = preview
             bulk.previewQuery = query
             bulk.previewAccount = BulkCleanupAccountIdentity(credentials: credentials)
         } catch {
-            guard isCurrentBulkCleanupRequest(credentials: credentials) else { return }
+            guard isCurrentBulkCleanupRequest(requestGeneration, credentials: credentials) else { return }
             bulk.error = Self.message(for: error)
         }
     }
@@ -99,71 +111,57 @@ extension AppState {
     /// approved a specific set of messages, so a changed filter must be
     /// re-previewed rather than silently acted on.
     func applyBulkCleanup() async {
-        guard let previewQuery = bulk.previewQuery,
-              let preview = bulk.preview,
-              let previewAccount = bulk.previewAccount else {
-            bulk.error = "Preview the cleanup before running it."
-            return
-        }
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            bulk.reset()
-            bulk.error = "Connect an account first."
-            return
-        }
-        guard previewAccount == BulkCleanupAccountIdentity(credentials: credentials) else {
-            bulk.reset()
-            bulk.error = "The connected account changed since the preview. Preview again before running cleanup."
-            return
-        }
-        guard previewQuery == browser.query else {
-            bulk.reset()
-            bulk.error = "The search changed since the preview. Preview again before running cleanup."
-            return
-        }
-        guard preview.matchCount > 0 else {
-            bulk.error = "Nothing matches that filter."
-            return
-        }
+        guard let applyContext = validatedBulkApplyContext() else { return }
 
+        let requestGeneration = nextBulkGeneration()
         let action = bulk.action
         bulk.error = nil
         bulk.completionMessage = nil
         bulk.isApplying = true
-        bulk.progress = MailBulkProgress(processed: 0, total: preview.matchCount)
-        defer { bulk.isApplying = false }
+        bulk.progress = MailBulkProgress(processed: 0, total: applyContext.preview.matchCount)
+        defer {
+            if bulkGeneration == requestGeneration {
+                bulk.isApplying = false
+            }
+        }
 
         do {
             let result = try await mailProvider.applyBulkCleanup(
-                credentials,
-                mailbox: previewQuery.mailbox,
-                criteria: previewQuery.criteria,
+                applyContext.credentials,
+                mailbox: applyContext.previewQuery.mailbox,
+                criteria: applyContext.previewQuery.criteria,
                 action: action,
                 selectionCap: Self.bulkSelectionCap,
                 // Batches complete on a NIO event loop, so hop back to the main
                 // actor before touching published state.
-                onProgress: { [weak self] progress in
-                    Task { @MainActor in self?.bulk.progress = progress }
+                onProgress: { [weak self, previewAccount = applyContext.previewAccount] progress in
+                    Task { @MainActor in
+                        self?.updateBulkApplyProgress(
+                            progress,
+                            requestGeneration,
+                            account: previewAccount
+                        )
+                    }
                 }
             )
-            bulk.progress = MailBulkProgress(
-                processed: result.affectedCount,
-                total: result.affectedCount
-            )
-            bulk.completionMessage = Self.bulkCompletionMessage(for: result)
-            // The affected messages have moved or changed state, so the visible
-            // result set is stale — reload it rather than showing phantom rows.
-            bulk.preview = nil
-            bulk.previewQuery = nil
-            bulk.previewAccount = nil
-            await runMailboxSearch()
+            guard isCurrentBulkCleanupApply(requestGeneration, account: applyContext.previewAccount) else { return }
+            await finishBulkApply(result)
         } catch {
+            guard isCurrentBulkCleanupApply(requestGeneration, account: applyContext.previewAccount) else { return }
             bulk.error = Self.message(for: error)
         }
     }
 
+    func nextBulkGeneration() -> Int {
+        bulkGeneration += 1
+        return bulkGeneration
+    }
+
     func resetBulkCleanupForAccountChange() {
+        _ = nextBulkGeneration()
         bulk.reset()
+        bulk.isPreviewing = false
+        bulk.isApplying = false
     }
 
     /// Human-readable summary of a completed run.
@@ -193,7 +191,76 @@ extension AppState {
         }
     }
 
-    private func isCurrentBulkCleanupRequest(credentials: MailAccountCredentials) -> Bool {
-        mailCredentials == credentials
+    private func validatedBulkApplyContext() -> BulkCleanupApplyContext? {
+        guard let previewQuery = bulk.previewQuery,
+              let preview = bulk.preview,
+              let previewAccount = bulk.previewAccount else {
+            bulk.error = "Preview the cleanup before running it."
+            return nil
+        }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            bulk.reset()
+            bulk.error = "Connect an account first."
+            return nil
+        }
+        guard previewAccount == BulkCleanupAccountIdentity(credentials: credentials) else {
+            bulk.reset()
+            bulk.error = "The connected account changed since the preview. Preview again before running cleanup."
+            return nil
+        }
+        guard previewQuery == browser.query else {
+            bulk.reset()
+            bulk.error = "The search changed since the preview. Preview again before running cleanup."
+            return nil
+        }
+        guard preview.matchCount > 0 else {
+            bulk.error = "Nothing matches that filter."
+            return nil
+        }
+        return BulkCleanupApplyContext(
+            previewQuery: previewQuery,
+            preview: preview,
+            previewAccount: previewAccount,
+            credentials: credentials
+        )
+    }
+
+    private func updateBulkApplyProgress(
+        _ progress: MailBulkProgress,
+        _ requestGeneration: Int,
+        account: BulkCleanupAccountIdentity
+    ) {
+        guard isCurrentBulkCleanupApply(requestGeneration, account: account) else { return }
+        bulk.progress = progress
+    }
+
+    private func finishBulkApply(_ result: MailBulkResult) async {
+        bulk.progress = MailBulkProgress(
+            processed: result.affectedCount,
+            total: result.affectedCount
+        )
+        bulk.completionMessage = Self.bulkCompletionMessage(for: result)
+        // The affected messages have moved or changed state, so the visible
+        // result set is stale — reload it rather than showing phantom rows.
+        bulk.preview = nil
+        bulk.previewQuery = nil
+        bulk.previewAccount = nil
+        await runMailboxSearch()
+    }
+
+    private func isCurrentBulkCleanupRequest(
+        _ requestGeneration: Int,
+        credentials: MailAccountCredentials
+    ) -> Bool {
+        bulkGeneration == requestGeneration && mailCredentials == credentials
+    }
+
+    private func isCurrentBulkCleanupApply(
+        _ requestGeneration: Int,
+        account: BulkCleanupAccountIdentity
+    ) -> Bool {
+        bulkGeneration == requestGeneration
+            && BulkCleanupAccountIdentity(credentials: mailCredentials) == account
     }
 }

@@ -95,6 +95,18 @@ final class IMAPBulkCleanupTests: XCTestCase {
     }
 
     @discardableResult
+    private func feedUIDValidation(
+        _ channel: EmbeddedChannel,
+        batchIndex: Int = 0,
+        uids: [UInt32]
+    ) throws -> String {
+        let ids = uids.map(String.init).joined(separator: " ")
+        let response = ids.isEmpty ? "* SEARCH\r\n" : "* SEARCH \(ids)\r\n"
+        try feed(channel, response)
+        return try feed(channel, "V\(batchIndex) OK SEARCH completed\r\n")
+    }
+
+    @discardableResult
     private func resolveWindow(
         _ channel: EmbeddedChannel,
         windowIndex: Int,
@@ -289,11 +301,13 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .markRead)
         try advanceThroughSelect(channel, exists: 5)
 
-        let store = try resolveWindow(
+        let validation = try resolveWindow(
             channel,
             windowIndex: 0,
             mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12)]
         )
+        XCTAssertTrue(validation.contains("UID SEARCH"), validation)
+        let store = try feedUIDValidation(channel, uids: [11, 12])
 
         XCTAssertTrue(store.contains("UID STORE"), store)
         XCTAssertTrue(store.contains("\\Seen"), store)
@@ -306,15 +320,33 @@ final class IMAPBulkCleanupTests: XCTestCase {
         XCTAssertEqual(outcome.affectedCount, 2)
     }
 
-    func testApplyWithPreviewSelectionSkipsLiveSearch() throws {
+    func testApplyWithPreviewSelectionRevalidatesUIDsAndSkipsLiveSearch() throws {
         let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21])
         let (channel, future) = try makeChannel(action: .markRead, selection: selection)
         let out = try advanceThroughSelect(channel, exists: 5)
 
-        XCTAssertTrue(out.contains("UID STORE"), out)
-        XCTAssertFalse(out.contains("SEARCH"), out)
+        XCTAssertTrue(out.contains("UID SEARCH"), out)
+        XCTAssertFalse(out.contains("UID STORE"), out)
         XCTAssertTrue(out.contains("22"), out)
         XCTAssertTrue(out.contains("21"), out)
+
+        let store = try feedUIDValidation(channel, uids: [22, 21])
+        XCTAssertTrue(store.contains("UID STORE"), store)
+        try feed(channel, "B0 OK STORE completed\r\n")
+        XCTAssertEqual(try future.wait().affectedCount, 2)
+    }
+
+    func testApplyWithPreviewSelectionDropsMissingUIDsBeforeCounting() throws {
+        let selection = MailBulkSelection(uidValidity: 123456, uids: [22, 21, 20])
+        let (channel, future) = try makeChannel(action: .markRead, selection: selection)
+        try advanceThroughSelect(channel, exists: 5)
+
+        let store = try feedUIDValidation(channel, uids: [22, 20])
+
+        XCTAssertTrue(store.contains("UID STORE"), store)
+        XCTAssertTrue(store.contains("22"), store)
+        XCTAssertTrue(store.contains("20"), store)
+        XCTAssertFalse(store.contains("21"), store)
 
         try feed(channel, "B0 OK STORE completed\r\n")
         XCTAssertEqual(try future.wait().affectedCount, 2)
@@ -352,11 +384,12 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: "Trash")
         try advanceThroughSelect(channel, exists: 5)
 
-        let move = try resolveWindow(
+        try resolveWindow(
             channel,
             windowIndex: 0,
             mappings: [(sequence: 1, uid: 11), (sequence: 2, uid: 12)]
         )
+        let move = try feedUIDValidation(channel, uids: [11, 12])
 
         XCTAssertTrue(move.contains("UID MOVE"), move)
         XCTAssertTrue(move.contains("Trash"), move)
@@ -369,11 +402,12 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .archive, destination: "[Gmail]/All Mail")
         try advanceThroughSelect(channel, exists: 5)
 
-        let move = try resolveWindow(
+        try resolveWindow(
             channel,
             windowIndex: 0,
             mappings: [(sequence: 1, uid: 11)]
         )
+        let move = try feedUIDValidation(channel, uids: [11])
 
         XCTAssertTrue(move.contains("UID MOVE"), move)
         XCTAssertTrue(move.contains("All Mail"), move)
@@ -427,6 +461,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
                 (sequence: 3, uid: 13)
             ]
         )
+        try feedUIDValidation(channel, uids: [11, 12, 13])
         try feed(channel, "B0 OK STORE completed\r\n")
 
         XCTAssertEqual(try future.wait().affectedCount, 3)
@@ -452,6 +487,7 @@ final class IMAPBulkCleanupTests: XCTestCase {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: "Trash")
         try advanceThroughSelect(channel, exists: 5)
         try resolveWindow(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
+        try feedUIDValidation(channel, uids: [11])
         try feed(channel, "B0 BAD Unknown command\r\n")
 
         XCTAssertThrowsError(try future.wait()) { error in
@@ -469,7 +505,8 @@ final class IMAPBulkCleanupTests: XCTestCase {
     func testMoveWithoutDestinationFailsInsteadOfMarkingRead() throws {
         let (channel, future) = try makeChannel(action: .moveToTrash, destination: nil)
         try advanceThroughSelect(channel, exists: 5)
-        let after = try resolveWindow(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
+        try resolveWindow(channel, windowIndex: 0, mappings: [(sequence: 1, uid: 11)])
+        let after = try feedUIDValidation(channel, uids: [11])
 
         XCTAssertFalse(after.contains("STORE"), after)
         XCTAssertThrowsError(try future.wait()) { error in

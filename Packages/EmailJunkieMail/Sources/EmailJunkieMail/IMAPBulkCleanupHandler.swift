@@ -14,7 +14,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     typealias InboundIn = Response
 
     enum Step {
-        case greeting, login, select, search, resolve, sample, apply, done
+        case greeting, login, select, search, resolve, validate, sample, apply, done
     }
 
     /// Accumulates one FETCH response; `IMAPBulkCleanupHandler+Envelope` fills it.
@@ -57,6 +57,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     private var pendingSequenceNumbers: [UInt32] = []
     private var matchedUIDs: [UInt32] = []
     private var isPartial = false
+
+    private var validationBatches: [[UInt32]] = []
+    private var validationBatchIndex = 0
+    private var validatedUIDs: [UInt32] = []
 
     private var batches: [[UInt32]] = []
     private var batchIndex = 0
@@ -122,7 +126,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     private func handleUntagged(_ payload: ResponsePayload, context: ChannelHandlerContext) {
         captureUIDValidity(from: payload)
 
-        if isMailboxMutation(payload), step == .search || step == .resolve {
+        if isMailboxMutation(payload), step == .search || step == .resolve || step == .validate {
             failMailboxChangedDuringSelection(context: context)
             return
         }
@@ -138,6 +142,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         case .search:
             if case .mailboxData(.search(let ids, _)) = payload {
                 pendingSequenceNumbers.append(contentsOf: ids.map(\.rawValue))
+            }
+        case .validate:
+            if case .mailboxData(.search(let ids, _)) = payload {
+                validatedUIDs.append(contentsOf: ids.map(\.rawValue))
             }
         default:
             break
@@ -169,6 +177,9 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
                 pendingSequenceNumbers.removeAll()
                 windowIndex += 1
                 continueSelection(context: context)
+            } else if step == .validate {
+                validationBatchIndex += 1
+                continueValidation(context: context)
             } else if step == .apply {
                 // Guard the index rather than trusting tag ordering: an
                 // unsolicited or duplicated tagged response would otherwise
@@ -277,6 +288,30 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
         guard action != nil else { return beginSample(context: context) }
         guard !matchedUIDs.isEmpty else { return settleApplied(context: context) }
+        validationBatches = SequenceWindow.batches(matchedUIDs)
+        validationBatchIndex = 0
+        validatedUIDs.removeAll()
+        continueValidation(context: context)
+    }
+
+    /// Re-checks the concrete UID set immediately before mutating it. A previewed
+    /// UID may have been moved or expunged by another client after the preview,
+    /// and IMAP can otherwise accept a command that silently ignores that UID.
+    private func continueValidation(context: ChannelHandlerContext) {
+        guard validationBatchIndex < validationBatches.count else {
+            matchedUIDs = Array(Set(validatedUIDs)).sorted(by: >)
+            guard !matchedUIDs.isEmpty else { return settleApplied(context: context) }
+            return beginApply(context: context)
+        }
+        guard let set = Self.identifierSet(for: validationBatches[validationBatchIndex]) else {
+            validationBatchIndex += 1
+            return continueValidation(context: context)
+        }
+        step = .validate
+        send(.uidSearch(key: .uid(.set(set))), tag: "V\(validationBatchIndex)", context: context)
+    }
+
+    private func beginApply(context: ChannelHandlerContext) {
         batches = SequenceWindow.batches(matchedUIDs)
         batchIndex = 0
         step = .apply

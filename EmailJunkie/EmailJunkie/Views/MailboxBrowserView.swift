@@ -13,6 +13,8 @@ struct MailboxBrowserView: View {
         VStack(spacing: 0) {
             controls
             Divider()
+            bulkCleanup
+            Divider()
             results
         }
         .frame(minWidth: 600, minHeight: 520)
@@ -39,6 +41,12 @@ struct MailboxBrowserView: View {
             filterRow
         }
         .padding()
+    }
+
+    /// Bulk cleanup acts on the current filter, so it sits directly under the
+    /// filter controls that define what it would touch (item 42).
+    private var bulkCleanup: some View {
+        BulkCleanupPanel().environmentObject(appState)
     }
 
     private var searchRow: some View {

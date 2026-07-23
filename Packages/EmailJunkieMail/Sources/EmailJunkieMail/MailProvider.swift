@@ -72,6 +72,29 @@ public protocol MailProvider: Sendable {
         snapshotMessageCount: Int?
     ) async throws -> MailSearchResult
 
+    /// Reports what a bulk action would affect in `mailbox` for `criteria`,
+    /// without changing anything. Selection is bounded, so a very large match set
+    /// may be reported as partial. Throws `MailError` on failure.
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview
+
+    /// Applies `action` to every message in `mailbox` matching `criteria`, in
+    /// bounded batches, calling `onProgress` after each. Throws `MailError` on
+    /// failure.
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult
+
     /// Appends a full RFC 822 message to `mailbox` via IMAP `APPEND`, tagging it
     /// with the given flags (e.g. `\Draft`). Used to save a reply as a draft
     /// without sending it. Throws `MailError` on failure.
@@ -187,6 +210,31 @@ public extension MailProvider {
             offset: offset,
             limit: limit
         )
+    }
+
+    /// Default: bulk cleanup is unsupported. `IMAPMailProvider` overrides this
+    /// with the windowed selection path; other conformers inherit a clear
+    /// failure rather than a compile-time requirement.
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview {
+        throw MailError.commandFailed("This provider does not support bulk cleanup.")
+    }
+
+    /// Default: bulk cleanup is unsupported. See `previewBulkCleanup`.
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        throw MailError.commandFailed("This provider does not support bulk cleanup.")
     }
 }
 

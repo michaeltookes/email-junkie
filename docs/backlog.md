@@ -94,6 +94,17 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9).
     - Any folder-name mismatch found is fixed in `MailboxNaming` before item 42 ships.
 
+## High Priority
+
+49. **Bulk cleanup silently under-selects on large mailboxes** — *bug; blocks trusting item 42's destructive actions*
+    A single bulk "clean all" over a filter selects only part of the matching set on a big mailbox, so messages are silently left behind. Found live on att.net (item 44): a `from:bloomingdales` filter of ~923 was reported as ~605 and a Move to Trash cleared ~603, leaving ~318; a second pass of ~453 actual reported 318 and left 134. It **converges** over repeated passes but a single pass is incomplete.
+    *As a user cleaning a huge inbox, I want "clean all" to actually move every matching message in one action, so that I can trust the inbox is clear instead of silently keeping a third of the junk.*
+    - **Symptom:** proportional shortfall (~30% left behind), not a fixed cap — so it is not simply the 8 KB frame limit from item 45, though the filtered-count path (`IMAPSearch` materializing all UIDs into `matchedUIDs`, `totalMatches = matchedUIDs.count`) does still violate item 45's "counts must come from a bounded call, never from materializing all UIDs" and must be fixed too.
+    - **Leading hypotheses (unproven, need live IMAP logging):** (a) att.net/Yahoo returns partial `SEARCH` results on large mailboxes; (b) the bulk handler's two-step scan — `SEARCH` by sequence number then a separate `FETCH` to resolve each UID (`recordResolvedUID`) — drops responses, silently losing matches; (c) `EXISTS` under-reports so the highest sequence windows are never scanned.
+    - **Fix direction:** add opt-in IMAP protocol logging to reproduce and confirm the cause; replace the sequence-number `SEARCH` + resolve `FETCH` with a direct **windowed `UID SEARCH`** over descending UID ranges (returns UIDs in one step, stable against renumbering); and make one user action **verify-until-stable** — re-scan after applying and repeat until a fresh bounded count returns zero — so a single "clean all" is actually complete.
+    - **Counts:** the filtered browser total and the preview count must both come from a bounded call (windowed accumulation or `ESEARCH COUNT`), and a capped/partial result must be labelled, never presented as an exact total.
+    - **Until fixed:** bulk cleanup must not be presented as trustworthy for one-shot "clean all" on large mailboxes; the working user path is repeated passes until the count reaches zero.
+
 ## Medium Priority
 
 16. **Local model support**

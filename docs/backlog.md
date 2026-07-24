@@ -207,6 +207,16 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **One-click hand-off:** selecting a row (a sender, or an age bucket) fills the browser's filter so item 42's preview + confirm cleanup can act on it directly.
     - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question still outstanding from item 42: whether any cleanup should ever run automatically vs. manual-only.
 
+47. **Per-message selection for bulk cleanup (row checkboxes)**
+    Checkboxes on each browser row so cleanup can target specific messages instead of only the whole filter. Delivered on branch `attnet-verify`; kept here as the record of scope, with remaining polish noted below.
+    *As a user reviewing search results, I want to check individual messages and clean up only those, so that I get granularity instead of being forced to act on every match of my filter.*
+    - Each result row has a checkbox; checking any row switches cleanup scope to exactly the checked messages.
+    - "Check all N listed" and "Clear" act on the loaded page; the count of checked rows is always visible.
+    - The panel states which scope is live **before** anything runs ("Applies to 3 checked messages only" vs "Applies to all matches").
+    - Checked rows need no preview scan — they are already visible — but destructive actions still require confirmation naming the checked count.
+    - Selection clears on a new search, and a run is refused if the folder changed since the rows were loaded.
+    - **Remaining polish:** selection does not survive "Load more" pagination beyond the loaded page (no "select all 605 matches" via checkbox — use the unchecked/filter path for that), and there is no shift-click range selection.
+
 ## Low Priority
 
 30. **Slack approval channel**

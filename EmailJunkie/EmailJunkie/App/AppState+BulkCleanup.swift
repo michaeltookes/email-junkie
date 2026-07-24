@@ -115,6 +115,50 @@ extension AppState {
         }
     }
 
+    /// Applies the action to just the rows the user checked (item 47).
+    ///
+    /// Checked rows need no server scan to preview — the user is looking at
+    /// exactly the messages they picked, which *is* the preview. So this stages
+    /// them as the approved selection and hands off to the same validated apply
+    /// path, inheriting its account/query/action checks and its guarantee that
+    /// only the approved UID set is touched.
+    func applyBulkCleanupToSelectedMessages() async {
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            bulk.error = "Connect an account first."
+            return
+        }
+
+        let selected = browser.selectedMessages
+        guard !selected.isEmpty else {
+            bulk.error = "Check at least one message first."
+            return
+        }
+        guard let mailbox = browser.resultQuery?.mailbox else {
+            bulk.error = "Search the mailbox before cleaning up specific messages."
+            return
+        }
+
+        bulk.error = nil
+        bulk.completionMessage = nil
+        bulk.preview = MailBulkPreview(
+            matchCount: selected.count,
+            sample: selected,
+            isPartial: false,
+            selection: MailBulkSelection(
+                uidValidity: selected.compactMap(\.uidValidity).first,
+                uids: selected.map(\.id)
+            )
+        )
+        // Anchor approval to the mailbox the rows actually came from, not the
+        // live folder picker, so switching folders mid-flow invalidates it.
+        bulk.previewQuery = MailboxBrowserQuery(mailbox: mailbox, criteria: browser.criteria)
+        bulk.previewAction = bulk.action
+        bulk.previewAccount = BulkCleanupAccountIdentity(credentials: credentials)
+
+        await applyBulkCleanup()
+    }
+
     /// Applies the selected action to everything the *previewed* query matched.
     ///
     /// Refuses to run if the search inputs changed since the preview: the user
@@ -203,6 +247,22 @@ extension AppState {
             subject = "all \(matchCount) \(noun) matching this filter"
         }
 
+        switch action {
+        case .markRead:
+            return "Mark \(subject) as read?"
+        case .archive:
+            return "Archive \(subject)? You can find them in the Archive folder."
+        case .moveToTrash:
+            return "Move \(subject) to Trash? You can recover them from Trash."
+        }
+    }
+
+    /// The confirmation question for a checked-rows cleanup (item 47). Scope is
+    /// the specific messages picked, so this must not say "matching this filter"
+    /// — that would overstate what is about to happen.
+    static func bulkSelectionConfirmationMessage(for action: MailBulkAction, count: Int) -> String {
+        let noun = count == 1 ? "message" : "messages"
+        let subject = "\(count) checked \(noun)"
         switch action {
         case .markRead:
             return "Mark \(subject) as read?"

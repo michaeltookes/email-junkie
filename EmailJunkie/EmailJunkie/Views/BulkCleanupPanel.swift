@@ -3,10 +3,16 @@ import SwiftUI
 
 /// The bulk-cleanup panel inside the mailbox browser (item 42).
 ///
-/// Deliberately a two-step flow: **Preview** scans and reports what the current
-/// filter matches, and only then does a run button appear. Destructive actions
-/// additionally require confirming an alert that names the exact count, so mail
-/// is never moved on a single mis-click.
+/// Two scopes, and which one is live is always stated up front:
+///
+/// - **Checked rows** (item 47): if any row is checked, the action applies to
+///   exactly those messages. No preview scan is needed — the user is looking at
+///   what they picked.
+/// - **Whole filter**: with nothing checked, **Preview** scans every match and
+///   only then does a run button appear.
+///
+/// Destructive actions additionally require confirming an alert that names the
+/// scope and count, so mail is never moved on a single mis-click.
 struct BulkCleanupPanel: View {
     @EnvironmentObject var appState: AppState
     @State private var isConfirming = false
@@ -14,7 +20,7 @@ struct BulkCleanupPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             actionRow
-            if let preview = appState.bulk.preview {
+            if !hasCheckedRows, let preview = appState.bulk.preview {
                 previewSummary(preview)
             }
             statusRow
@@ -24,10 +30,36 @@ struct BulkCleanupPanel: View {
         .alert("Confirm cleanup", isPresented: $isConfirming) {
             Button("Cancel", role: .cancel) {}
             Button(appState.bulk.action.verb, role: destructiveRole) {
-                Task { await appState.applyBulkCleanup() }
+                Task { await run() }
             }
         } message: {
             Text(confirmationMessage)
+        }
+    }
+
+    /// Whether the user has narrowed cleanup to specific rows.
+    private var hasCheckedRows: Bool {
+        appState.browser.hasSelection
+    }
+
+    private var checkedCount: Int {
+        appState.browser.selectedMessages.count
+    }
+
+    /// Routes to the checked-rows path or the previewed-filter path.
+    private func run() async {
+        if hasCheckedRows {
+            await appState.applyBulkCleanupToSelectedMessages()
+        } else {
+            await appState.applyBulkCleanup()
+        }
+    }
+
+    private func start() {
+        if appState.bulk.action.isDestructive {
+            isConfirming = true
+        } else {
+            Task { await run() }
         }
     }
 
@@ -44,30 +76,42 @@ struct BulkCleanupPanel: View {
             .frame(width: 160)
             .disabled(isBusy)
 
-            Button("Preview cleanup") {
-                Task { await appState.previewBulkCleanup() }
-            }
-            .disabled(isBusy)
-            .help("Count every message the current filter matches, without changing anything")
-
-            Text("Applies to all matches, not just the rows listed below")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if appState.bulk.canApply {
-                Button(appState.bulk.action.verb) {
-                    if appState.bulk.action.isDestructive {
-                        isConfirming = true
-                    } else {
-                        Task { await appState.applyBulkCleanup() }
-                    }
+            if hasCheckedRows {
+                // Checked rows are their own preview, so act directly.
+                Button("\(appState.bulk.action.verb) \(checkedCount) checked") { start() }
+                    .disabled(isBusy)
+                    .help("Apply to only the messages you checked")
+            } else {
+                Button("Preview cleanup") {
+                    Task { await appState.previewBulkCleanup() }
                 }
-                .keyboardShortcut(.none)
-                .help("Apply to every message the preview matched")
+                .disabled(isBusy)
+                .help("Count every message the current filter matches, without changing anything")
+
+                if appState.bulk.canApply {
+                    Button(appState.bulk.action.verb) { start() }
+                        .keyboardShortcut(.none)
+                        .help("Apply to every message the preview matched")
+                }
             }
+
+            Text(scopeCaption)
+                .font(.caption2)
+                .foregroundStyle(hasCheckedRows ? .primary : .secondary)
 
             Spacer()
         }
+    }
+
+    /// States which scope is live *before* anything runs — the whole point of the
+    /// checkbox feature is that "just these three" is distinguishable from "all
+    /// 605 matches", and that has to be readable at a glance.
+    private var scopeCaption: String {
+        if hasCheckedRows {
+            let noun = checkedCount == 1 ? "message" : "messages"
+            return "Applies to \(checkedCount) checked \(noun) only"
+        }
+        return "Applies to all matches, not just the rows listed below"
     }
 
     @ViewBuilder
@@ -136,6 +180,14 @@ struct BulkCleanupPanel: View {
     }
 
     private var confirmationMessage: String {
+        // Checked rows are confirmed before being staged as a preview, and their
+        // scope is "these specific messages" — not "everything matching".
+        if hasCheckedRows {
+            return AppState.bulkSelectionConfirmationMessage(
+                for: appState.bulk.action,
+                count: checkedCount
+            )
+        }
         guard let preview = appState.bulk.preview else { return "" }
         return AppState.bulkConfirmationMessage(
             for: appState.bulk.action,

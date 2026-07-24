@@ -190,15 +190,26 @@ extension AppState {
 
     /// The confirmation question shown before a destructive run.
     static func bulkConfirmationMessage(for action: MailBulkAction, matchCount: Int, isPartial: Bool) -> String {
+        // Name the scope, not just the count. The browser lists one page at a
+        // time ("Showing 25 of 605"), so a bare count reads as "the 25 I can
+        // see" — a dangerous misreading for a destructive action.
         let noun = matchCount == 1 ? "message" : "messages"
-        let count = isPartial ? "at least \(matchCount)" : "\(matchCount)"
+        let subject: String
+        if isPartial {
+            subject = "at least \(matchCount) \(noun) matching this filter"
+        } else if matchCount == 1 {
+            subject = "1 \(noun) matching this filter"
+        } else {
+            subject = "all \(matchCount) \(noun) matching this filter"
+        }
+
         switch action {
         case .markRead:
-            return "Mark \(count) \(noun) as read?"
+            return "Mark \(subject) as read?"
         case .archive:
-            return "Archive \(count) \(noun)? You can find them in the Archive folder."
+            return "Archive \(subject)? You can find them in the Archive folder."
         case .moveToTrash:
-            return "Move \(count) \(noun) to Trash? You can recover them from Trash."
+            return "Move \(subject) to Trash? You can recover them from Trash."
         }
     }
 

@@ -379,12 +379,29 @@ final class AppStateBulkCleanupTests: XCTestCase {
     func testConfirmationNamesTheCountAndRecoveryPath() {
         XCTAssertEqual(
             AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 1, isPartial: false),
-            "Move 1 message to Trash? You can recover them from Trash."
+            "Move 1 message matching this filter to Trash? You can recover them from Trash."
         )
         XCTAssertEqual(
             AppState.bulkConfirmationMessage(for: .archive, matchCount: 12, isPartial: false),
-            "Archive 12 messages? You can find them in the Archive folder."
+            "Archive all 12 messages matching this filter? You can find them in the Archive folder."
         )
+    }
+
+    /// The browser lists one page at a time ("Showing 25 of 605"), so a bare
+    /// count reads as "the 25 I can see". The confirmation must state that the
+    /// scope is the whole filter, or the user approves far more than they think.
+    func testConfirmationStatesScopeIsTheWholeFilterNotTheVisiblePage() {
+        let message = AppState.bulkConfirmationMessage(
+            for: .moveToTrash,
+            matchCount: 605,
+            isPartial: false
+        )
+        XCTAssertEqual(
+            message,
+            "Move all 605 messages matching this filter to Trash? You can recover them from Trash."
+        )
+        XCTAssertTrue(message.contains("all 605"), message)
+        XCTAssertTrue(message.contains("matching this filter"), message)
     }
 
     /// A capped scan knows only a lower bound, so the confirmation must not
@@ -392,7 +409,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
     func testPartialPreviewIsWordedAsALowerBound() {
         XCTAssertEqual(
             AppState.bulkConfirmationMessage(for: .markRead, matchCount: 5_000, isPartial: true),
-            "Mark at least 5000 messages as read?"
+            "Mark at least 5000 messages matching this filter as read?"
         )
     }
 

@@ -48,7 +48,11 @@ struct BulkCleanupPanel: View {
                 Task { await appState.previewBulkCleanup() }
             }
             .disabled(isBusy)
-            .help("Count what the current filter matches, without changing anything")
+            .help("Count every message the current filter matches, without changing anything")
+
+            Text("Applies to all matches, not just the rows listed below")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             if appState.bulk.canApply {
                 Button(appState.bulk.action.verb) {
@@ -145,7 +149,13 @@ struct BulkCleanupPanel: View {
         let count = preview.isPartial ? "At least \(preview.matchCount)" : "\(preview.matchCount)"
         let action = appState.bulk.previewAction ?? appState.bulk.action
         let qualifier = action == .markRead ? "unread " : ""
-        return "\(count) \(qualifier)\(noun) match — \(action.verb.lowercased()) will apply to all of them."
+        // Spell out that the scope is the whole match set rather than the page
+        // of rows visible below, which shows only the first 25.
+        let loaded = appState.browser.results.count
+        let scope = loaded > 0 && preview.matchCount > loaded
+            ? " — \(action.verb.lowercased()) will apply to all \(preview.matchCount), not just the \(loaded) listed below."
+            : " — \(action.verb.lowercased()) will apply to all of them."
+        return "\(count) \(qualifier)\(noun) match\(scope)"
     }
 
     private func displaySubject(_ message: MailMessage) -> String {

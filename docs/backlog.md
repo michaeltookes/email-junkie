@@ -85,25 +85,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Makes explicit that the real account password will **not** work over IMAP — an app-specific credential is required.
     - The user only has to paste email + key; host/port auto-fill from the domain (item 41) and SMTP is derived automatically.
 
-44. **Live end-to-end verification of a non-Gmail (att.net) account**
-    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path — auth, folder resolution, and large-mailbox browsing — end-to-end, the way Gmail was live-verified (items 6/9). Blocks destructive bulk actions (item 42) from shipping against unverified folder names.
+44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
+    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
     *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*
-    - **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` (SMTP `smtp.mail.att.net`) passes "Test Connection".
-    - **Inbox browsing:** the mailbox browser loads and pages the Inbox without loading the whole mailbox — validates the item 39/40 search+paging engine against a genuinely huge, unread-heavy mailbox (the kind that crashes heavier clients).
-    - **Folder resolution:** Sent (`Sent`), Drafts (`Draft`), and Junk (`Bulk Mail`) each return the expected mail; "All Mail" is correctly hidden (Yahoo/AT&T have none). Confirm the live **Trash (`Trash`)** and **Archive (`Archive`)** folder names match reality before item 42's bulk delete/archive target them.
-    - **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9).
-    - Any folder-name mismatch found is fixed in `MailboxNaming` before item 42 ships.
-
-## High Priority
-
-49. **Bulk cleanup silently under-selects on large mailboxes** — *bug; blocks trusting item 42's destructive actions*
-    A single bulk "clean all" over a filter selects only part of the matching set on a big mailbox, so messages are silently left behind. Found live on att.net (item 44): a `from:bloomingdales` filter of ~923 was reported as ~605 and a Move to Trash cleared ~603, leaving ~318; a second pass of ~453 actual reported 318 and left 134. It **converges** over repeated passes but a single pass is incomplete.
-    *As a user cleaning a huge inbox, I want "clean all" to actually move every matching message in one action, so that I can trust the inbox is clear instead of silently keeping a third of the junk.*
-    - **Symptom:** proportional shortfall (~30% left behind), not a fixed cap — so it is not simply the 8 KB frame limit from item 45, though the filtered-count path (`IMAPSearch` materializing all UIDs into `matchedUIDs`, `totalMatches = matchedUIDs.count`) does still violate item 45's "counts must come from a bounded call, never from materializing all UIDs" and must be fixed too.
-    - **Leading hypotheses (unproven, need live IMAP logging):** (a) att.net/Yahoo returns partial `SEARCH` results on large mailboxes; (b) the bulk handler's two-step scan — `SEARCH` by sequence number then a separate `FETCH` to resolve each UID (`recordResolvedUID`) — drops responses, silently losing matches; (c) `EXISTS` under-reports so the highest sequence windows are never scanned.
-    - **Fix direction:** add opt-in IMAP protocol logging to reproduce and confirm the cause; replace the sequence-number `SEARCH` + resolve `FETCH` with a direct **windowed `UID SEARCH`** over descending UID ranges (returns UIDs in one step, stable against renumbering); and make one user action **verify-until-stable** — re-scan after applying and repeat until a fresh bounded count returns zero — so a single "clean all" is actually complete.
-    - **Counts:** the filtered browser total and the preview count must both come from a bounded call (windowed accumulation or `ESEARCH COUNT`), and a capped/partial result must be labelled, never presented as an exact total.
-    - **Until fixed:** bulk cleanup must not be presented as trustworthy for one-shot "clean all" on large mailboxes; the working user path is repeated passes until the count reaches zero.
+    - ✅ **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` passes "Test Connection". *(Verified live, branch `attnet-verify`.)*
+    - ✅ **Inbox browsing:** the mailbox browser loads and pages a genuinely huge, unread-heavy Inbox without loading it whole — the crash that motivated items 45/49. *(Verified live.)*
+    - ✅ **Folder resolution:** Sent/Drafts load; "All Mail" correctly hidden; live **Trash** and **Archive** folder names confirmed by successful moves during the item-49 sweep verification. *(Verified live.)*
+    - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
+    - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
 
 ## Medium Priority
 
@@ -217,16 +206,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Never bulk-download:** counting must reuse item 42's bounded `SequenceWindow` walk (or IMAP `ESEARCH COUNT` where supported) so a mailbox of any size stays safe. A partial/capped scan must be labelled as such rather than presented as exact.
     - **One-click hand-off:** selecting a row (a sender, or an age bucket) fills the browser's filter so item 42's preview + confirm cleanup can act on it directly.
     - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question still outstanding from item 42: whether any cleanup should ever run automatically vs. manual-only.
-
-47. **Per-message selection for bulk cleanup (row checkboxes)**
-    Checkboxes on each browser row so cleanup can target specific messages instead of only the whole filter. Delivered on branch `attnet-verify`; kept here as the record of scope, with remaining polish noted below.
-    *As a user reviewing search results, I want to check individual messages and clean up only those, so that I get granularity instead of being forced to act on every match of my filter.*
-    - Each result row has a checkbox; checking any row switches cleanup scope to exactly the checked messages.
-    - "Check all N listed" and "Clear" act on the loaded page; the count of checked rows is always visible.
-    - The panel states which scope is live **before** anything runs ("Applies to 3 checked messages only" vs "Applies to all matches").
-    - Checked rows need no preview scan — they are already visible — but destructive actions still require confirmation naming the checked count.
-    - Selection clears on a new search, and a run is refused if the folder changed since the rows were loaded.
-    - **Remaining polish:** selection does not survive "Load more" pagination beyond the loaded page (no "select all 605 matches" via checkbox — use the unchecked/filter path for that), and there is no shift-click range selection.
 
 48. **Dedicated Email Account settings page with saved accounts**
     Promote the cramped inline "Email account" section to its own Settings page, and remember multiple accounts' credentials so switching between them is a one-tap pick instead of a full re-entry.

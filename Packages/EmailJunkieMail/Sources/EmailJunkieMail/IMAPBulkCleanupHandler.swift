@@ -31,16 +31,16 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
     private let email: String
     private let password: String
-    private let mailboxName: String
+    let mailboxName: String
     let destinationName: String?
     private let request: IMAPBulkCleanupRequest
     let promise: EventLoopPromise<IMAPBulkOutcome>
 
     private var criteria: MailSearchCriteria { request.criteria }
-    private var action: MailBulkAction? { request.action }
+    var action: MailBulkAction? { request.action }
     private var sampleLimit: Int { request.sampleLimit }
     private var selectionCap: Int { request.selectionCap }
-    private var onProgress: (@Sendable (MailBulkProgress) -> Void)? { request.onProgress }
+    var onProgress: (@Sendable (MailBulkProgress) -> Void)? { request.onProgress }
     private var hasUnscannedSelectionWindows: Bool { windowIndex < windows.count }
     private var liveSelectionCriteria: MailSearchCriteria? {
         guard action == .markRead else { return criteria }
@@ -54,20 +54,23 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
     var step: Step = .greeting
     var settled = false
-    private var messageCount = 0
+    var messageCount = 0
     var selectedUIDValidity: UInt32?
 
-    private var windows: [(lower: UInt32, upper: UInt32)] = []
-    private var windowIndex = 0
-    private var pendingSequenceNumbers: [UInt32] = []
-    private var matchedUIDs: [UInt32] = []
+    var windows: [(lower: UInt32, upper: UInt32)] = []
+    var windowIndex = 0
+    var pendingSequenceNumbers: [UInt32] = []
+    var matchedUIDs: [UInt32] = []
+    /// `matchedUIDs.count` at the start of the current window's resolve, so
+    /// per-window resolved counts can be logged (item 49 diagnosis).
+    var matchedUIDsAtWindowStart = 0
     private var isPartial = false
 
-    private var batches: [[UInt32]] = []
-    private var batchIndex = 0
-    private var currentBatchUIDs: [UInt32] = []
-    private var applyTotal = 0
-    private var affectedCount = 0
+    var batches: [[UInt32]] = []
+    var batchIndex = 0
+    var currentBatchUIDs: [UInt32] = []
+    var applyTotal = 0
+    var affectedCount = 0
 
     var sample: [MailMessage] = []
     var current: PartialMessage?
@@ -182,8 +185,10 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
 
         switch step {
         case .search:
+            logWindowSearch()
             resolveCurrentWindow(context: context)
         case .resolve:
+            logWindowResolve()
             pendingSequenceNumbers.removeAll()
             windowIndex += 1
             continueSelection(context: context)
@@ -213,6 +218,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         }
         windows = SequenceWindow.windows(total: messageCount)
         windowIndex = 0
+        logSelectionStart()
         step = .search
         continueSelection(context: context)
     }
@@ -284,6 +290,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
             continueSelection(context: context)
             return
         }
+        matchedUIDsAtWindowStart = matchedUIDs.count
         step = .resolve
         send(.fetch(.set(set), [.uid], []), tag: "F\(windowIndex)", context: context)
     }
@@ -297,7 +304,9 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
     /// applying the action in bounded batches.
     private func finishSelection(context: ChannelHandlerContext) {
         // Newest first, and never act on more than the user was shown.
+        let rawCount = matchedUIDs.count
         matchedUIDs = Array(Set(matchedUIDs)).sorted(by: >)
+        logSelectionDone(rawCount: rawCount)
         if matchedUIDs.count > selectionCap {
             isPartial = true
             matchedUIDs = Array(matchedUIDs.prefix(selectionCap))
@@ -326,65 +335,6 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         send(.uidFetch(.set(set), [.uid, .envelope], []), tag: sampleTag, context: context)
     }
 
-    // MARK: - Applying
-
-    private func continueApply(context: ChannelHandlerContext) {
-        guard batchIndex < batches.count else {
-            return settleApplied(context: context)
-        }
-        guard let set = Self.identifierSet(for: batches[batchIndex]) else {
-            batchIndex += 1
-            return continueApply(context: context)
-        }
-        currentBatchUIDs.removeAll()
-        step = .validate
-        send(.uidSearch(key: .uid(.set(set))), tag: "V\(batchIndex)", context: context)
-    }
-
-    /// Re-checks each concrete UID batch immediately before mutating it. A
-    /// previewed UID may have been moved or expunged by another client after the
-    /// preview, and IMAP can otherwise accept a command that silently ignores it.
-    private func mutateCurrentBatch(context: ChannelHandlerContext) {
-        guard batchIndex < batches.count else {
-            return settleApplied(context: context)
-        }
-
-        currentBatchUIDs = Array(Set(currentBatchUIDs)).sorted(by: >)
-        let missingCount = max(0, batches[batchIndex].count - currentBatchUIDs.count)
-        if missingCount > 0 {
-            applyTotal = max(0, applyTotal - missingCount)
-        }
-
-        guard let set = Self.identifierSet(for: currentBatchUIDs) else {
-            onProgress?(MailBulkProgress(processed: affectedCount, total: applyTotal))
-            batchIndex += 1
-            return continueApply(context: context)
-        }
-        guard let command = command(for: set) else {
-            settle(.failure(MailError.commandFailed(
-                "No destination folder is configured for this cleanup action."
-            )))
-            return finish(context: context)
-        }
-        step = .apply
-        send(command, tag: "B\(batchIndex)", context: context)
-    }
-
-    /// Keys off the action rather than the presence of a destination: a move
-    /// action that somehow arrived without a destination folder must fail
-    /// loudly, not silently degrade into marking the batch read.
-    private func command(for set: MessageIdentifierSetNonEmpty<UID>) -> Command? {
-        switch action {
-        case .markRead:
-            return .uidStore(.set(set), [], .flags(.add(silent: true, list: [.seen])))
-        case .archive, .moveToTrash:
-            guard let destinationName else { return nil }
-            return .uidMove(.set(set), MailboxName(ByteBuffer(string: destinationName)))
-        case nil:
-            return nil
-        }
-    }
-
     // MARK: - Settling
 
     private func settlePreview(context: ChannelHandlerContext) {
@@ -398,7 +348,7 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         finish(context: context)
     }
 
-    private func settleApplied(context: ChannelHandlerContext) {
+    func settleApplied(context: ChannelHandlerContext) {
         settle(.success(IMAPBulkOutcome(
             matchCount: matchedUIDs.count,
             sample: [],
@@ -409,13 +359,13 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         finish(context: context)
     }
 
-    private func finish(context: ChannelHandlerContext) {
+    func finish(context: ChannelHandlerContext) {
         step = .done
         send(.logout, tag: logoutTag, context: context)
         context.close(promise: nil)
     }
 
-    private func send(_ command: Command, tag: String, context: ChannelHandlerContext) {
+    func send(_ command: Command, tag: String, context: ChannelHandlerContext) {
         let part = CommandStreamPart.tagged(TaggedCommand(tag: tag, command: command))
         context.writeAndFlush(NIOAny(IMAPClientHandler.Message.part(part)), promise: nil)
     }

@@ -146,4 +146,36 @@ extension IMAPBulkCleanupHandler {
         let name = address.personName.map { String(buffer: $0) }
         return MailAddress(name: name, email: email)
     }
+
+    // MARK: - Diagnostics (item 49)
+
+    func logSelectionStart() {
+        IMAPDiagnosticLog.log(
+            "bulk selection start: mailbox=\(mailboxName) EXISTS=\(messageCount) "
+                + "windows=\(windows.count) (\(SequenceWindow.defaultSize)/window)"
+        )
+    }
+
+    func logWindowSearch() {
+        guard windowIndex < windows.count else { return }
+        IMAPDiagnosticLog.log(
+            "window \(windowIndex) \(windows[windowIndex]) SEARCH returned "
+                + "\(pendingSequenceNumbers.count) sequence numbers"
+        )
+    }
+
+    func logWindowResolve() {
+        IMAPDiagnosticLog.log(
+            "window \(windowIndex) resolved \(matchedUIDs.count - matchedUIDsAtWindowStart) UIDs "
+                + "from \(pendingSequenceNumbers.count) sequence numbers "
+                + "(cumulative matched=\(matchedUIDs.count))"
+        )
+    }
+
+    func logSelectionDone(rawCount: Int) {
+        IMAPDiagnosticLog.log(
+            "bulk selection done: scanned \(windowIndex)/\(windows.count) windows, "
+                + "raw matched=\(rawCount), unique matched=\(matchedUIDs.count)"
+        )
+    }
 }

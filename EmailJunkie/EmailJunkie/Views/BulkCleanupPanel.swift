@@ -171,6 +171,9 @@ struct BulkCleanupPanel: View {
     /// unknown until the mailbox stops revealing older matches (item 49).
     private var sweepText: String {
         let moved = appState.bulk.sweepMovedSoFar ?? 0
+        if appState.bulk.isCancellingSweep {
+            return "Stopping after the current pass finishes — \(moved) moved so far…"
+        }
         return "Cleaning your mailbox — \(moved) moved so far "
             + "(att.net shows 10,000 at a time)…"
     }

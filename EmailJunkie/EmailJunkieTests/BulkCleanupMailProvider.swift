@@ -188,6 +188,78 @@ final class SweepBulkCleanupMailProvider: MailProvider, @unchecked Sendable {
     }
 }
 
+/// A provider whose approved preview has matches, but whose next preview is
+/// empty because the mailbox changed before the sweep started.
+final class VanishingSweepProvider: MailProvider, @unchecked Sendable {
+    private var previewCounts: [Int]
+    private(set) var applyCallCount = 0
+
+    init(initialCount: Int) {
+        previewCounts = [initialCount, 0]
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] { [] }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
+
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult { .empty(offset: offset) }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview {
+        let count = previewCounts.isEmpty ? 0 : previewCounts.removeFirst()
+        guard count > 0 else { return .empty }
+        return MailBulkPreview(
+            matchCount: count,
+            sample: [],
+            isPartial: false,
+            selection: MailBulkSelection(uidValidity: 1, uids: (0..<count).map { UInt32(1_000 + $0) })
+        )
+    }
+
+    // swiftlint:disable:next function_parameter_count
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selection: MailBulkSelection?,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        applyCallCount += 1
+        return MailBulkResult(action: action, affectedCount: selection?.uids.count ?? 0)
+    }
+}
+
 final class SuspendedBulkCleanupMailProvider: MailProvider, @unchecked Sendable {
     let didStartPreview = XCTestExpectation(description: "bulk cleanup preview started")
     let didStartApply = XCTestExpectation(description: "bulk cleanup apply started")

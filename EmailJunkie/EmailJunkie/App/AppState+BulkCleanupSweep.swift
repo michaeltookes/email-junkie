@@ -9,6 +9,21 @@ private struct SweepSuperseded: Error {}
 /// confirms that no matches remain.
 private struct SweepPassLimitExceeded: Error {}
 
+/// Thrown when a preview found matches but the apply pass moved none, so the
+/// filter has not been verified empty.
+private struct SweepNoProgress: Error {}
+
+/// Thrown when Stop was requested and the sweep should finish without claiming
+/// the filter is empty.
+private struct SweepStopped: Error {}
+
+private enum SweepPassOutcome {
+    case exhausted
+    case moved(Int)
+    case noProgress
+    case superseded
+}
+
 /// The fixed inputs of a multi-pass sweep, threaded through each pass so the
 /// per-pass helper stays small (item 49).
 private struct SweepContext {
@@ -35,7 +50,7 @@ extension AppState {
     static let bulkSweepMaxTransientRetries = 5
 
     /// Repeatedly previews and applies a move action until the filter reports no
-    /// remaining matches or a pass makes no progress.
+    /// remaining matches, or reports an incomplete sweep when progress stops.
     ///
     /// att.net/Yahoo exposes only ~10,000 messages over IMAP at once, so a single
     /// pass can only reach the matches inside that window; removing them slides
@@ -76,6 +91,7 @@ extension AppState {
             if bulkGeneration == requestGeneration {
                 bulk.isApplying = false
                 bulk.sweepMovedSoFar = nil
+                bulk.isCancellingSweep = false
             }
         }
 
@@ -85,6 +101,10 @@ extension AppState {
             bulk.completionMessage = Self.bulkCompletionMessage(
                 for: MailBulkResult(action: action, affectedCount: total)
             )
+            await runMailboxSearch()
+        } catch is SweepStopped {
+            guard isCurrentBulkCleanupApply(requestGeneration, account: account) else { return }
+            bulk.completionMessage = Self.sweepStoppedMessage(movedSoFar: bulk.sweepMovedSoFar ?? 0)
             await runMailboxSearch()
         } catch is SweepSuperseded {
             return
@@ -96,17 +116,17 @@ extension AppState {
     }
 
     /// Loops preview+apply, pacing between passes and riding out transient
-    /// rate-limit failures, until the filter is exhausted or a pass makes no
-    /// progress. Returns the total moved; throws on a non-transient error, after
-    /// too many consecutive transient failures, or when the pass limit is reached
-    /// before the filter is verified empty.
+    /// rate-limit failures, until the filter is exhausted. Returns the total
+    /// moved; throws on a non-transient error, a no-progress pass, after too many
+    /// consecutive transient failures, or when the pass limit is reached before
+    /// the filter is verified empty.
     private func sweepUntilClear(_ context: SweepContext) async throws -> Int {
         var total = 0
         var transientFailures = 0
         for _ in 0..<Self.bulkSweepMaxPasses {
-            let moved: Int?
+            let outcome: SweepPassOutcome
             do {
-                moved = try await runOneSweepPass(context)
+                outcome = try await runOneSweepPass(context)
             } catch {
                 guard try await shouldRetryAfterTransientFailure(error, &transientFailures, context) else {
                     throw error
@@ -114,10 +134,18 @@ extension AppState {
                 continue
             }
             transientFailures = 0
-            guard let moved else { throw SweepSuperseded() }
-            guard moved > 0 else { return total }
-            total += moved
-            bulk.sweepMovedSoFar = total
+            switch outcome {
+            case .exhausted:
+                return total
+            case .moved(let count):
+                total += count
+                bulk.sweepMovedSoFar = total
+                if bulk.isCancellingSweep { throw SweepStopped() }
+            case .noProgress:
+                throw SweepNoProgress()
+            case .superseded:
+                throw SweepSuperseded()
+            }
             // Breathe between passes so a rapid burst of full scans does not trip
             // the provider's rate limit.
             try? await Task.sleep(nanoseconds: bulkSweepPacingNanoseconds)
@@ -161,6 +189,12 @@ extension AppState {
             return "Moved \(movedSoFar) \(noun), but stopped at the sweep pass limit "
                 + "before verifying the filter was empty. Run cleanup again to continue."
         }
+        if error is SweepNoProgress {
+            return incompleteSweepMessage(
+                movedSoFar: movedSoFar,
+                reason: "a sweep pass found matches but moved 0 messages"
+            )
+        }
         let base = message(for: error)
         guard movedSoFar > 0 else { return base }
         let noun = movedSoFar == 1 ? "message" : "messages"
@@ -168,11 +202,28 @@ extension AppState {
             + "Wait a moment and run it again to continue. (\(base))"
     }
 
-    /// One preview+apply pass of a sweep. Returns the number moved, `0` when the
-    /// filter is exhausted (stop), or `nil` when the request was superseded (a
-    /// newer action or a cancel) so the caller must abandon quietly.
-    private func runOneSweepPass(_ context: SweepContext) async throws -> Int? {
-        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else { return nil }
+    static func incompleteSweepMessage(movedSoFar: Int, reason: String) -> String {
+        let prefix: String
+        if movedSoFar > 0 {
+            let noun = movedSoFar == 1 ? "message" : "messages"
+            prefix = "Moved \(movedSoFar) \(noun), but"
+        } else {
+            prefix = "Stopped before moving any messages because"
+        }
+        return "\(prefix) \(reason), so the filter was not verified empty. "
+            + "Run cleanup again to continue."
+    }
+
+    static func sweepStoppedMessage(movedSoFar: Int) -> String {
+        "Stopped after moving \(movedSoFar) message\(movedSoFar == 1 ? "" : "s")."
+    }
+
+    /// One preview+apply pass of a sweep.
+    private func runOneSweepPass(_ context: SweepContext) async throws -> SweepPassOutcome {
+        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else {
+            return .superseded
+        }
+        guard !bulk.isCancellingSweep else { throw SweepStopped() }
         let preview = try await mailProvider.previewBulkCleanup(
             context.credentials,
             mailbox: context.query.mailbox,
@@ -180,8 +231,11 @@ extension AppState {
             sampleLimit: 0,
             selectionCap: Self.bulkSelectionCap
         )
-        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else { return nil }
-        guard preview.matchCount > 0, let selection = preview.selection else { return 0 }
+        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else {
+            return .superseded
+        }
+        guard !bulk.isCancellingSweep else { throw SweepStopped() }
+        guard preview.matchCount > 0, let selection = preview.selection else { return .exhausted }
 
         let result = try await mailProvider.applyBulkCleanup(
             context.credentials,
@@ -192,20 +246,23 @@ extension AppState {
             selectionCap: Self.bulkSelectionCap,
             onProgress: nil
         )
-        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else { return nil }
-        return result.affectedCount
+        guard isCurrentBulkCleanupApply(context.generation, account: context.account) else {
+            return .superseded
+        }
+        return result.affectedCount > 0 ? .moved(result.affectedCount) : .noProgress
     }
 
-    /// Stops an in-flight sweep or apply after the current pass by superseding
-    /// its generation, so its later stages no-op.
+    /// Stops an in-flight sweep after the current pass reports what it moved.
+    /// For non-sweep work, supersedes the request so later stages no-op.
     func cancelBulkCleanup() {
-        _ = nextBulkGeneration()
-        bulk.isApplying = false
-        bulk.isPreviewing = false
-        if let moved = bulk.sweepMovedSoFar {
-            bulk.completionMessage = "Stopped after moving \(moved) message\(moved == 1 ? "" : "s")."
+        guard bulk.isSweeping else {
+            _ = nextBulkGeneration()
+            bulk.isApplying = false
+            bulk.isPreviewing = false
+            Task { await runMailboxSearch() }
+            return
         }
-        bulk.sweepMovedSoFar = nil
-        Task { await runMailboxSearch() }
+        bulk.isCancellingSweep = true
+        bulk.isPreviewing = false
     }
 }

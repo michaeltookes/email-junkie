@@ -32,6 +32,9 @@ struct BulkCleanupState: Equatable {
     /// Whether a multi-pass sweep is currently running.
     var isSweeping: Bool { sweepMovedSoFar != nil }
 
+    /// Whether the user asked an active sweep to stop after the current pass.
+    var isCancellingSweep = false
+
     /// Whether a confirmed apply is currently allowed.
     var canApply: Bool {
         guard let preview, previewQuery != nil, previewAction == action, previewAccount != nil else { return false }
@@ -51,6 +54,7 @@ struct BulkCleanupState: Equatable {
         previewAccount = nil
         progress = nil
         sweepMovedSoFar = nil
+        isCancellingSweep = false
         error = nil
         completionMessage = nil
     }

@@ -52,12 +52,17 @@ struct BulkCleanupPanel: View {
     /// provider's visibility cap is impossible).
     private func run() async {
         if hasCheckedRows {
-            await appState.applyBulkCleanupToSelectedMessages()
+            await runCheckedRows()
         } else if appState.bulk.action.destination != nil {
             await appState.applyBulkCleanupSweep()
         } else {
             await appState.applyBulkCleanup()
         }
+    }
+
+    private func runCheckedRows() async {
+        guard !appState.bulkSelectionArchiveUnavailable else { return }
+        await appState.applyBulkCleanupToSelectedMessages()
     }
 
     private func start() {

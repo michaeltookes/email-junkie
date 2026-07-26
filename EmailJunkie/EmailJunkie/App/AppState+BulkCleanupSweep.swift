@@ -199,10 +199,9 @@ extension AppState {
         guard movedSoFar > 0 else { return base }
         let noun = movedSoFar == 1 ? "message" : "messages"
         guard Self.isTransientBulkError(error) else {
-            return "Moved \(movedSoFar) \(noun) before cleanup stopped. \(base)"
+            return permanentSweepErrorMessage(movedSoFar: movedSoFar, noun: noun, base: base)
         }
-        return "Moved \(movedSoFar) \(noun) before the server asked us to slow down. "
-            + "Wait a moment and run it again to continue. (\(base))"
+        return transientSweepErrorMessage(movedSoFar: movedSoFar, noun: noun, base: base)
     }
 
     static func incompleteSweepMessage(movedSoFar: Int, reason: String) -> String {
@@ -215,6 +214,15 @@ extension AppState {
         }
         return "\(prefix) \(reason), so the filter was not verified empty. "
             + "Run cleanup again to continue."
+    }
+
+    static func permanentSweepErrorMessage(movedSoFar: Int, noun: String, base: String) -> String {
+        "Moved \(movedSoFar) \(noun) before cleanup stopped. \(base)"
+    }
+
+    static func transientSweepErrorMessage(movedSoFar: Int, noun: String, base: String) -> String {
+        "Moved \(movedSoFar) \(noun) before the server asked us to slow down. "
+            + "Wait a moment and run it again to continue. (\(base))"
     }
 
     static func sweepStoppedMessage(movedSoFar: Int) -> String {

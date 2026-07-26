@@ -20,12 +20,15 @@ final class AppStateBulkSweepTests: XCTestCase {
             pollIntervalSeconds: 300,
             mailEmail: connected ? "me@gmail.com" : ""
         ))
-        return AppState(
+        let appState = AppState(
             persistence: persistence,
             secrets: secrets,
             mailProvider: provider,
             llm: FakeLLMProvider(result: .success(()))
         )
+        // No real delays in tests.
+        appState.bulkSweepPacingNanoseconds = 0
+        return appState
     }
 
     // MARK: - Convergence
@@ -104,6 +107,57 @@ final class AppStateBulkSweepTests: XCTestCase {
         XCTAssertLessThanOrEqual(provider.applyCallCount, 1, "mark read must be a single pass, not a sweep")
     }
 
+    // MARK: - Rate-limit resilience
+
+    /// A transient "try again later" must not kill the whole sweep — it should
+    /// back off and retry, then finish. This is the att.net failure we hit live.
+    func testSweepRidesOutTransientRateLimitAndCompletes() async {
+        let provider = FlakySweepProvider(
+            passCounts: [500, 200],
+            transientFailuresBeforeSuccess: 3,
+            transientError: .commandFailed("SEARCH Server error - Please try again later")
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(appState.bulk.completionMessage, "Moved 700 messages to Trash.")
+        XCTAssertNil(appState.bulk.error, "a recovered transient failure must not surface as an error")
+    }
+
+    /// Past the retry ceiling, give up — but report what was already moved and
+    /// invite another run, rather than reading as a total failure.
+    func testPersistentRateLimitReportsPartialProgress() async {
+        // First pass moves 500, then every later attempt is throttled forever.
+        let provider = FlakySweepProvider(
+            passCounts: [500, 200],
+            successesBeforeTransient: 1,
+            transientFailuresBeforeSuccess: 999,
+            transientError: .commandFailed("SEARCH Server error - Please try again later")
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertNil(appState.bulk.completionMessage)
+        let error = appState.bulk.error ?? ""
+        XCTAssertTrue(error.contains("Moved 500"), error)
+        XCTAssertTrue(error.contains("run it again"), error)
+    }
+
+    func testTransientErrorClassification() {
+        XCTAssertTrue(AppState.isTransientBulkError(
+            MailError.commandFailed("SEARCH Server error - Please try again later")
+        ))
+        XCTAssertTrue(AppState.isTransientBulkError(MailError.commandFailed("Too many requests")))
+        XCTAssertFalse(AppState.isTransientBulkError(MailError.commandFailed("Unknown command")))
+        XCTAssertFalse(AppState.isTransientBulkError(MailError.authenticationFailed("bad")))
+    }
+
     // MARK: - Failure handling
 
     func testSweepSurfacesAnApplyFailureWithoutClaimingSuccess() async {
@@ -140,6 +194,95 @@ final class AppStateBulkSweepTests: XCTestCase {
         XCTAssertTrue(message.contains("repeated passes"), message)
         XCTAssertTrue(message.contains("605"), message)
         XCTAssertTrue(message.contains("recover them from Trash"), message)
+    }
+}
+
+/// Like `SweepBulkCleanupMailProvider`, but throws a transient error on the
+/// first N apply attempts before letting the pass succeed — models a provider
+/// rate-limiting a too-fast sweep (item 49).
+private final class FlakySweepProvider: MailProvider, @unchecked Sendable {
+    private var remainingCounts: [Int]
+    private var successesRemaining: Int
+    private var transientBudget: Int
+    private let transientError: MailError
+
+    init(
+        passCounts: [Int],
+        successesBeforeTransient: Int = 0,
+        transientFailuresBeforeSuccess: Int,
+        transientError: MailError
+    ) {
+        remainingCounts = passCounts + [0]
+        successesRemaining = successesBeforeTransient
+        transientBudget = transientFailuresBeforeSuccess
+        self.transientError = transientError
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] { [] }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
+
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult { .empty(offset: offset) }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview {
+        let count = remainingCounts.first ?? 0
+        guard count > 0 else { return .empty }
+        return MailBulkPreview(
+            matchCount: count,
+            sample: [],
+            isPartial: false,
+            selection: MailBulkSelection(uidValidity: 1, uids: (0..<count).map { UInt32(1_000 + $0) })
+        )
+    }
+
+    // swiftlint:disable:next function_parameter_count
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selection: MailBulkSelection?,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        if successesRemaining <= 0, transientBudget > 0 {
+            transientBudget -= 1
+            throw transientError
+        }
+        if successesRemaining > 0 { successesRemaining -= 1 }
+        let moved = selection?.uids.count ?? 0
+        if !remainingCounts.isEmpty { remainingCounts.removeFirst() }
+        return MailBulkResult(action: action, affectedCount: moved)
     }
 }
 

@@ -1,6 +1,10 @@
 import EmailJunkieMail
 import Foundation
 
+/// Thrown to unwind a sweep that was superseded (a newer action or a cancel),
+/// so the caller returns quietly without reporting completion or an error.
+private struct SweepSuperseded: Error {}
+
 /// The fixed inputs of a multi-pass sweep, threaded through each pass so the
 /// per-pass helper stays small (item 49).
 private struct SweepContext {
@@ -21,6 +25,10 @@ extension AppState {
     /// non-terminating loop. At up to `bulkSelectionCap` moved per pass this
     /// covers far more mail than any real mailbox holds.
     static let bulkSweepMaxPasses = 200
+
+    /// How many consecutive transient failures (e.g. a rate-limit "try again
+    /// later") to ride out before giving up and reporting partial progress.
+    static let bulkSweepMaxTransientRetries = 5
 
     /// Repeatedly previews and applies a move action until the filter reports no
     /// remaining matches or a pass makes no progress.
@@ -67,23 +75,87 @@ extension AppState {
             }
         }
 
-        var totalMoved = 0
         do {
-            for _ in 0..<Self.bulkSweepMaxPasses {
-                let moved = try await runOneSweepPass(context)
-                guard let moved, moved > 0 else { break }
-                totalMoved += moved
-                bulk.sweepMovedSoFar = totalMoved
-            }
+            let total = try await sweepUntilClear(context)
             guard isCurrentBulkCleanupApply(requestGeneration, account: account) else { return }
             bulk.completionMessage = Self.bulkCompletionMessage(
-                for: MailBulkResult(action: action, affectedCount: totalMoved)
+                for: MailBulkResult(action: action, affectedCount: total)
             )
             await runMailboxSearch()
+        } catch is SweepSuperseded {
+            return
         } catch {
             guard isCurrentBulkCleanupApply(requestGeneration, account: account) else { return }
-            bulk.error = Self.message(for: error)
+            bulk.error = Self.sweepErrorMessage(error, movedSoFar: bulk.sweepMovedSoFar ?? 0)
+            await runMailboxSearch()
         }
+    }
+
+    /// Loops preview+apply, pacing between passes and riding out transient
+    /// rate-limit failures, until the filter is exhausted or a pass makes no
+    /// progress. Returns the total moved; throws on a non-transient error or
+    /// after too many consecutive transient failures.
+    private func sweepUntilClear(_ context: SweepContext) async throws -> Int {
+        var total = 0
+        var transientFailures = 0
+        for _ in 0..<Self.bulkSweepMaxPasses {
+            let moved: Int?
+            do {
+                moved = try await runOneSweepPass(context)
+            } catch {
+                guard try await shouldRetryAfterTransientFailure(error, &transientFailures, context) else {
+                    throw error
+                }
+                continue
+            }
+            transientFailures = 0
+            guard let moved else { throw SweepSuperseded() }
+            guard moved > 0 else { break }
+            total += moved
+            bulk.sweepMovedSoFar = total
+            // Breathe between passes so a rapid burst of full scans does not trip
+            // the provider's rate limit.
+            try? await Task.sleep(nanoseconds: bulkSweepPacingNanoseconds)
+        }
+        return total
+    }
+
+    /// Whether a failed pass should be retried: only transient failures, only
+    /// while still current, and only up to the retry ceiling. Backs off (longer
+    /// each time) before returning `true`.
+    private func shouldRetryAfterTransientFailure(
+        _ error: Error,
+        _ transientFailures: inout Int,
+        _ context: SweepContext
+    ) async throws -> Bool {
+        transientFailures += 1
+        guard Self.isTransientBulkError(error),
+              transientFailures <= Self.bulkSweepMaxTransientRetries,
+              isCurrentBulkCleanupApply(context.generation, account: context.account) else {
+            return false
+        }
+        try? await Task.sleep(nanoseconds: bulkSweepPacingNanoseconds &* UInt64(transientFailures))
+        return true
+    }
+
+    /// A rate limit or a temporary server hiccup is retryable; a rejected
+    /// command (e.g. no MOVE support) is not.
+    static func isTransientBulkError(_ error: Error) -> Bool {
+        guard case MailError.commandFailed(let text) = error else { return false }
+        let lowered = text.lowercased()
+        return ["try again", "server error", "temporar", "timeout", "too many", "busy", "unavailable"]
+            .contains { lowered.contains($0) }
+    }
+
+    /// Error text that preserves partial progress: a sweep that moved thousands
+    /// before being throttled should say so and invite another run, not read as
+    /// a total failure.
+    static func sweepErrorMessage(_ error: Error, movedSoFar: Int) -> String {
+        let base = message(for: error)
+        guard movedSoFar > 0 else { return base }
+        let noun = movedSoFar == 1 ? "message" : "messages"
+        return "Moved \(movedSoFar) \(noun) before the server asked us to slow down. "
+            + "Wait a moment and run it again to continue. (\(base))"
     }
 
     /// One preview+apply pass of a sweep. Returns the number moved, `0` when the

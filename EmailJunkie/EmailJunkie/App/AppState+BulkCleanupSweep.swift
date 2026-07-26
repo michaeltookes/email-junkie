@@ -198,6 +198,9 @@ extension AppState {
         let base = message(for: error)
         guard movedSoFar > 0 else { return base }
         let noun = movedSoFar == 1 ? "message" : "messages"
+        guard Self.isTransientBulkError(error) else {
+            return "Moved \(movedSoFar) \(noun) before cleanup stopped. \(base)"
+        }
         return "Moved \(movedSoFar) \(noun) before the server asked us to slow down. "
             + "Wait a moment and run it again to continue. (\(base))"
     }

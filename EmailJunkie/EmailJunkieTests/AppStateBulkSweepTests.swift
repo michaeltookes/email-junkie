@@ -233,6 +233,27 @@ final class AppStateBulkSweepTests: XCTestCase {
         XCTAssertTrue(error.contains("run it again"), error)
     }
 
+    func testPermanentErrorAfterPartialProgressKeepsTheRealCause() async {
+        let provider = FlakySweepProvider(
+            passCounts: [500, 200],
+            successesBeforeTransient: 1,
+            transientFailuresBeforeSuccess: 1,
+            transientError: .commandFailed("MOVE rejected")
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.previewBulkCleanup()
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertNil(appState.bulk.completionMessage)
+        let error = appState.bulk.error ?? ""
+        XCTAssertTrue(error.contains("Moved 500 messages before cleanup stopped"), error)
+        XCTAssertTrue(error.contains("MOVE rejected"), error)
+        XCTAssertFalse(error.contains("server asked us to slow down"), error)
+    }
+
     func testTransientErrorClassification() {
         XCTAssertTrue(AppState.isTransientBulkError(
             MailError.commandFailed("SEARCH Server error - Please try again later")

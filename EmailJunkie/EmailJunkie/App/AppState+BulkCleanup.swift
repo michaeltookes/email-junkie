@@ -97,6 +97,15 @@ extension AppState {
         bulk.canApply && bulk.previewQuery == browser.query
     }
 
+    var bulkSelectionArchiveUnavailable: Bool {
+        guard let mailbox = browser.resultQuery?.mailbox else { return false }
+        return Self.archiveActionMovesToSameMailbox(
+            bulk.action,
+            source: mailbox,
+            naming: connectedMailboxNaming
+        )
+    }
+
     /// Scans the mailbox for what the current filter would affect. Read-only.
     func previewBulkCleanup() async {
         let requestGeneration = nextBulkGeneration()
@@ -161,6 +170,14 @@ extension AppState {
         }
         guard let mailbox = browser.resultQuery?.mailbox else {
             bulk.error = "Search the mailbox before cleaning up specific messages."
+            return
+        }
+        guard !Self.archiveActionMovesToSameMailbox(
+            bulk.action,
+            source: mailbox,
+            naming: credentials.mailboxNaming
+        ) else {
+            bulk.error = Self.bulkArchiveUnavailableMessage
             return
         }
 
@@ -302,6 +319,18 @@ extension AppState {
         case .moveToTrash:
             return "Move \(subject) to Trash? You can recover them from Trash."
         }
+    }
+
+    static let bulkArchiveUnavailableMessage =
+        "Archive is unavailable because the source and archive folders are the same."
+
+    static func archiveActionMovesToSameMailbox(
+        _ action: MailBulkAction,
+        source: Mailbox,
+        naming: MailboxNaming
+    ) -> Bool {
+        guard action == .archive, let destination = action.destination else { return false }
+        return source.imapName(using: naming) == destination.imapName(using: naming)
     }
 
     func validatedBulkApplyContext() -> BulkCleanupApplyContext? {

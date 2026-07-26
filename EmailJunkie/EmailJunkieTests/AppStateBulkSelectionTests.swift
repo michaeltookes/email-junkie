@@ -41,12 +41,17 @@ final class AppStateBulkSelectionTests: XCTestCase {
     }
 
     /// Puts the browser in a realistic post-search state with `count` loaded rows.
-    private func seedResults(_ appState: AppState, count: Int, totalMatches: Int? = nil) {
+    private func seedResults(
+        _ appState: AppState,
+        count: Int,
+        totalMatches: Int? = nil,
+        mailbox: Mailbox = .inbox
+    ) {
         let loaded = messages(count)
         appState.browser.results = loaded
         appState.browser.totalMatches = totalMatches ?? count
         appState.browser.resultQuery = MailboxBrowserQuery(
-            mailbox: .inbox,
+            mailbox: mailbox,
             criteria: appState.browser.criteria
         )
     }
@@ -174,6 +179,23 @@ final class AppStateBulkSelectionTests: XCTestCase {
 
         XCTAssertEqual(provider.applyCallCount, 0)
         XCTAssertEqual(appState.bulk.error, "Connect an account first.")
+    }
+
+    func testArchiveSelectionFromGmailAllMailIsRefused() async {
+        let provider = BulkCleanupMailProvider(
+            applyResult: .success(MailBulkResult(action: .archive, affectedCount: 1))
+        )
+        let appState = makeAppState(provider: provider)
+        seedResults(appState, count: 2, mailbox: .allMail)
+        appState.bulk.action = .archive
+        appState.browser.toggleSelection(100)
+
+        XCTAssertTrue(appState.bulkSelectionArchiveUnavailable)
+
+        await appState.applyBulkCleanupToSelectedMessages()
+
+        XCTAssertEqual(provider.applyCallCount, 0)
+        XCTAssertEqual(appState.bulk.error, AppState.bulkArchiveUnavailableMessage)
     }
 
     /// The rows came from a specific folder. If the picker moved on, the checked

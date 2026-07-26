@@ -84,8 +84,8 @@ struct BulkCleanupPanel: View {
             if hasCheckedRows {
                 // Checked rows are their own preview, so act directly.
                 Button("\(appState.bulk.action.verb) \(checkedCount) checked") { start() }
-                    .disabled(isBusy)
-                    .help("Apply to only the messages you checked")
+                    .disabled(isBusy || appState.bulkSelectionArchiveUnavailable)
+                    .help(checkedRowsHelpText)
             } else {
                 Button("Preview cleanup") {
                     Task { await appState.previewBulkCleanup() }
@@ -113,6 +113,9 @@ struct BulkCleanupPanel: View {
     /// 605 matches", and that has to be readable at a glance.
     private var scopeCaption: String {
         if hasCheckedRows {
+            if appState.bulkSelectionArchiveUnavailable {
+                return AppState.bulkArchiveUnavailableMessage
+            }
             let noun = checkedCount == 1 ? "message" : "messages"
             return "Applies to \(checkedCount) checked \(noun) only"
         }
@@ -193,6 +196,12 @@ struct BulkCleanupPanel: View {
 
     private var destructiveRole: ButtonRole? {
         appState.bulk.action == .moveToTrash ? .destructive : nil
+    }
+
+    private var checkedRowsHelpText: String {
+        appState.bulkSelectionArchiveUnavailable
+            ? AppState.bulkArchiveUnavailableMessage
+            : "Apply to only the messages you checked"
     }
 
     private var progressText: String {

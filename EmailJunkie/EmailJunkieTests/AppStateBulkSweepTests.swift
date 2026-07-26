@@ -1,0 +1,212 @@
+import EmailJunkieMail
+import XCTest
+@testable import EmailJunkie
+
+/// Tests for the verify-until-stable bulk sweep (item 49).
+///
+/// att.net/Yahoo only exposes ~10,000 messages over IMAP at once, so a single
+/// pass can never clear a larger filtered set — removing the visible matches
+/// reveals older ones. The sweep loops preview+apply until the filter reports
+/// zero, which is the only way "clean all" actually clears all on such a mailbox.
+@MainActor
+final class AppStateBulkSweepTests: XCTestCase {
+
+    private func makeAppState(provider: MailProvider, connected: Bool = true) -> AppState {
+        let secrets = connected
+            ? InMemorySecretStore(seed: [.mailAppPassword: "app-pw"])
+            : InMemorySecretStore()
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: connected ? "me@gmail.com" : ""
+        ))
+        return AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()))
+        )
+    }
+
+    // MARK: - Convergence
+
+    func testSweepLoopsUntilTheFilterReportsZero() async {
+        // The exact att.net convergence we saw live: 605 visible, then 318, then
+        // 134 as older mail slid into view.
+        let provider = SweepBulkCleanupMailProvider(passCounts: [605, 318, 134])
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(provider.appliedSelectionCounts, [605, 318, 134])
+        XCTAssertEqual(appState.bulk.completionMessage, "Moved 1057 messages to Trash.")
+        XCTAssertNil(appState.bulk.error)
+        XCTAssertFalse(appState.bulk.isSweeping)
+    }
+
+    func testSweepPreviewsOnceMoreThanItAppliesToConfirmZero() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [200, 50])
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .archive
+
+        await appState.applyBulkCleanupSweep()
+
+        // Two applies, three previews (the last returns zero and ends the loop).
+        XCTAssertEqual(provider.applyCallCount, 2)
+        XCTAssertEqual(provider.previewCallCount, 3)
+        XCTAssertEqual(appState.bulk.completionMessage, "Archived 250 messages.")
+    }
+
+    func testSweepOnAnAlreadyEmptyFilterMovesNothing() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [])
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "nobody@nowhere.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(provider.applyCallCount, 0)
+        XCTAssertEqual(appState.bulk.completionMessage, "Moved 0 messages to Trash.")
+    }
+
+    // MARK: - Termination safety
+
+    /// If a pass reports moving nothing (e.g. every UID vanished) the loop must
+    /// stop rather than spin forever, even though the preview still shows matches.
+    func testSweepStopsWhenAPassMakesNoProgress() async {
+        let provider = StuckSweepProvider(matchCount: 500)
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertLessThanOrEqual(provider.applyCallCount, 2, "must not loop forever on zero progress")
+        XCTAssertFalse(appState.bulk.isSweeping)
+    }
+
+    // MARK: - Action routing
+
+    /// Marking read removes nothing, so looping cannot reach past the visibility
+    /// cap; the sweep entry point must fall back to a single pass instead of
+    /// looping pointlessly.
+    func testMarkReadDoesNotSweep() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [300, 300, 300])
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .markRead
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertLessThanOrEqual(provider.applyCallCount, 1, "mark read must be a single pass, not a sweep")
+    }
+
+    // MARK: - Failure handling
+
+    func testSweepSurfacesAnApplyFailureWithoutClaimingSuccess() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [500], applyError: .commandFailed("MOVE failed"))
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertNil(appState.bulk.completionMessage)
+        XCTAssertEqual(appState.bulk.error, AppState.message(for: MailError.commandFailed("MOVE failed")))
+        XCTAssertFalse(appState.bulk.isSweeping)
+    }
+
+    func testSweepWithoutAccountIsRefused() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [500])
+        let appState = makeAppState(provider: provider, connected: false)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(provider.applyCallCount, 0)
+        XCTAssertEqual(appState.bulk.error, "Connect an account first.")
+    }
+
+    // MARK: - Copy
+
+    /// The move confirmation must warn that a sweep can exceed the visible count,
+    /// so approving is informed consent, not a surprise.
+    func testMoveConfirmationWarnsAboutRepeatedPasses() {
+        let message = AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 605, isPartial: false)
+        XCTAssertTrue(message.contains("repeated passes"), message)
+        XCTAssertTrue(message.contains("605"), message)
+        XCTAssertTrue(message.contains("recover them from Trash"), message)
+    }
+}
+
+/// A provider whose filter never empties but whose applies move nothing — the
+/// pathological "no progress" case the sweep must not loop on forever.
+private final class StuckSweepProvider: MailProvider, @unchecked Sendable {
+    private let matchCount: Int
+    private(set) var applyCallCount = 0
+
+    init(matchCount: Int) { self.matchCount = matchCount }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] { [] }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
+
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult { .empty(offset: offset) }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview {
+        MailBulkPreview(
+            matchCount: matchCount,
+            sample: [],
+            isPartial: false,
+            selection: MailBulkSelection(uidValidity: 1, uids: (0..<matchCount).map { UInt32(1_000 + $0) })
+        )
+    }
+
+    // swiftlint:disable:next function_parameter_count
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selection: MailBulkSelection?,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        applyCallCount += 1
+        return MailBulkResult(action: action, affectedCount: 0)
+    }
+}

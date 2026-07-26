@@ -22,10 +22,25 @@ struct BulkCleanupState: Equatable {
     var error: String?
     var completionMessage: String?
 
+    /// While a multi-pass sweep runs, the running total moved so far. att.net/
+    /// Yahoo exposes only ~10,000 messages over IMAP at once, so clearing a large
+    /// filter takes repeated passes as older mail becomes visible; the total is
+    /// unknown up front, so this is an ever-growing count rather than N-of-M
+    /// progress (item 49).
+    var sweepMovedSoFar: Int?
+
+    /// Whether a multi-pass sweep is currently running.
+    var isSweeping: Bool { sweepMovedSoFar != nil }
+
     /// Whether a confirmed apply is currently allowed.
     var canApply: Bool {
         guard let preview, previewQuery != nil, previewAction == action, previewAccount != nil else { return false }
         return preview.matchCount > 0 && !isPreviewing && !isApplying
+    }
+
+    /// Whether any cleanup work is in flight.
+    var isBusy: Bool {
+        isPreviewing || isApplying
     }
 
     /// Clears everything derived from a previous run.
@@ -35,6 +50,7 @@ struct BulkCleanupState: Equatable {
         previewAction = nil
         previewAccount = nil
         progress = nil
+        sweepMovedSoFar = nil
         error = nil
         completionMessage = nil
     }
@@ -247,13 +263,19 @@ extension AppState {
             subject = "all \(matchCount) \(noun) matching this filter"
         }
 
+        // Move actions sweep until the mailbox is clear, so the true total may
+        // exceed the currently-visible count on a provider that only exposes a
+        // slice of a huge mailbox at a time (item 49).
+        let sweepNote = " This runs in repeated passes until every match is"
+            + " gone, so it may move more than the \(matchCount) visible now."
+
         switch action {
         case .markRead:
             return "Mark \(subject) as read?"
         case .archive:
-            return "Archive \(subject)? You can find them in the Archive folder."
+            return "Archive \(subject)?\(sweepNote) You can find them in the Archive folder."
         case .moveToTrash:
-            return "Move \(subject) to Trash? You can recover them from Trash."
+            return "Move \(subject) to Trash?\(sweepNote) You can recover them from Trash."
         }
     }
 
@@ -325,7 +347,7 @@ extension AppState {
         )
     }
 
-    private static func bulkCleanupCriteria(
+    static func bulkCleanupCriteria(
         for criteria: MailSearchCriteria,
         action: MailBulkAction
     ) -> MailSearchCriteria? {
@@ -364,7 +386,7 @@ extension AppState {
         bulkGeneration == requestGeneration && mailCredentials == credentials
     }
 
-    private func isCurrentBulkCleanupApply(
+    func isCurrentBulkCleanupApply(
         _ requestGeneration: Int,
         account: BulkCleanupAccountIdentity
     ) -> Bool {

@@ -46,10 +46,15 @@ struct BulkCleanupPanel: View {
         appState.browser.selectedMessages.count
     }
 
-    /// Routes to the checked-rows path or the previewed-filter path.
+    /// Routes to the checked-rows path (single pass on the picked UIDs) or the
+    /// filter path. On the filter path a move action sweeps until the mailbox is
+    /// clear; mark read is a single pass (it removes nothing, so looping past the
+    /// provider's visibility cap is impossible).
     private func run() async {
         if hasCheckedRows {
             await appState.applyBulkCleanupToSelectedMessages()
+        } else if appState.bulk.action.destination != nil {
+            await appState.applyBulkCleanupSweep()
         } else {
             await appState.applyBulkCleanup()
         }
@@ -142,7 +147,14 @@ struct BulkCleanupPanel: View {
 
     @ViewBuilder
     private var statusRow: some View {
-        if appState.bulk.isPreviewing {
+        if appState.bulk.isSweeping {
+            HStack(spacing: 8) {
+                label(sweepText, showsSpinner: true)
+                Button("Stop") { appState.cancelBulkCleanup() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+        } else if appState.bulk.isPreviewing {
             label("Scanning mailbox…", showsSpinner: true)
         } else if appState.bulk.isApplying {
             label(progressText, showsSpinner: true)
@@ -153,6 +165,14 @@ struct BulkCleanupPanel: View {
         if let error = appState.bulk.error {
             Text(error).font(.caption).foregroundStyle(.red)
         }
+    }
+
+    /// Sweep progress is an ever-growing count, not N-of-M: the true total is
+    /// unknown until the mailbox stops revealing older matches (item 49).
+    private var sweepText: String {
+        let moved = appState.bulk.sweepMovedSoFar ?? 0
+        return "Cleaning your mailbox — \(moved) moved so far "
+            + "(att.net shows 10,000 at a time)…"
     }
 
     private func label(_ text: String, showsSpinner: Bool) -> some View {

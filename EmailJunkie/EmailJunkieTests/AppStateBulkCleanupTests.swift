@@ -377,14 +377,13 @@ final class AppStateBulkCleanupTests: XCTestCase {
     // MARK: - Copy
 
     func testConfirmationNamesTheCountAndRecoveryPath() {
-        XCTAssertEqual(
-            AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 1, isPartial: false),
-            "Move 1 message matching this filter to Trash? You can recover them from Trash."
-        )
-        XCTAssertEqual(
-            AppState.bulkConfirmationMessage(for: .archive, matchCount: 12, isPartial: false),
-            "Archive all 12 messages matching this filter? You can find them in the Archive folder."
-        )
+        let trash = AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 1, isPartial: false)
+        XCTAssertTrue(trash.hasPrefix("Move 1 message matching this filter to Trash?"), trash)
+        XCTAssertTrue(trash.hasSuffix("You can recover them from Trash."), trash)
+
+        let archive = AppState.bulkConfirmationMessage(for: .archive, matchCount: 12, isPartial: false)
+        XCTAssertTrue(archive.hasPrefix("Archive all 12 messages matching this filter?"), archive)
+        XCTAssertTrue(archive.hasSuffix("You can find them in the Archive folder."), archive)
     }
 
     /// The browser lists one page at a time ("Showing 25 of 605"), so a bare
@@ -396,9 +395,9 @@ final class AppStateBulkCleanupTests: XCTestCase {
             matchCount: 605,
             isPartial: false
         )
-        XCTAssertEqual(
-            message,
-            "Move all 605 messages matching this filter to Trash? You can recover them from Trash."
+        XCTAssertTrue(
+            message.hasPrefix("Move all 605 messages matching this filter to Trash?"),
+            message
         )
         XCTAssertTrue(message.contains("all 605"), message)
         XCTAssertTrue(message.contains("matching this filter"), message)

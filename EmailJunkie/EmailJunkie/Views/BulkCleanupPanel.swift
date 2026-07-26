@@ -93,7 +93,7 @@ struct BulkCleanupPanel: View {
                 .disabled(isBusy)
                 .help("Count every message the current filter matches, without changing anything")
 
-                if appState.bulk.canApply {
+                if appState.canApplyBulkCleanup {
                     Button(appState.bulk.action.verb) { start() }
                         .keyboardShortcut(.none)
                         .help("Apply to every message the preview matched")

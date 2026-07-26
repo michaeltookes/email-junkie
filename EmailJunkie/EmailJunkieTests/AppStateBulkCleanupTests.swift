@@ -247,6 +247,21 @@ final class AppStateBulkCleanupTests: XCTestCase {
         )
     }
 
+    func testChangingTheFilterAfterPreviewHidesTheApplyAction() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 9))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+
+        await appState.previewBulkCleanup()
+        XCTAssertTrue(appState.canApplyBulkCleanup)
+
+        appState.browser.sender = "boss@work.com"
+
+        XCTAssertFalse(appState.canApplyBulkCleanup)
+    }
+
     func testChangingTheFolderAfterPreviewBlocksTheRun() async {
         let provider = BulkCleanupMailProvider(
             previewResult: .success(preview(matchCount: 9))

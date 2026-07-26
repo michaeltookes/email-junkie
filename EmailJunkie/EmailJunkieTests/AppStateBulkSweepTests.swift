@@ -41,6 +41,7 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertEqual(provider.appliedSelectionCounts, [605, 318, 134])
@@ -55,20 +56,22 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .archive
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
-        // Two applies, three previews (the last returns zero and ends the loop).
+        // One approved preview, then two sweep applies and a final zero preview.
         XCTAssertEqual(provider.applyCallCount, 2)
-        XCTAssertEqual(provider.previewCallCount, 3)
+        XCTAssertEqual(provider.previewCallCount, 4)
         XCTAssertEqual(appState.bulk.completionMessage, "Archived 250 messages.")
     }
 
-    func testSweepOnAnAlreadyEmptyFilterMovesNothing() async {
-        let provider = SweepBulkCleanupMailProvider(passCounts: [])
+    func testSweepOnAFilterThatEmptiedAfterPreviewMovesNothing() async {
+        let provider = VanishingSweepProvider(initialCount: 25)
         let appState = makeAppState(provider: provider)
-        appState.browser.sender = "nobody@nowhere.com"
+        appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertEqual(provider.applyCallCount, 0)
@@ -85,10 +88,47 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertLessThanOrEqual(provider.applyCallCount, 2, "must not loop forever on zero progress")
         XCTAssertFalse(appState.bulk.isSweeping)
+    }
+
+    func testChangingTheFilterAfterPreviewBlocksSweep() async {
+        let provider = SweepBulkCleanupMailProvider(passCounts: [9])
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.previewBulkCleanup()
+        appState.browser.sender = "boss@work.com"
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(provider.applyCallCount, 0, "must not sweep a filter the user never previewed")
+        XCTAssertNil(appState.bulk.preview)
+        XCTAssertEqual(
+            appState.bulk.error,
+            "The search changed since the preview. Preview again before running cleanup."
+        )
+    }
+
+    func testSweepReportsIncompleteWhenPassLimitIsReached() async {
+        let provider = SweepBulkCleanupMailProvider(
+            passCounts: Array(repeating: 1, count: AppState.bulkSweepMaxPasses)
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+        appState.bulk.action = .moveToTrash
+
+        await appState.previewBulkCleanup()
+        await appState.applyBulkCleanupSweep()
+
+        XCTAssertEqual(provider.applyCallCount, AppState.bulkSweepMaxPasses)
+        XCTAssertNil(appState.bulk.completionMessage)
+        let error = appState.bulk.error ?? ""
+        XCTAssertTrue(error.contains("Moved \(AppState.bulkSweepMaxPasses) messages"), error)
+        XCTAssertTrue(error.contains("before verifying the filter was empty"), error)
     }
 
     // MARK: - Action routing
@@ -102,6 +142,7 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .markRead
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertLessThanOrEqual(provider.applyCallCount, 1, "mark read must be a single pass, not a sweep")
@@ -121,6 +162,7 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertEqual(appState.bulk.completionMessage, "Moved 700 messages to Trash.")
@@ -141,6 +183,7 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertNil(appState.bulk.completionMessage)
@@ -166,6 +209,7 @@ final class AppStateBulkSweepTests: XCTestCase {
         appState.browser.sender = "spam@junk.com"
         appState.bulk.action = .moveToTrash
 
+        await appState.previewBulkCleanup()
         await appState.applyBulkCleanupSweep()
 
         XCTAssertNil(appState.bulk.completionMessage)
@@ -283,6 +327,78 @@ private final class FlakySweepProvider: MailProvider, @unchecked Sendable {
         let moved = selection?.uids.count ?? 0
         if !remainingCounts.isEmpty { remainingCounts.removeFirst() }
         return MailBulkResult(action: action, affectedCount: moved)
+    }
+}
+
+/// A provider whose approved preview has matches, but whose next preview is
+/// empty because the mailbox changed before the sweep started.
+private final class VanishingSweepProvider: MailProvider, @unchecked Sendable {
+    private var previewCounts: [Int]
+    private(set) var applyCallCount = 0
+
+    init(initialCount: Int) {
+        previewCounts = [initialCount, 0]
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] { [] }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
+
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult { .empty(offset: offset) }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws {}
+
+    func previewBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        sampleLimit: Int,
+        selectionCap: Int
+    ) async throws -> MailBulkPreview {
+        let count = previewCounts.isEmpty ? 0 : previewCounts.removeFirst()
+        guard count > 0 else { return .empty }
+        return MailBulkPreview(
+            matchCount: count,
+            sample: [],
+            isPartial: false,
+            selection: MailBulkSelection(uidValidity: 1, uids: (0..<count).map { UInt32(1_000 + $0) })
+        )
+    }
+
+    // swiftlint:disable:next function_parameter_count
+    func applyBulkCleanup(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        action: MailBulkAction,
+        selection: MailBulkSelection?,
+        selectionCap: Int,
+        onProgress: (@Sendable (MailBulkProgress) -> Void)?
+    ) async throws -> MailBulkResult {
+        applyCallCount += 1
+        return MailBulkResult(action: action, affectedCount: selection?.uids.count ?? 0)
     }
 }
 

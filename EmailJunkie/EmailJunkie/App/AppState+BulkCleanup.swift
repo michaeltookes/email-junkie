@@ -70,10 +70,11 @@ struct BulkCleanupAccountIdentity: Equatable {
     }
 }
 
-private struct BulkCleanupApplyContext {
+struct BulkCleanupApplyContext {
     var previewQuery: MailboxBrowserQuery
     var criteria: MailSearchCriteria
     var preview: MailBulkPreview
+    var action: MailBulkAction
     var previewAccount: BulkCleanupAccountIdentity
     var credentials: MailAccountCredentials
 }
@@ -87,6 +88,10 @@ extension AppState {
 
     /// Ceiling on how many messages a single cleanup pass touches.
     static let bulkSelectionCap = 5_000
+
+    var canApplyBulkCleanup: Bool {
+        bulk.canApply && bulk.previewQuery == browser.query
+    }
 
     /// Scans the mailbox for what the current filter would affect. Read-only.
     func previewBulkCleanup() async {
@@ -184,7 +189,7 @@ extension AppState {
         guard let applyContext = validatedBulkApplyContext() else { return }
 
         let requestGeneration = nextBulkGeneration()
-        let action = bulk.action
+        let action = applyContext.action
         bulk.error = nil
         bulk.completionMessage = nil
         bulk.isApplying = true
@@ -295,7 +300,7 @@ extension AppState {
         }
     }
 
-    private func validatedBulkApplyContext() -> BulkCleanupApplyContext? {
+    func validatedBulkApplyContext() -> BulkCleanupApplyContext? {
         guard let previewQuery = bulk.previewQuery,
               let preview = bulk.preview,
               let previewAction = bulk.previewAction,
@@ -342,6 +347,7 @@ extension AppState {
             previewQuery: previewQuery,
             criteria: criteria,
             preview: preview,
+            action: previewAction,
             previewAccount: previewAccount,
             credentials: credentials
         )

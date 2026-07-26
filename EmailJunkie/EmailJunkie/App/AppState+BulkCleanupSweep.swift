@@ -5,6 +5,10 @@ import Foundation
 /// so the caller returns quietly without reporting completion or an error.
 private struct SweepSuperseded: Error {}
 
+/// Thrown when the sweep reaches its safety pass ceiling before a final preview
+/// confirms that no matches remain.
+private struct SweepPassLimitExceeded: Error {}
+
 /// The fixed inputs of a multi-pass sweep, threaded through each pass so the
 /// per-pass helper stays small (item 49).
 private struct SweepContext {
@@ -41,29 +45,29 @@ extension AppState {
     /// marking read leaves the window unchanged, so callers route that to the
     /// single-pass path instead.
     func applyBulkCleanupSweep() async {
-        let query = browser.query
-        let action = bulk.action
         let credentials = mailCredentials
         guard credentials.isComplete else {
             bulk.error = "Connect an account first."
             return
         }
+        guard let applyContext = validatedBulkApplyContext() else { return }
+        let action = applyContext.action
         guard action.destination != nil else {
             // No source-shrinking effect, so a sweep cannot make progress past
             // the visibility cap; a single pass is the honest behavior.
             await applyBulkCleanup()
             return
         }
-        guard let criteria = Self.bulkCleanupCriteria(for: query.criteria, action: action) else {
-            bulk.error = "Nothing matches that filter."
-            return
-        }
 
         let requestGeneration = nextBulkGeneration()
-        let account = BulkCleanupAccountIdentity(credentials: credentials)
+        let account = applyContext.previewAccount
         let context = SweepContext(
-            query: query, action: action, criteria: criteria,
-            credentials: credentials, account: account, generation: requestGeneration
+            query: applyContext.previewQuery,
+            action: action,
+            criteria: applyContext.criteria,
+            credentials: applyContext.credentials,
+            account: account,
+            generation: requestGeneration
         )
         bulk.reset()
         bulk.isApplying = true
@@ -93,8 +97,9 @@ extension AppState {
 
     /// Loops preview+apply, pacing between passes and riding out transient
     /// rate-limit failures, until the filter is exhausted or a pass makes no
-    /// progress. Returns the total moved; throws on a non-transient error or
-    /// after too many consecutive transient failures.
+    /// progress. Returns the total moved; throws on a non-transient error, after
+    /// too many consecutive transient failures, or when the pass limit is reached
+    /// before the filter is verified empty.
     private func sweepUntilClear(_ context: SweepContext) async throws -> Int {
         var total = 0
         var transientFailures = 0
@@ -110,14 +115,14 @@ extension AppState {
             }
             transientFailures = 0
             guard let moved else { throw SweepSuperseded() }
-            guard moved > 0 else { break }
+            guard moved > 0 else { return total }
             total += moved
             bulk.sweepMovedSoFar = total
             // Breathe between passes so a rapid burst of full scans does not trip
             // the provider's rate limit.
             try? await Task.sleep(nanoseconds: bulkSweepPacingNanoseconds)
         }
-        return total
+        throw SweepPassLimitExceeded()
     }
 
     /// Whether a failed pass should be retried: only transient failures, only
@@ -151,6 +156,11 @@ extension AppState {
     /// before being throttled should say so and invite another run, not read as
     /// a total failure.
     static func sweepErrorMessage(_ error: Error, movedSoFar: Int) -> String {
+        if error is SweepPassLimitExceeded {
+            let noun = movedSoFar == 1 ? "message" : "messages"
+            return "Moved \(movedSoFar) \(noun), but stopped at the sweep pass limit "
+                + "before verifying the filter was empty. Run cleanup again to continue."
+        }
         let base = message(for: error)
         guard movedSoFar > 0 else { return base }
         let noun = movedSoFar == 1 ? "message" : "messages"

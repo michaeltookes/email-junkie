@@ -18,6 +18,18 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
         }
     }
 
+    func testIncompleteEditOfTrackedHostPersistsPendingOwnershipAcrossRelaunch() {
+        assertPendingHostSurvivesRelaunch { firstLaunch in
+            firstLaunch.updateMailEmailFromUser("me@company.example")
+            firstLaunch.updateMailHostFromUser("imap.gmail.com")
+            firstLaunch.updateMailEmailFromUser("renamed@company")
+
+            let settings = firstLaunch.buildSettings()
+            XCTAssertNil(settings.mailHostGuidanceEmail)
+            XCTAssertTrue(settings.mailHostGuidancePendingEmail)
+        }
+    }
+
     private func assertPendingHostSurvivesRelaunch(_ configure: (AppState) -> Void) {
         let persistence = AppStateMemoryPersistence()
         let firstLaunch = AppState(

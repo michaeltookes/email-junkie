@@ -196,6 +196,18 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testRecognizedDomainAfterTransientMalformedEditSupersedesExplicitCustomHost() {
+        let app = makeAppState()
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.company.example")
+
+        app.updateMailEmailFromUser("me@company")
+        app.updateMailEmailFromUser("me@yahoo.com")
+
+        XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+    }
+
     func testRecognizedDomainSupersedesVerifiedCustomHostFromCustomDomain() async {
         let app = AppState(
             persistence: AppStateMemoryPersistence(),

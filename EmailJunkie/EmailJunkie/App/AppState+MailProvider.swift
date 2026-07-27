@@ -35,7 +35,8 @@ extension AppState {
         mailEmail = email
 
         if hasHostEnteredBeforeEmail {
-            if Self.suggestedIMAPHost(forEmail: email) != nil {
+            if let suggestion = Self.suggestedIMAPHost(forEmail: email) {
+                mailHost = suggestion
                 markMailHostManagedByApp()
             } else if Self.normalizedEmailDomainForHostTracking(email) != nil {
                 mailHostExplicitlyEditedBeforeEmail = false
@@ -45,6 +46,8 @@ extension AppState {
             }
         } else if hasHostAssociatedWithTrackedEmail {
             guard let currentDomain = Self.normalizedEmailDomainForHostTracking(email) else {
+                mailHostExplicitlyEditedEmail = nil
+                mailHostExplicitlyEditedBeforeEmail = true
                 return
             }
 

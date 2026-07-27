@@ -11,9 +11,24 @@ enum EmailProviderKind: Equatable, CaseIterable {
     case icloud
 
     /// Classifies an email address by domain, or `nil` when unrecognized.
+    /// This also keeps host suggestion and credential guidance on one source of
+    /// truth for provider variants.
     static func forEmail(_ email: String) -> EmailProviderKind? {
         guard let domain = Self.domain(of: email) else { return nil }
-        return domainMap[domain]
+        switch domain {
+        case "gmail.com", "googlemail.com":
+            return .gmail
+        case "att.net", "sbcglobal.net", "bellsouth.net":
+            return .att
+        case "yahoo.com", "ymail.com", "rocketmail.com":
+            return .yahoo
+        case "aol.com":
+            return .aol
+        case "icloud.com", "me.com", "mac.com":
+            return .icloud
+        default:
+            return nil
+        }
     }
 
     /// The IMAP host for this provider (its SMTP host is derived from it).
@@ -41,20 +56,4 @@ enum EmailProviderKind: Equatable, CaseIterable {
         return domain.isEmpty ? nil : domain
     }
 
-    /// Domains kept identical to item 41's original host map, so host suggestion
-    /// behavior is unchanged; guidance is layered on top.
-    private static let domainMap: [String: EmailProviderKind] = [
-        "gmail.com": .gmail,
-        "googlemail.com": .gmail,
-        "att.net": .att,
-        "sbcglobal.net": .att,
-        "bellsouth.net": .att,
-        "yahoo.com": .yahoo,
-        "ymail.com": .yahoo,
-        "rocketmail.com": .yahoo,
-        "aol.com": .aol,
-        "icloud.com": .icloud,
-        "me.com": .icloud,
-        "mac.com": .icloud
-    ]
 }

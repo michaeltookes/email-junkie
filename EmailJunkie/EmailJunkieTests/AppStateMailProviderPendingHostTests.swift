@@ -25,9 +25,30 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
             firstLaunch.updateMailEmailFromUser("renamed@company")
 
             let settings = firstLaunch.buildSettings()
-            XCTAssertNil(settings.mailHostGuidanceEmail)
+            XCTAssertEqual(settings.mailHostGuidanceEmail, "me@company.example")
             XCTAssertTrue(settings.mailHostGuidancePendingEmail)
         }
+    }
+
+    func testIncompleteEditClearsTrackedHostForDifferentDomainAfterRelaunch() {
+        let persistence = AppStateMemoryPersistence()
+        let firstLaunch = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore()
+        )
+        firstLaunch.updateMailEmailFromUser("me@company.example")
+        firstLaunch.updateMailHostFromUser("imap.company.example")
+        firstLaunch.updateMailEmailFromUser("renamed@company")
+        firstLaunch.saveSettingsSync()
+
+        let secondLaunch = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore()
+        )
+        secondLaunch.updateMailEmailFromUser("me@other-company.example")
+
+        XCTAssertEqual(secondLaunch.mailHost, "")
+        XCTAssertNil(secondLaunch.credentialGuidanceHostFallback)
     }
 
     private func assertPendingHostSurvivesRelaunch(_ configure: (AppState) -> Void) {

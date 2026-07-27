@@ -16,6 +16,17 @@ final class AppStateMailProviderCustomHostTests: XCTestCase {
         XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "renamed@yahoo.com")
     }
 
+    func testCustomHostEnteredBeforeRecognizedEmailIsRetained() {
+        let app = makeAppState()
+
+        app.updateMailHostFromUser("imap.proxy.example")
+        app.updateMailEmailFromUser("me@yahoo.com")
+
+        XCTAssertEqual(app.mailHost, "imap.proxy.example")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.proxy.example")
+        XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "me@yahoo.com")
+    }
+
     func testVerifiedCustomHostForRecognizedDomainIsSupersededWhenSwitchingProviders() async {
         let app = AppState(
             persistence: AppStateMemoryPersistence(),

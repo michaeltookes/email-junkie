@@ -143,7 +143,7 @@ struct Settings: Codable, Equatable {
             copy.mailHostGuidanceEmail = nil
         }
         if copy.mailHostGuidancePendingEmail,
-           !hasStoredGuidanceHost || copy.mailHostGuidanceEmail != nil {
+           !hasStoredGuidanceHost {
             copy.mailHostGuidancePendingEmail = false
         }
         return copy

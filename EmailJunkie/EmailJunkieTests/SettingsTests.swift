@@ -94,14 +94,16 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(settings.mailHostGuidancePendingEmail)
     }
 
-    func testValidatedClearsPendingHostGuidanceWhenGuidanceEmailExists() {
+    func testValidatedKeepsPendingHostGuidanceWithGuidanceEmail() {
         let settings = Settings(
             schemaVersion: Settings.currentSchemaVersion,
             pollIntervalSeconds: 300,
+            mailHost: "imap.gmail.com",
             mailHostGuidanceEmail: "me@company.example",
             mailHostGuidancePendingEmail: true
         ).validated()
-        XCTAssertFalse(settings.mailHostGuidancePendingEmail)
+        XCTAssertEqual(settings.mailHostGuidanceEmail, "me@company.example")
+        XCTAssertTrue(settings.mailHostGuidancePendingEmail)
     }
 
     func testSettingsRoundTripsThroughCodable() throws {

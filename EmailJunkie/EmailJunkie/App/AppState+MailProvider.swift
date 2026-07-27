@@ -33,14 +33,18 @@ extension AppState {
 
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
         if hadExplicitHostForPreviousEmail,
-           !host.isEmpty,
-           EmailProviderKind.forEmail(email) == nil {
-            let currentDomain = Self.normalizedEmailDomainForHostTracking(email)
-            if let currentDomain, previousDomain == currentDomain {
-                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
-            } else {
+           !host.isEmpty {
+            if Self.suggestedIMAPHost(forEmail: email) != nil {
                 mailHost = ""
                 markMailHostManagedByApp()
+            } else {
+                let currentDomain = Self.normalizedEmailDomainForHostTracking(email)
+                if let currentDomain, previousDomain == currentDomain {
+                    mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                } else {
+                    mailHost = ""
+                    markMailHostManagedByApp()
+                }
             }
         }
 

@@ -144,6 +144,24 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testRecognizedDomainSupersedesExplicitCustomHostFromCustomDomain() {
+        let app = makeAppState()
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.company.example")
+
+        app.updateMailEmailFromUser("me@yahoo.com")
+
+        XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Yahoo"
+        )
+    }
+
     func testDisconnectPreservesVerifiedProviderHostGuidanceForCustomDomain() async {
         let provider = FakeAppMailProvider(result: .success(()))
         let app = AppState(

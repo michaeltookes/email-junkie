@@ -92,13 +92,16 @@ extension AppState {
             mailHostExplicitlyEditedEmail = nil
         }
 
+        restorePendingMailHostGuidanceIfPossible()
+
         if shouldMigrateLegacyMailHostGuidance(from: settings) {
             mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
         }
 
         if isAccountConnected {
             markMailHostVerifiedForGuidance()
-        } else if Self.normalizedEmailForHostTracking(mailEmail) != nil {
+        } else if Self.normalizedEmailForHostTracking(mailEmail) != nil,
+                  !mailHostExplicitlyEditedBeforeEmail {
             applySuggestedHostIfDefault()
         }
     }
@@ -112,6 +115,23 @@ extension AppState {
         }
         mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
         mailHostExplicitlyEditedBeforeEmail = false
+    }
+
+    private func restorePendingMailHostGuidanceIfPossible() {
+        guard mailHostExplicitlyEditedBeforeEmail else { return }
+
+        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            mailHostExplicitlyEditedBeforeEmail = false
+            return
+        }
+
+        if Self.suggestedIMAPHost(forEmail: mailEmail) != nil {
+            markMailHostManagedByApp()
+        } else if Self.normalizedEmailDomainForHostTracking(mailEmail) != nil {
+            mailHostExplicitlyEditedBeforeEmail = false
+            mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+        }
     }
 
     private func shouldMigrateLegacyMailHostGuidance(from settings: Settings) -> Bool {

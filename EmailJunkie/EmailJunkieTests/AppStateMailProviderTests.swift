@@ -317,6 +317,33 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testHostEnteredBeforeCompletedEmailPersistsAcrossRelaunch() {
+        let persistence = AppStateMemoryPersistence()
+        let firstLaunch = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore()
+        )
+        firstLaunch.updateMailHostFromUser("imap.gmail.com")
+        firstLaunch.updateMailEmailFromUser("me@company")
+        firstLaunch.saveSettingsSync()
+
+        let secondLaunch = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore()
+        )
+        secondLaunch.updateMailEmailFromUser("me@company.example")
+
+        XCTAssertEqual(secondLaunch.mailHost, "imap.gmail.com")
+        XCTAssertEqual(secondLaunch.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                secondLaunch.mailEmail,
+                explicitHostFallback: secondLaunch.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
     func testLoadedLegacyProviderHostForCustomDomainMigratesGuidance() {
         let app = AppState(
             persistence: AppStateMemoryPersistence(settings: Settings(

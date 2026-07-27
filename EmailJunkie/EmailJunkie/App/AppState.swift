@@ -244,6 +244,7 @@ final class AppState: ObservableObject {
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
         self.mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
+        self.mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
@@ -431,6 +432,7 @@ final class AppState: ObservableObject {
         mailHost = settings.mailHost
         mailPort = settings.mailPort
         mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
+        mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
         mailAppPassword = appPassword ?? ""
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
         restoreMailHostGuidanceFromSettings(settings)
@@ -451,6 +453,7 @@ final class AppState: ObservableObject {
             mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
             mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
+            mailHostGuidancePendingEmail: mailHostExplicitlyEditedBeforeEmail,
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),

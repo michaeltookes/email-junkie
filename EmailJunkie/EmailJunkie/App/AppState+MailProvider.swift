@@ -68,8 +68,9 @@ extension AppState {
         mailHost = host
         let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedEmail = Self.normalizedEmailForHostTracking(mailEmail)
-        mailHostExplicitlyEditedEmail = normalizedHost.isEmpty ? nil : normalizedEmail
-        mailHostExplicitlyEditedBeforeEmail = !normalizedHost.isEmpty && normalizedEmail == nil
+        let hasCompletedEmailDomain = Self.normalizedEmailDomainForHostTracking(mailEmail) != nil
+        mailHostExplicitlyEditedEmail = normalizedHost.isEmpty || !hasCompletedEmailDomain ? nil : normalizedEmail
+        mailHostExplicitlyEditedBeforeEmail = !normalizedHost.isEmpty && !hasCompletedEmailDomain
     }
 
     private func isMailHostReplaceableBySuggestion(

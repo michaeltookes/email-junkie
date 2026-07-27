@@ -36,6 +36,9 @@ struct Settings: Codable, Equatable {
     /// The IMAP host.
     var mailHost: String
 
+    /// Email address the configured host was explicitly or successfully tied to.
+    var mailHostGuidanceEmail: String?
+
     /// The IMAP port.
     var mailPort: Int
 
@@ -63,6 +66,7 @@ struct Settings: Codable, Equatable {
         pollIntervalSeconds: Int,
         mailEmail: String = "",
         mailHost: String = "imap.gmail.com",
+        mailHostGuidanceEmail: String? = nil,
         mailPort: Int = 993,
         llmProvider: String = "anthropic",
         llmModel: String = "",
@@ -74,6 +78,7 @@ struct Settings: Codable, Equatable {
         self.pollIntervalSeconds = pollIntervalSeconds
         self.mailEmail = mailEmail
         self.mailHost = mailHost
+        self.mailHostGuidanceEmail = mailHostGuidanceEmail
         self.mailPort = mailPort
         self.llmProvider = llmProvider
         self.llmModel = llmModel
@@ -89,7 +94,7 @@ struct Settings: Codable, Equatable {
     )
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort
+        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail, mailPort
         case llmProvider, llmModel, llmVerifiedModel, sendBehavior, onboardingCompleted
     }
 
@@ -99,6 +104,7 @@ struct Settings: Codable, Equatable {
         pollIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds) ?? 300
         mailEmail = try container.decodeIfPresent(String.self, forKey: .mailEmail) ?? ""
         mailHost = try container.decodeIfPresent(String.self, forKey: .mailHost) ?? "imap.gmail.com"
+        mailHostGuidanceEmail = try container.decodeIfPresent(String.self, forKey: .mailHostGuidanceEmail)
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
@@ -114,6 +120,12 @@ struct Settings: Codable, Equatable {
         copy.mailPort = min(max(mailPort, 1), 65535)
         if copy.mailHost.isEmpty && copy.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             copy.mailHost = "imap.gmail.com"
+        }
+        if let guidanceEmail = copy.mailHostGuidanceEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !guidanceEmail.isEmpty {
+            copy.mailHostGuidanceEmail = guidanceEmail
+        } else {
+            copy.mailHostGuidanceEmail = nil
         }
         return copy
     }

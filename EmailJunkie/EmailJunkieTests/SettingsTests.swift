@@ -50,6 +50,28 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.mailHost, "imap.gmail.com")
     }
 
+    func testValidatedNormalizesHostGuidanceEmail() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHostGuidanceEmail: " Me@Company.Example "
+        ).validated()
+        XCTAssertEqual(settings.mailHostGuidanceEmail, "me@company.example")
+    }
+
+    func testHostGuidanceEmailRoundTripsThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@company.example",
+            mailHost: "imap.gmail.com",
+            mailHostGuidanceEmail: "me@company.example"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.mailHostGuidanceEmail, "me@company.example")
+    }
+
     func testSettingsRoundTripsThroughCodable() throws {
         let original = Settings(
             schemaVersion: 1,

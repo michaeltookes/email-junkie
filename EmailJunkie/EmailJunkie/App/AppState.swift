@@ -242,6 +242,7 @@ final class AppState: ObservableObject {
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
+        self.mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
@@ -255,7 +256,7 @@ final class AppState: ObservableObject {
 
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
-        markMailHostVerifiedForGuidance()
+        restoreMailHostGuidanceFromSettings()
         refreshLLMConnectionStatus()
 
         setupAutoSave()
@@ -428,9 +429,10 @@ final class AppState: ObservableObject {
         mailEmail = settings.mailEmail
         mailHost = settings.mailHost
         mailPort = settings.mailPort
+        mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         mailAppPassword = appPassword ?? ""
-        markMailHostVerifiedForGuidance()
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
+        restoreMailHostGuidanceFromSettings()
     }
 
     /// Builds a `Settings` snapshot from the current published values.
@@ -447,6 +449,7 @@ final class AppState: ObservableObject {
             pollIntervalSeconds: pollIntervalSeconds,
             mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),

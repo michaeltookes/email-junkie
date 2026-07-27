@@ -200,6 +200,51 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testLoadedUnverifiedProviderHostForCustomDomainClearsStaleHost() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@company.example",
+                mailHost: "imap.gmail.com"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ),
+            CredentialGuidance.generic
+        )
+    }
+
+    func testLoadedExplicitHostMarkerKeepsDisconnectedCustomDomainGuidance() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@company.example",
+                mailHost: "imap.gmail.com",
+                mailHostGuidanceEmail: "me@company.example"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
     func testClearingExplicitHostRemovesGuidanceFallback() {
         let app = makeAppState()
         app.updateMailEmailFromUser("me@company.example")

@@ -70,6 +70,18 @@ extension AppState {
         mailHostExplicitlyEditedEmail = nil
     }
 
+    func restoreMailHostGuidanceFromSettings() {
+        if !mailHostWasExplicitlyEditedForCurrentAddress {
+            mailHostExplicitlyEditedEmail = nil
+        }
+
+        if isAccountConnected {
+            markMailHostVerifiedForGuidance()
+        } else if Self.normalizedEmailForHostTracking(mailEmail) != nil {
+            applySuggestedHostIfDefault()
+        }
+    }
+
     func markMailHostVerifiedForGuidance() {
         guard EmailProviderKind.forEmail(mailEmail) == nil,
               EmailProviderKind.forHost(mailHost) != nil else {

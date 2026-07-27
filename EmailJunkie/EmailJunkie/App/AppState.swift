@@ -198,6 +198,12 @@ final class AppState: ObservableObject {
     var browserGeneration = 0
     var bulkGeneration = 0
 
+    /// Pause between bulk-cleanup sweep passes, so a rapid loop of full mailbox
+    /// scans does not trip a provider's rate limit — att.net/Yahoo answers a
+    /// too-fast burst with "SEARCH Server error - Please try again later"
+    /// (item 49). Overridable so tests run without real delays.
+    var bulkSweepPacingNanoseconds: UInt64 = 1_200_000_000
+
     // MARK: - Initialization
 
     init(

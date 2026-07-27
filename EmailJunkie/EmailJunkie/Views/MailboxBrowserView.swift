@@ -156,6 +156,8 @@ struct MailboxBrowserView: View {
                         MailboxBrowserRow(
                             message: message,
                             sourceMailbox: appState.browser.resultQuery?.mailbox,
+                            isSelected: appState.browser.selectedMessageIDs.contains(message.id),
+                            onToggleSelection: { appState.browser.toggleSelection(message.id) },
                             onPreviewBody: { message, mailbox in
                                 previewBody(for: message, mailbox: mailbox)
                             },
@@ -172,10 +174,28 @@ struct MailboxBrowserView: View {
     }
 
     private var resultCountBar: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("Showing \(appState.browser.results.count) of \(appState.browser.totalMatches)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if appState.browser.hasSelection {
+                Text("· \(appState.browser.selectedMessages.count) checked")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Button("Clear") { appState.browser.clearSelection() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+
+            if !appState.browser.results.isEmpty && !appState.browser.areAllLoadedSelected {
+                Button("Check all \(appState.browser.results.count) listed") {
+                    appState.browser.selectAllLoaded()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+
             Spacer()
         }
         .padding(.horizontal)
@@ -273,12 +293,20 @@ struct MailboxBrowserView: View {
 private struct MailboxBrowserRow: View {
     let message: MailMessage
     let sourceMailbox: Mailbox?
+    let isSelected: Bool
+    let onToggleSelection: () -> Void
     let onPreviewBody: (MailMessage, Mailbox) -> Void
     let onGenerateDraft: (MailMessage, Mailbox) -> Void
     @EnvironmentObject var appState: AppState
 
     var body: some View {
         HStack {
+            // Checking rows narrows cleanup to exactly these messages instead of
+            // the whole filter (item 47).
+            Toggle("", isOn: Binding(get: { isSelected }, set: { _ in onToggleSelection() }))
+                .labelsHidden()
+                .accessibilityLabel("Select message from \(message.from?.email ?? "unknown sender")")
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(message.subject.isEmpty ? "(no subject)" : message.subject)
                     .font(.callout)

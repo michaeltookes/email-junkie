@@ -247,6 +247,21 @@ final class AppStateBulkCleanupTests: XCTestCase {
         )
     }
 
+    func testChangingTheFilterAfterPreviewHidesTheApplyAction() async {
+        let provider = BulkCleanupMailProvider(
+            previewResult: .success(preview(matchCount: 9))
+        )
+        let appState = makeAppState(provider: provider)
+        appState.browser.sender = "spam@junk.com"
+
+        await appState.previewBulkCleanup()
+        XCTAssertTrue(appState.canApplyBulkCleanup)
+
+        appState.browser.sender = "boss@work.com"
+
+        XCTAssertFalse(appState.canApplyBulkCleanup)
+    }
+
     func testChangingTheFolderAfterPreviewBlocksTheRun() async {
         let provider = BulkCleanupMailProvider(
             previewResult: .success(preview(matchCount: 9))
@@ -377,14 +392,30 @@ final class AppStateBulkCleanupTests: XCTestCase {
     // MARK: - Copy
 
     func testConfirmationNamesTheCountAndRecoveryPath() {
-        XCTAssertEqual(
-            AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 1, isPartial: false),
-            "Move 1 message to Trash? You can recover them from Trash."
+        let trash = AppState.bulkConfirmationMessage(for: .moveToTrash, matchCount: 1, isPartial: false)
+        XCTAssertTrue(trash.hasPrefix("Move 1 message matching this filter to Trash?"), trash)
+        XCTAssertTrue(trash.hasSuffix("You can recover them from Trash."), trash)
+
+        let archive = AppState.bulkConfirmationMessage(for: .archive, matchCount: 12, isPartial: false)
+        XCTAssertTrue(archive.hasPrefix("Archive all 12 messages matching this filter?"), archive)
+        XCTAssertTrue(archive.hasSuffix("You can find them in the Archive folder."), archive)
+    }
+
+    /// The browser lists one page at a time ("Showing 25 of 605"), so a bare
+    /// count reads as "the 25 I can see". The confirmation must state that the
+    /// scope is the whole filter, or the user approves far more than they think.
+    func testConfirmationStatesScopeIsTheWholeFilterNotTheVisiblePage() {
+        let message = AppState.bulkConfirmationMessage(
+            for: .moveToTrash,
+            matchCount: 605,
+            isPartial: false
         )
-        XCTAssertEqual(
-            AppState.bulkConfirmationMessage(for: .archive, matchCount: 12, isPartial: false),
-            "Archive 12 messages? You can find them in the Archive folder."
+        XCTAssertTrue(
+            message.hasPrefix("Move all 605 messages matching this filter to Trash?"),
+            message
         )
+        XCTAssertTrue(message.contains("all 605"), message)
+        XCTAssertTrue(message.contains("matching this filter"), message)
     }
 
     /// A capped scan knows only a lower bound, so the confirmation must not
@@ -392,7 +423,7 @@ final class AppStateBulkCleanupTests: XCTestCase {
     func testPartialPreviewIsWordedAsALowerBound() {
         XCTAssertEqual(
             AppState.bulkConfirmationMessage(for: .markRead, matchCount: 5_000, isPartial: true),
-            "Mark at least 5000 messages as read?"
+            "Mark at least 5000 messages matching this filter as read?"
         )
     }
 

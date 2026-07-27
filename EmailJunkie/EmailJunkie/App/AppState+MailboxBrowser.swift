@@ -57,6 +57,44 @@ struct MailboxBrowserState: Equatable {
     /// Next sequence-number page offset within `sequenceSnapshotMessageCount`.
     var sequencePageOffset = 0
 
+    /// UIDs of rows the user explicitly checked (item 47). When non-empty, bulk
+    /// cleanup acts on exactly these messages instead of the whole filter, which
+    /// is what makes "just these three" possible. Cleared whenever the result set
+    /// is replaced, so a checked UID can never outlive the rows it referred to.
+    var selectedMessageIDs: Set<UInt32> = []
+
+    /// The loaded rows the user has checked, newest first.
+    var selectedMessages: [MailMessage] {
+        results.filter { selectedMessageIDs.contains($0.id) }
+    }
+
+    /// True when cleanup should act on the checked rows rather than the filter.
+    var hasSelection: Bool {
+        !selectedMessages.isEmpty
+    }
+
+    /// Whether every loaded row is checked.
+    var areAllLoadedSelected: Bool {
+        !results.isEmpty && selectedMessageIDs.count >= results.count
+            && results.allSatisfy { selectedMessageIDs.contains($0.id) }
+    }
+
+    mutating func toggleSelection(_ id: UInt32) {
+        if selectedMessageIDs.contains(id) {
+            selectedMessageIDs.remove(id)
+        } else {
+            selectedMessageIDs.insert(id)
+        }
+    }
+
+    mutating func selectAllLoaded() {
+        selectedMessageIDs = Set(results.map(\.id))
+    }
+
+    mutating func clearSelection() {
+        selectedMessageIDs.removeAll()
+    }
+
     /// The IMAP search criteria described by the current inputs.
     var criteria: MailSearchCriteria {
         MailSearchCriteria(
@@ -100,6 +138,9 @@ extension AppState {
         browser.hasMore = false
         browser.totalMatches = 0
         browser.isLoadingMore = false
+        // A checked UID refers to a row in the old result set; keeping it across
+        // a new search could act on a message the user can no longer see.
+        browser.clearSelection()
 
         let credentials = mailCredentials
         guard credentials.isComplete else {

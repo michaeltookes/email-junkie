@@ -85,23 +85,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Makes explicit that the real account password will **not** work over IMAP — an app-specific credential is required.
     - The user only has to paste email + key; host/port auto-fill from the domain (item 41) and SMTP is derived automatically.
 
-44. **Live end-to-end verification of a non-Gmail (att.net) account**
-    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path — auth, folder resolution, and large-mailbox browsing — end-to-end, the way Gmail was live-verified (items 6/9). Blocks destructive bulk actions (item 42) from shipping against unverified folder names.
+44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
+    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
     *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*
-    - **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` (SMTP `smtp.mail.att.net`) passes "Test Connection".
-    - **Inbox browsing:** the mailbox browser loads and pages the Inbox without loading the whole mailbox — validates the item 39/40 search+paging engine against a genuinely huge, unread-heavy mailbox (the kind that crashes heavier clients).
-    - **Folder resolution:** Sent (`Sent`), Drafts (`Draft`), and Junk (`Bulk Mail`) each return the expected mail; "All Mail" is correctly hidden (Yahoo/AT&T have none). Confirm the live **Trash (`Trash`)** and **Archive (`Archive`)** folder names match reality before item 42's bulk delete/archive target them.
-    - **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9).
-    - Any folder-name mismatch found is fixed in `MailboxNaming` before item 42 ships.
-
-45. **Large-mailbox search exceeds IMAP frame limit (`PayloadTooLargeError`)** — *bug; blocks browsing/cleanup on big inboxes*
-    The mailbox browser fails on very large mailboxes because `UID SEARCH` returns every matching UID on a single response line, which exceeds swift-nio-imap's fixed 8 KB frame buffer. Found live on a real att.net inbox: "Couldn't reach the mail server. (PayloadTooLargeError())" on the default view.
-    *As a user with a huge inbox (att.net, a big Gmail), I want to browse and search it without the connection erroring, so that the app is usable on exactly the mailboxes it exists to rescue.*
-    - **Root cause:** `IMAPSearchHandler` issues `UID SEARCH <criteria>`; the server's `* SEARCH …` reply lists all matched UIDs on one line. Above ~1,000 UIDs (~8 KB) NIO's frame decoder throws `PayloadTooLargeError`. `IMAPClientHandler` hardcodes `maximumBufferSize = IMAPDefaults.lineLengthLimit` (8192) and does **not** expose it, so the fix cannot simply be "raise the limit."
-    - **Default recent view:** when no filter is set, skip SEARCH entirely — `SELECT` to read `EXISTS` (total count) and `FETCH` the newest page by sequence-number range. Bounded to page size; works at any mailbox size.
-    - **Filtered / broad search & bulk selection:** page the matched set without ever requesting an unbounded SEARCH — e.g. windowed `UID SEARCH` over descending UID ranges (or ESEARCH `RETURN (COUNT)`/`PARTIAL` where supported), accumulating one page at a time.
-    - **Counts:** the total-match count must come from a bounded call (`EXISTS`, ESEARCH `COUNT`, or windowed accumulation), never from materializing all UIDs.
-    - **Prerequisite for item 42:** bulk actions select large sets server-side, so this bounded-selection engine must land first. Ties to items 39/40.
+    - ✅ **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` passes "Test Connection". *(Verified live, branch `attnet-verify`.)*
+    - ✅ **Inbox browsing:** the mailbox browser loads and pages a genuinely huge, unread-heavy Inbox without loading it whole — the crash that motivated items 45/49. *(Verified live.)*
+    - ✅ **Folder resolution:** Sent/Drafts load; "All Mail" correctly hidden; live **Trash** and **Archive** folder names confirmed by successful moves during the item-49 sweep verification. *(Verified live.)*
+    - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
+    - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
 
 ## Medium Priority
 
@@ -215,6 +206,16 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Never bulk-download:** counting must reuse item 42's bounded `SequenceWindow` walk (or IMAP `ESEARCH COUNT` where supported) so a mailbox of any size stays safe. A partial/capped scan must be labelled as such rather than presented as exact.
     - **One-click hand-off:** selecting a row (a sender, or an age bucket) fills the browser's filter so item 42's preview + confirm cleanup can act on it directly.
     - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question still outstanding from item 42: whether any cleanup should ever run automatically vs. manual-only.
+
+48. **Dedicated Email Account settings page with saved accounts**
+    Promote the cramped inline "Email account" section to its own Settings page, and remember multiple accounts' credentials so switching between them is a one-tap pick instead of a full re-entry.
+    *As a professional juggling more than one mailbox (e.g. a Gmail and an att.net), I want my accounts saved so I can switch between them without re-typing my email and app password every time, so that moving between inboxes is friction-free.*
+    - **Dedicated page:** the email-account controls move out of the single scrolling Settings form into their own page/tab — connect form, connection status, host/port (advanced), and the provider-specific credential guidance (item 43) — so account management is a distinct, uncluttered place.
+    - **Saved accounts ("placeholders"):** the app remembers each account that has been connected — email, host, port, and its app password in the Keychain under a **per-account key** (not the single shared `mailAppPassword` slot) — and lists them so the user picks one to make active.
+    - **One-tap switch:** selecting a saved account connects it using the stored credentials with no re-entry; the previously active account's credentials are retained, not wiped. (This fixes today's behavior where connecting a second account overwrites the first.)
+    - **Add / remove:** the user can add a new account (the current connect flow) and remove a saved account, which deletes only that account's Keychain entry and settings.
+    - **Still one active account at a time:** this is remembered-credentials + fast switching, **not** simultaneous multi-mailbox watching — that broader capability (per-account voice profiles, per-account attribution, watching several at once) remains **item 33**, which this is a stepping stone toward.
+    - **Security:** each account's secret lives in its own Keychain item; removing an account or the app leaves no orphaned secrets. Never display stored app passwords in plain text.
 
 ## Low Priority
 

@@ -182,10 +182,13 @@ private struct OnboardingAccountStep: View {
                 }
                 .disabled(appState.isConnecting)
 
-                AppPasswordGuidanceView(email: appState.mailEmail, host: appState.mailHost)
+                AppPasswordGuidanceView(
+                    email: appState.mailEmail,
+                    explicitHostFallback: appState.credentialGuidanceHostFallback
+                )
 
                 DisclosureGroup("Advanced (IMAP server)") {
-                    TextField("IMAP host", text: $appState.mailHost)
+                    TextField("IMAP host", text: mailHostBinding)
                         .textFieldStyle(.roundedBorder)
                     TextField("Port", value: $appState.mailPort, format: .number)
                         .textFieldStyle(.roundedBorder)
@@ -201,6 +204,13 @@ private struct OnboardingAccountStep: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
         }
+    }
+
+    private var mailHostBinding: Binding<String> {
+        Binding(
+            get: { appState.mailHost },
+            set: { appState.updateMailHostFromUser($0) }
+        )
     }
 }
 

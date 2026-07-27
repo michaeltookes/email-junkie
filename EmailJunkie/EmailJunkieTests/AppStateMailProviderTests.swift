@@ -56,6 +56,7 @@ final class AppStateMailProviderTests: XCTestCase {
         app.mailEmail = "me@example.org"
         app.applySuggestedHostIfDefault()
         XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
     }
 
     func testLeavesCustomHostUnchangedForUnknownDomain() {
@@ -73,18 +74,51 @@ final class AppStateMailProviderTests: XCTestCase {
         app.applySuggestedHostIfDefault()
         XCTAssertEqual(app.mailHost, "")
         XCTAssertEqual(
-            CredentialGuidance.forEmail(app.mailEmail, explicitHostFallback: app.mailHost),
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ),
             CredentialGuidance.generic
         )
 
-        app.mailHost = "imap.gmail.com"
+        app.updateMailHostFromUser("imap.gmail.com")
         XCTAssertEqual(
             CredentialGuidance.forEmail(
                 app.mailEmail,
-                explicitHostFallback: app.mailHost
+                explicitHostFallback: app.credentialGuidanceHostFallback
             ).providerName,
             "Gmail"
         )
+    }
+
+    func testPreservesExplicitProviderHostForUnknownDomainEmailEdits() {
+        let app = makeAppState()
+        app.mailEmail = "me@company.example"
+        app.applySuggestedHostIfDefault()
+
+        app.updateMailHostFromUser("imap.gmail.com")
+        app.mailEmail = "me@renamed-company.example"
+        app.applySuggestedHostIfDefault()
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
+    func testClearingExplicitHostRemovesGuidanceFallback() {
+        let app = makeAppState()
+        app.updateMailHostFromUser("imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+
+        app.updateMailHostFromUser(" ")
+
+        XCTAssertNil(app.credentialGuidanceHostFallback)
     }
 
     func testICloudSuggestionUsesICloudMailboxLayout() {

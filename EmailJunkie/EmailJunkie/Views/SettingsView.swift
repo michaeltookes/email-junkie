@@ -64,10 +64,13 @@ struct SettingsView: View {
                     }
                     .disabled(appState.isConnecting)
 
-                    AppPasswordGuidanceView(email: appState.mailEmail, host: appState.mailHost)
+                    AppPasswordGuidanceView(
+                        email: appState.mailEmail,
+                        explicitHostFallback: appState.credentialGuidanceHostFallback
+                    )
 
                     DisclosureGroup("Advanced (IMAP server)") {
-                        TextField("IMAP host", text: $appState.mailHost)
+                        TextField("IMAP host", text: mailHostBinding)
                         TextField("Port", value: $appState.mailPort, format: .number)
                     }
                 }
@@ -285,6 +288,13 @@ struct SettingsView: View {
                 appState.llmModel = $0
                 appState.refreshLLMConnectionStatus()
             }
+        )
+    }
+
+    private var mailHostBinding: Binding<String> {
+        Binding(
+            get: { appState.mailHost },
+            set: { appState.updateMailHostFromUser($0) }
         )
     }
 }

@@ -44,19 +44,17 @@ extension AppState {
                 return
             }
         } else if hasHostAssociatedWithTrackedEmail {
-            if Self.suggestedIMAPHost(forEmail: email) != nil {
-                mailHost = ""
-                markMailHostManagedByApp()
-            } else if let currentDomain = Self.normalizedEmailDomainForHostTracking(email) {
-                if trackedDomain == currentDomain {
-                    mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
-                } else {
-                    mailHost = ""
-                    markMailHostManagedByApp()
-                }
-            } else {
+            guard let currentDomain = Self.normalizedEmailDomainForHostTracking(email) else {
                 return
             }
+
+            if trackedDomain == currentDomain {
+                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                return
+            }
+
+            mailHost = ""
+            markMailHostManagedByApp()
         }
 
         applySuggestedHostIfDefault()
@@ -108,13 +106,22 @@ extension AppState {
     }
 
     func markMailHostVerifiedForGuidance() {
-        guard EmailProviderKind.forEmail(mailEmail) == nil,
-              !mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let guidanceEmail = Self.normalizedEmailForHostTracking(mailEmail),
+              !host.isEmpty else {
             mailHostExplicitlyEditedEmail = nil
             mailHostExplicitlyEditedBeforeEmail = false
             return
         }
-        mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+
+        if let suggestedHost = Self.suggestedIMAPHost(forEmail: mailEmail),
+           host == suggestedHost {
+            mailHostExplicitlyEditedEmail = nil
+            mailHostExplicitlyEditedBeforeEmail = false
+            return
+        }
+
+        mailHostExplicitlyEditedEmail = guidanceEmail
         mailHostExplicitlyEditedBeforeEmail = false
     }
 

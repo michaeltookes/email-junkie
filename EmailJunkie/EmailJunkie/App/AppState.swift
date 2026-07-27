@@ -45,6 +45,7 @@ final class AppState: ObservableObject {
     @Published var mailHost: String
     @Published var mailPort: Int
     var mailHostExplicitlyEditedEmail: String?
+    var mailHostExplicitlyEditedBeforeEmail = false
 
     // MARK: - Recent Messages (preview)
 

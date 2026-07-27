@@ -30,18 +30,26 @@ extension AppState {
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let trackedDomain = mailHostExplicitlyEditedEmail.flatMap(Self.normalizedEmailDomainForHostTracking)
         let hasHostAssociatedWithTrackedEmail = trackedDomain != nil && !host.isEmpty
+        let hasHostEnteredBeforeEmail = mailHostExplicitlyEditedBeforeEmail && !host.isEmpty
 
         mailEmail = email
 
-        if hasHostAssociatedWithTrackedEmail {
+        if hasHostEnteredBeforeEmail {
+            if Self.suggestedIMAPHost(forEmail: email) != nil {
+                markMailHostManagedByApp()
+            } else if Self.normalizedEmailDomainForHostTracking(email) != nil {
+                mailHostExplicitlyEditedBeforeEmail = false
+                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+            } else {
+                return
+            }
+        } else if hasHostAssociatedWithTrackedEmail {
             if Self.suggestedIMAPHost(forEmail: email) != nil {
                 mailHost = ""
                 markMailHostManagedByApp()
             } else if let currentDomain = Self.normalizedEmailDomainForHostTracking(email) {
                 if trackedDomain == currentDomain {
                     mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
-                } else if trackedDomain?.hasPrefix(currentDomain) == true {
-                    return
                 } else {
                     mailHost = ""
                     markMailHostManagedByApp()
@@ -58,9 +66,10 @@ extension AppState {
     /// provider host typed for a custom domain is not treated as a stale default.
     func updateMailHostFromUser(_ host: String) {
         mailHost = host
-        mailHostExplicitlyEditedEmail = host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? nil
-            : Self.normalizedEmailForHostTracking(mailEmail)
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+        mailHostExplicitlyEditedEmail = normalizedHost.isEmpty ? nil : normalizedEmail
+        mailHostExplicitlyEditedBeforeEmail = !normalizedHost.isEmpty && normalizedEmail == nil
     }
 
     private func isMailHostReplaceableBySuggestion(
@@ -75,6 +84,7 @@ extension AppState {
 
     private func markMailHostManagedByApp() {
         mailHostExplicitlyEditedEmail = nil
+        mailHostExplicitlyEditedBeforeEmail = false
     }
 
     func restoreMailHostGuidanceFromSettings(_ settings: Settings) {
@@ -97,21 +107,24 @@ extension AppState {
         guard EmailProviderKind.forEmail(mailEmail) == nil,
               !mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             mailHostExplicitlyEditedEmail = nil
+            mailHostExplicitlyEditedBeforeEmail = false
             return
         }
         mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+        mailHostExplicitlyEditedBeforeEmail = false
     }
 
     private func shouldMigrateLegacyMailHostGuidance(from settings: Settings) -> Bool {
+        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard settings.schemaVersion < Settings.mailHostGuidanceSchemaVersion,
               settings.mailHostGuidanceEmail == nil,
               EmailProviderKind.forEmail(mailEmail) == nil,
-              Self.normalizedEmailForHostTracking(mailEmail) != nil,
-              !mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              Self.normalizedEmailDomainForHostTracking(mailEmail) != nil,
+              !host.isEmpty else {
             return false
         }
 
-        return true
+        return host != Settings.default.mailHost || settings.onboardingCompleted
     }
 
     private static func normalizedEmailForHostTracking(_ email: String) -> String? {
@@ -125,7 +138,14 @@ extension AppState {
             return nil
         }
         let domain = normalizedEmail[normalizedEmail.index(after: separator)...]
-        return domain.isEmpty ? nil : String(domain)
+        let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2,
+              labels.allSatisfy({ !$0.isEmpty }),
+              let topLevelDomain = labels.last,
+              topLevelDomain.count >= 2 else {
+            return nil
+        }
+        return String(domain)
     }
 
     /// The special-folder layout for the currently-entered IMAP host.

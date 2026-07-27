@@ -113,7 +113,7 @@ final class AppStateMailProviderTests: XCTestCase {
         app.updateMailEmailFromUser("me@company.example")
         app.updateMailHostFromUser("imap.gmail.com")
 
-        for partialEmail in ["", "renamed", "renamed@", "renamed@c", "renamed@company", "renamed@company.ex"] {
+        for partialEmail in ["", "renamed", "renamed@", "renamed@c", "renamed@company", "renamed@company.e"] {
             app.updateMailEmailFromUser(partialEmail)
             XCTAssertEqual(app.mailHost, "imap.gmail.com")
         }
@@ -129,6 +129,17 @@ final class AppStateMailProviderTests: XCTestCase {
             ).providerName,
             "Gmail"
         )
+    }
+
+    func testChangingToCompletedPrefixDomainClearsExplicitHost() {
+        let app = makeAppState()
+        app.updateMailEmailFromUser("me@company.com")
+        app.updateMailHostFromUser("imap.gmail.com")
+
+        app.updateMailEmailFromUser("me@company.co")
+
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
     }
 
     func testChangingUnknownDomainClearsExplicitProviderHost() {
@@ -289,13 +300,31 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testHostEnteredBeforeCustomDomainEmailIsRetained() {
+        let app = makeAppState()
+
+        app.updateMailHostFromUser("imap.gmail.com")
+        app.updateMailEmailFromUser("me@company.example")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
     func testLoadedLegacyProviderHostForCustomDomainMigratesGuidance() {
         let app = AppState(
             persistence: AppStateMemoryPersistence(settings: Settings(
                 schemaVersion: Settings.mailHostGuidanceSchemaVersion - 1,
                 pollIntervalSeconds: 300,
                 mailEmail: "me@company.example",
-                mailHost: "imap.gmail.com"
+                mailHost: "imap.gmail.com",
+                onboardingCompleted: true
             )),
             secrets: InMemorySecretStore()
         )
@@ -309,6 +338,28 @@ final class AppStateMailProviderTests: XCTestCase {
                 explicitHostFallback: app.credentialGuidanceHostFallback
             ).providerName,
             "Gmail"
+        )
+    }
+
+    func testLoadedLegacyUnonboardedDefaultHostForCustomDomainClearsStaleHost() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.mailHostGuidanceSchemaVersion - 1,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@company.example",
+                mailHost: "imap.gmail.com"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ),
+            CredentialGuidance.generic
         )
     }
 

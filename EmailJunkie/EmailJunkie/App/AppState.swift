@@ -256,7 +256,7 @@ final class AppState: ObservableObject {
 
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
-        restoreMailHostGuidanceFromSettings()
+        restoreMailHostGuidanceFromSettings(settings)
         refreshLLMConnectionStatus()
 
         setupAutoSave()
@@ -432,7 +432,7 @@ final class AppState: ObservableObject {
         mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         mailAppPassword = appPassword ?? ""
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
-        restoreMailHostGuidanceFromSettings()
+        restoreMailHostGuidanceFromSettings(settings)
     }
 
     /// Builds a `Settings` snapshot from the current published values.

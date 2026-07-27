@@ -27,24 +27,27 @@ extension AppState {
     /// domain address is being edited, but recognized or unrelated domains can
     /// supersede a provider host from the previous address.
     func updateMailEmailFromUser(_ email: String) {
-        let previousDomain = Self.normalizedEmailDomainForHostTracking(mailEmail)
-        let hadExplicitHostForPreviousEmail = mailHostWasExplicitlyEditedForCurrentAddress
+        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trackedDomain = mailHostExplicitlyEditedEmail.flatMap(Self.normalizedEmailDomainForHostTracking)
+        let hasHostAssociatedWithTrackedEmail = trackedDomain != nil && !host.isEmpty
+
         mailEmail = email
 
-        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        if hadExplicitHostForPreviousEmail,
-           !host.isEmpty {
+        if hasHostAssociatedWithTrackedEmail {
             if Self.suggestedIMAPHost(forEmail: email) != nil {
                 mailHost = ""
                 markMailHostManagedByApp()
-            } else {
-                let currentDomain = Self.normalizedEmailDomainForHostTracking(email)
-                if let currentDomain, previousDomain == currentDomain {
+            } else if let currentDomain = Self.normalizedEmailDomainForHostTracking(email) {
+                if trackedDomain == currentDomain {
                     mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                } else if trackedDomain?.hasPrefix(currentDomain) == true {
+                    return
                 } else {
                     mailHost = ""
                     markMailHostManagedByApp()
                 }
+            } else {
+                return
             }
         }
 
@@ -74,9 +77,13 @@ extension AppState {
         mailHostExplicitlyEditedEmail = nil
     }
 
-    func restoreMailHostGuidanceFromSettings() {
+    func restoreMailHostGuidanceFromSettings(_ settings: Settings) {
         if !mailHostWasExplicitlyEditedForCurrentAddress {
             mailHostExplicitlyEditedEmail = nil
+        }
+
+        if shouldMigrateLegacyMailHostGuidance(from: settings) {
+            mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
         }
 
         if isAccountConnected {
@@ -93,6 +100,18 @@ extension AppState {
             return
         }
         mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+    }
+
+    private func shouldMigrateLegacyMailHostGuidance(from settings: Settings) -> Bool {
+        guard settings.schemaVersion < Settings.mailHostGuidanceSchemaVersion,
+              settings.mailHostGuidanceEmail == nil,
+              EmailProviderKind.forEmail(mailEmail) == nil,
+              Self.normalizedEmailForHostTracking(mailEmail) != nil,
+              !mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+
+        return true
     }
 
     private static func normalizedEmailForHostTracking(_ email: String) -> String? {

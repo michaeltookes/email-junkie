@@ -19,10 +19,13 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 6
+    static let currentSchemaVersion = 7
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
+
+    /// Schema version that introduced persisted IMAP host guidance ownership.
+    static let mailHostGuidanceSchemaVersion = 7
 
     /// Schema version of the persisted file.
     var schemaVersion: Int

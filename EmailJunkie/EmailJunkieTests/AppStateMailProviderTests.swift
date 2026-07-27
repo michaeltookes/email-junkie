@@ -108,6 +108,29 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testTransientMalformedEmailEditPreservesExplicitHostForSameDomain() {
+        let app = makeAppState()
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.gmail.com")
+
+        for partialEmail in ["", "renamed", "renamed@", "renamed@c", "renamed@company", "renamed@company.ex"] {
+            app.updateMailEmailFromUser(partialEmail)
+            XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        }
+
+        app.updateMailEmailFromUser("renamed@company.example")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
     func testChangingUnknownDomainClearsExplicitProviderHost() {
         let app = makeAppState()
         app.updateMailEmailFromUser("me@company.example")
@@ -263,6 +286,29 @@ final class AppStateMailProviderTests: XCTestCase {
                 explicitHostFallback: app.credentialGuidanceHostFallback
             ),
             CredentialGuidance.generic
+        )
+    }
+
+    func testLoadedLegacyProviderHostForCustomDomainMigratesGuidance() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.mailHostGuidanceSchemaVersion - 1,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@company.example",
+                mailHost: "imap.gmail.com"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "me@company.example")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
         )
     }
 

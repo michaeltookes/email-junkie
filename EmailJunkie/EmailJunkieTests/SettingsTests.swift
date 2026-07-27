@@ -94,12 +94,16 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsSix() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 6)
+    func testCurrentSchemaVersionIsSeven() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 7)
     }
 
     func testOnboardingCompletionSchemaVersionIsSix() {
         XCTAssertEqual(Settings.onboardingCompletionSchemaVersion, 6)
+    }
+
+    func testMailHostGuidanceSchemaVersionIsSeven() {
+        XCTAssertEqual(Settings.mailHostGuidanceSchemaVersion, 7)
     }
 
     func testLegacyFileWithoutOnboardingFlagDecodesToNotCompleted() throws {

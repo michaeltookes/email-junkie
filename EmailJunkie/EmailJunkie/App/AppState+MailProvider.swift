@@ -88,7 +88,7 @@ extension AppState {
 
     func markMailHostVerifiedForGuidance() {
         guard EmailProviderKind.forEmail(mailEmail) == nil,
-              EmailProviderKind.forHost(mailHost) != nil else {
+              !mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             mailHostExplicitlyEditedEmail = nil
             return
         }

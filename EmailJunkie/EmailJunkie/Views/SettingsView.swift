@@ -48,9 +48,8 @@ struct SettingsView: View {
                         appState.disconnectMail()
                     }
                 } else {
-                    TextField("Email address", text: $appState.mailEmail)
+                    TextField("Email address", text: mailEmailBinding)
                         .textContentType(.username)
-                        .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
                     SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {
@@ -295,6 +294,13 @@ struct SettingsView: View {
         Binding(
             get: { appState.mailHost },
             set: { appState.updateMailHostFromUser($0) }
+        )
+    }
+
+    private var mailEmailBinding: Binding<String> {
+        Binding(
+            get: { appState.mailEmail },
+            set: { appState.updateMailEmailFromUser($0) }
         )
     }
 }

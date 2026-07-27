@@ -164,10 +164,9 @@ private struct OnboardingAccountStep: View {
                 ConnectedBadge(text: "Connected as \(appState.mailEmail)")
                 Button("Disconnect", role: .destructive) { appState.disconnectMail() }
             } else {
-                TextField("Email address", text: $appState.mailEmail)
+                TextField("Email address", text: mailEmailBinding)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
-                    .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
                 SecureField("App password", text: $appState.mailAppPassword)
                     .textFieldStyle(.roundedBorder)
 
@@ -210,6 +209,13 @@ private struct OnboardingAccountStep: View {
         Binding(
             get: { appState.mailHost },
             set: { appState.updateMailHostFromUser($0) }
+        )
+    }
+
+    private var mailEmailBinding: Binding<String> {
+        Binding(
+            get: { appState.mailEmail },
+            set: { appState.updateMailEmailFromUser($0) }
         )
     }
 }

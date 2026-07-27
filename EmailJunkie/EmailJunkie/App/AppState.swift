@@ -44,7 +44,7 @@ final class AppState: ObservableObject {
     @Published var mailAppPassword: String
     @Published var mailHost: String
     @Published var mailPort: Int
-    var mailHostWasExplicitlyEditedForCurrentAddress = false
+    var mailHostExplicitlyEditedEmail: String?
 
     // MARK: - Recent Messages (preview)
 
@@ -351,7 +351,7 @@ final class AppState: ObservableObject {
             return
         }
         mailAppPassword = ""
-        mailHostWasExplicitlyEditedForCurrentAddress = false
+        mailHostExplicitlyEditedEmail = nil
         isAccountConnected = false
         stopWatching()
         resetMessagePreviewForAccountChange()
@@ -400,7 +400,7 @@ final class AppState: ObservableObject {
         mailHost = credentials.host
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
-        mailHostWasExplicitlyEditedForCurrentAddress = false
+        mailHostExplicitlyEditedEmail = nil
 
         try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
@@ -428,7 +428,7 @@ final class AppState: ObservableObject {
         mailHost = settings.mailHost
         mailPort = settings.mailPort
         mailAppPassword = appPassword ?? ""
-        mailHostWasExplicitlyEditedForCurrentAddress = false
+        mailHostExplicitlyEditedEmail = nil
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
     }
 

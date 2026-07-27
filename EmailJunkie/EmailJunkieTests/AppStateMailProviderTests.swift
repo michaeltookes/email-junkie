@@ -50,12 +50,38 @@ final class AppStateMailProviderTests: XCTestCase {
         XCTAssertEqual(app.mailHost, "imap.customdomain.example", "custom host preserved")
     }
 
-    func testLeavesHostUnchangedForUnknownDomain() {
+    func testClearsReplaceableHostForUnknownDomain() {
         let app = makeAppState()
-        app.mailHost = "imap.gmail.com"
+        app.mailHost = "imap.mail.att.net"
         app.mailEmail = "me@example.org"
         app.applySuggestedHostIfDefault()
-        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.mailHost, "")
+    }
+
+    func testLeavesCustomHostUnchangedForUnknownDomain() {
+        let app = makeAppState()
+        app.mailHost = "imap.customdomain.example"
+        app.mailEmail = "me@example.org"
+        app.applySuggestedHostIfDefault()
+        XCTAssertEqual(app.mailHost, "imap.customdomain.example", "custom host preserved")
+    }
+
+    func testUnknownDomainUsesGenericGuidanceUntilHostIsExplicitlyEntered() {
+        let app = makeAppState()
+        app.mailHost = "imap.gmail.com"
+        app.mailEmail = "me@company.example"
+        app.applySuggestedHostIfDefault()
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(app.mailEmail, host: app.mailHost),
+            CredentialGuidance.generic
+        )
+
+        app.mailHost = "imap.gmail.com"
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(app.mailEmail, host: app.mailHost).providerName,
+            "Gmail"
+        )
     }
 
     func testICloudSuggestionUsesICloudMailboxLayout() {

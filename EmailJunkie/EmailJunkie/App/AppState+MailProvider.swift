@@ -23,11 +23,21 @@ extension AppState {
 
     /// Auto-fills the IMAP host from the email domain when the user hasn't set a
     /// custom one — i.e. the host is empty or still a recognized provider
-    /// default. A hand-entered custom host is never overwritten.
+    /// default. If the domain is unrecognized, stale provider defaults are
+    /// cleared so credential guidance does not infer Gmail/AT&T/etc. from an
+    /// untouched or previous-account host. A hand-entered custom host is never
+    /// overwritten.
     func applySuggestedHostIfDefault() {
-        guard let suggestion = Self.suggestedIMAPHost(forEmail: mailEmail) else { return }
         let current = mailHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let isReplaceable = current.isEmpty || EmailProviderKind.allHosts.contains(current)
+
+        guard let suggestion = Self.suggestedIMAPHost(forEmail: mailEmail) else {
+            if isReplaceable, !current.isEmpty {
+                mailHost = ""
+            }
+            return
+        }
+
         if isReplaceable, current != suggestion {
             mailHost = suggestion
         }

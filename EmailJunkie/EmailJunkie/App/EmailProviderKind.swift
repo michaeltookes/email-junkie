@@ -50,6 +50,8 @@ enum EmailProviderKind: Equatable, CaseIterable {
         "sbcglobal.net": .att,
         "bellsouth.net": .att,
         "yahoo.com": .yahoo,
+        "ymail.com": .yahoo,
+        "rocketmail.com": .yahoo,
         "aol.com": .aol,
         "icloud.com": .icloud,
         "me.com": .icloud,

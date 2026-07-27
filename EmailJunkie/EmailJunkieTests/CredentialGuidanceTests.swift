@@ -3,8 +3,7 @@ import XCTest
 
 /// Tests for provider classification and the connect-screen credential guidance
 /// (item 43). The guidance is what makes non-Gmail IMAP setup self-serve, so the
-/// provider-specific copy and the always-present "normal password won't work"
-/// note are worth pinning down.
+/// provider-specific copy and normal-password notes are worth pinning down.
 final class CredentialGuidanceTests: XCTestCase {
 
     // MARK: - Provider classification
@@ -16,6 +15,8 @@ final class CredentialGuidanceTests: XCTestCase {
         XCTAssertEqual(EmailProviderKind.forEmail("me@sbcglobal.net"), .att)
         XCTAssertEqual(EmailProviderKind.forEmail("me@bellsouth.net"), .att)
         XCTAssertEqual(EmailProviderKind.forEmail("me@yahoo.com"), .yahoo)
+        XCTAssertEqual(EmailProviderKind.forEmail("me@ymail.com"), .yahoo)
+        XCTAssertEqual(EmailProviderKind.forEmail("me@rocketmail.com"), .yahoo)
         XCTAssertEqual(EmailProviderKind.forEmail("me@aol.com"), .aol)
         XCTAssertEqual(EmailProviderKind.forEmail("me@icloud.com"), .icloud)
         XCTAssertEqual(EmailProviderKind.forEmail("me@me.com"), .icloud)
@@ -56,12 +57,28 @@ final class CredentialGuidanceTests: XCTestCase {
             guidance.steps.contains { $0.contains("Manage secure mail keys") },
             "AT&T steps must name the actual menu path"
         )
+        XCTAssertTrue(
+            guidance.steps.contains { $0.contains("email address you entered") },
+            "AT&T steps must work for att.net and legacy AT&T domains"
+        )
+        XCTAssertFalse(guidance.steps.contains { $0.contains("Select your att.net address") })
     }
 
     func testGmailGuidanceRequiresTwoStepVerification() {
         let guidance = CredentialGuidance.forEmail("me@gmail.com")
         XCTAssertEqual(guidance.credentialName, "app password")
         XCTAssertTrue(guidance.steps.contains { $0.contains("2-Step Verification") })
+    }
+
+    func testYahooAlternateDomainsUseYahooGuidance() {
+        for address in ["me@yahoo.com", "me@ymail.com", "me@rocketmail.com"] {
+            let guidance = CredentialGuidance.forEmail(address)
+            XCTAssertEqual(guidance.providerName, "Yahoo")
+            XCTAssertEqual(
+                guidance.url?.absoluteString,
+                "https://login.yahoo.com/account/security"
+            )
+        }
     }
 
     func testICloudGuidanceUsesAppSpecificPassword() {
@@ -92,12 +109,15 @@ final class CredentialGuidanceTests: XCTestCase {
     // MARK: - Generic fallback
 
     /// An unrecognized domain must still get usable, non-Gmail-specific advice
-    /// rather than nothing.
+    /// without claiming that every provider rejects normal-password IMAP auth.
     func testUnknownProviderGetsGenericGuidance() {
         let guidance = CredentialGuidance.forEmail("me@fastmail.com")
         XCTAssertEqual(guidance, CredentialGuidance.generic)
         XCTAssertNil(guidance.url)
+        XCTAssertEqual(guidance.title, "Getting your IMAP sign-in credential")
         XCTAssertTrue(guidance.steps.contains { $0.contains("secure mail key") })
+        XCTAssertTrue(guidance.passwordWontWorkNote.contains("some accept your normal email password"))
+        XCTAssertFalse(guidance.passwordWontWorkNote.contains("won't work here"))
         XCTAssertFalse(
             guidance.passwordWontWorkNote.contains("Gmail"),
             "generic guidance must not be Gmail-specific"

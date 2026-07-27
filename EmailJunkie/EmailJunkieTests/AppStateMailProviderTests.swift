@@ -17,6 +17,8 @@ final class AppStateMailProviderTests: XCTestCase {
     func testSuggestsHostForKnownDomains() {
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@att.net"), "imap.mail.att.net")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@yahoo.com"), "imap.mail.yahoo.com")
+        XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@ymail.com"), "imap.mail.yahoo.com")
+        XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@rocketmail.com"), "imap.mail.yahoo.com")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "Me@GMAIL.com"), "imap.gmail.com")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@sbcglobal.net"), "imap.mail.att.net")
         XCTAssertEqual(AppState.suggestedIMAPHost(forEmail: "me@icloud.com"), "imap.mail.me.com")

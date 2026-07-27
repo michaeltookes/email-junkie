@@ -14,6 +14,22 @@ struct CredentialGuidance: Equatable {
     let steps: [String]
     /// A deep link to the provider's credential page, when one is stable.
     let url: URL?
+    /// Custom note for providers whose normal-password behavior varies.
+    private let passwordNoteOverride: String?
+
+    init(
+        providerName: String,
+        credentialName: String,
+        steps: [String],
+        url: URL?,
+        passwordNoteOverride: String? = nil
+    ) {
+        self.providerName = providerName
+        self.credentialName = credentialName
+        self.steps = steps
+        self.url = url
+        self.passwordNoteOverride = passwordNoteOverride
+    }
 
     /// The disclosure label, phrased around the provider's own credential name
     /// so AT&T users see "Secure Mail Key", not "app password".
@@ -21,10 +37,14 @@ struct CredentialGuidance: Equatable {
         "Getting your \(credentialName)"
     }
 
-    /// The point every provider shares and users most often miss: the normal
-    /// account password does not work over IMAP.
+    /// The point recognized providers share and users most often miss: the
+    /// normal account password does not work over IMAP.
     var passwordWontWorkNote: String {
-        "Your normal \(providerName) password won't work here — you need "
+        if let passwordNoteOverride = passwordNoteOverride {
+            return passwordNoteOverride
+        }
+
+        return "Your normal \(providerName) password won't work here — you need "
             + "\(Self.article(for: credentialName)) \(credentialName)."
     }
 
@@ -55,7 +75,7 @@ struct CredentialGuidance: Equatable {
                 steps: [
                     "Sign in at signin.att.net.",
                     "Go to Profile → Sign-in info → Manage secure mail keys.",
-                    "Select your att.net address, then Add secure mail key.",
+                    "Select the email address you entered, then Add secure mail key.",
                     "Copy the key and paste it here."
                 ],
                 url: URL(string: "https://signin.att.net")
@@ -97,18 +117,23 @@ struct CredentialGuidance: Equatable {
         }
     }
 
-    /// Fallback for unrecognized domains — still steers the user to the right
-    /// kind of credential rather than leaving them stuck on Gmail-only copy.
+    /// Fallback for unrecognized domains. IMAP password requirements vary, so
+    /// keep this conditional instead of claiming every provider needs a separate
+    /// app-specific credential.
     static let generic = CredentialGuidance(
         providerName: "your email provider",
-        credentialName: "app password",
+        credentialName: "IMAP sign-in credential",
         steps: [
-            "Most providers need an app-specific password — not your normal password — for IMAP access.",
-            "Find it in your provider's account security settings; look for "
+            "Check your provider's IMAP setup instructions for the password "
+                + "or credential they require.",
+            "If normal password sign-in is blocked, look in account security settings for "
                 + "\"app password\", \"app-specific password\", or \"secure mail key\".",
-            "Generate one and paste it here. You may also need to set the IMAP server under Advanced."
+            "Paste the working password here. You may also need to set the IMAP server under Advanced."
         ],
-        url: nil
+        url: nil,
+        passwordNoteOverride: "Unrecognized providers differ: some accept your normal email "
+            + "password for IMAP, while others require an app-specific password "
+            + "or similar credential."
     )
 
     /// "a" / "an" for the credential name, so the note reads naturally.

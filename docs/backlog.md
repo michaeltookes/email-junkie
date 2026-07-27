@@ -77,14 +77,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - No auto-send ever fires on a flagged draft.
     - Flagged items appear distinctly in the approval UI and activity history (item 21).
 
-43. **Non-Gmail account onboarding: app-password / Secure Mail Key guidance**
-    In-app guidance that walks a non-Gmail user through generating the provider-specific app password and connecting, so IMAP setup is self-serve.
-    *As Priya, I want the app to tell me exactly how to get an app password / Secure Mail Key for my provider (AT&T/Yahoo, iCloud, Gmail), so that I can connect a non-Gmail account without hunting through provider help pages.*
-    - The add-account screen detects the provider from the email domain (item 41's host suggestion) and shows the right instructions inline. For AT&T: **signin.att.net → Profile → Sign-in info → Manage secure mail keys → select the att.net address → Add secure mail key → copy the key**.
-    - Covers AT&T/Yahoo "Secure Mail Key", Gmail "App Password" (2FA required), and iCloud "app-specific password", each with the correct path/link.
-    - Makes explicit that the real account password will **not** work over IMAP — an app-specific credential is required.
-    - The user only has to paste email + key; host/port auto-fill from the domain (item 41) and SMTP is derived automatically.
-
 44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
     Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
     *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*

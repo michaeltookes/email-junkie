@@ -112,7 +112,7 @@ struct Settings: Codable, Equatable {
         var copy = self
         copy.pollIntervalSeconds = min(max(pollIntervalSeconds, 30), 3600)
         copy.mailPort = min(max(mailPort, 1), 65535)
-        if copy.mailHost.isEmpty {
+        if copy.mailHost.isEmpty && copy.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             copy.mailHost = "imap.gmail.com"
         }
         return copy

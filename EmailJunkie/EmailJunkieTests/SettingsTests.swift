@@ -31,6 +31,25 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.pollIntervalSeconds, 120)
     }
 
+    func testValidatedPreservesEmptyHostWhenEmailIsEntered() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@company.example",
+            mailHost: ""
+        ).validated()
+        XCTAssertEqual(settings.mailHost, "")
+    }
+
+    func testValidatedRestoresDefaultHostWhenNoEmailIsEntered() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHost: ""
+        ).validated()
+        XCTAssertEqual(settings.mailHost, "imap.gmail.com")
+    }
+
     func testSettingsRoundTripsThroughCodable() throws {
         let original = Settings(
             schemaVersion: 1,

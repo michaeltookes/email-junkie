@@ -23,10 +23,11 @@ extension AppState {
     }
 
     /// Routes email-field edits through host tracking before applying provider
-    /// suggestions. An explicit provider host stays attached while a custom
-    /// domain address is being edited, but a recognized address can supersede a
-    /// provider host from the previous custom-domain value.
+    /// suggestions. An explicit host stays attached while the same custom
+    /// domain address is being edited, but recognized or unrelated domains can
+    /// supersede a provider host from the previous address.
     func updateMailEmailFromUser(_ email: String) {
+        let previousDomain = Self.normalizedEmailDomainForHostTracking(mailEmail)
         let hadExplicitHostForPreviousEmail = mailHostWasExplicitlyEditedForCurrentAddress
         mailEmail = email
 
@@ -34,7 +35,13 @@ extension AppState {
         if hadExplicitHostForPreviousEmail,
            !host.isEmpty,
            EmailProviderKind.forEmail(email) == nil {
-            mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+            let currentDomain = Self.normalizedEmailDomainForHostTracking(email)
+            if let currentDomain, previousDomain == currentDomain {
+                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+            } else {
+                mailHost = ""
+                markMailHostManagedByApp()
+            }
         }
 
         applySuggestedHostIfDefault()
@@ -75,6 +82,15 @@ extension AppState {
     private static func normalizedEmailForHostTracking(_ email: String) -> String? {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func normalizedEmailDomainForHostTracking(_ email: String) -> String? {
+        guard let normalizedEmail = normalizedEmailForHostTracking(email),
+              let separator = normalizedEmail.lastIndex(of: "@") else {
+            return nil
+        }
+        let domain = normalizedEmail[normalizedEmail.index(after: separator)...]
+        return domain.isEmpty ? nil : String(domain)
     }
 
     /// The special-folder layout for the currently-entered IMAP host.

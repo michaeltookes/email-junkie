@@ -90,12 +90,12 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
-    func testPreservesExplicitProviderHostForUnknownDomainEmailEdits() {
+    func testPreservesExplicitProviderHostForSameUnknownDomainEmailEdits() {
         let app = makeAppState()
         app.updateMailEmailFromUser("me@company.example")
 
         app.updateMailHostFromUser("imap.gmail.com")
-        app.updateMailEmailFromUser("me@renamed-company.example")
+        app.updateMailEmailFromUser("renamed@company.example")
 
         XCTAssertEqual(app.mailHost, "imap.gmail.com")
         XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
@@ -105,6 +105,24 @@ final class AppStateMailProviderTests: XCTestCase {
                 explicitHostFallback: app.credentialGuidanceHostFallback
             ).providerName,
             "Gmail"
+        )
+    }
+
+    func testChangingUnknownDomainClearsExplicitProviderHost() {
+        let app = makeAppState()
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.gmail.com")
+
+        app.updateMailEmailFromUser("me@other-company.example")
+
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ),
+            CredentialGuidance.generic
         )
     }
 
@@ -156,6 +174,29 @@ final class AppStateMailProviderTests: XCTestCase {
                 explicitHostFallback: app.credentialGuidanceHostFallback
             ).providerName,
             "Gmail"
+        )
+    }
+
+    func testLoadedIncompleteCustomDomainKeepsGenericGuidance() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@company.example",
+            mailHost: ""
+        ).validated()
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: settings),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ),
+            CredentialGuidance.generic
         )
     }
 

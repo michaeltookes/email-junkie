@@ -1,12 +1,13 @@
 import SwiftUI
 
 /// Connect-screen guidance for getting the app-specific credential IMAP needs,
-/// tailored to the provider detected from the typed email (item 43). Shared by
-/// onboarding and Settings so the copy stays in one place.
+/// tailored to the provider detected from the typed email or configured host
+/// (item 43). Shared by onboarding and Settings so the copy stays in one place.
 struct AppPasswordGuidanceView: View {
     let email: String
+    let host: String
 
-    private var guidance: CredentialGuidance { CredentialGuidance.forEmail(email) }
+    private var guidance: CredentialGuidance { CredentialGuidance.forEmail(email, host: host) }
 
     var body: some View {
         DisclosureGroup(guidance.title) {

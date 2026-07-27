@@ -49,9 +49,12 @@ struct CredentialGuidance: Equatable {
     }
 
     /// Guidance for an email address, always returning something usable: a
-    /// recognized provider's specific steps, or generic advice for the rest.
-    static func forEmail(_ email: String) -> CredentialGuidance {
-        guard let kind = EmailProviderKind.forEmail(email) else { return .generic }
+    /// recognized provider's specific steps, a provider fallback from the IMAP
+    /// host for custom domains, or generic advice for the rest.
+    static func forEmail(_ email: String, host: String? = nil) -> CredentialGuidance {
+        let kind = EmailProviderKind.forEmail(email)
+            ?? host.flatMap(EmailProviderKind.forHost)
+        guard let kind else { return .generic }
         return forKind(kind)
     }
 

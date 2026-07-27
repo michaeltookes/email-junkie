@@ -182,7 +182,7 @@ private struct OnboardingAccountStep: View {
                 }
                 .disabled(appState.isConnecting)
 
-                AppPasswordGuidanceView(email: appState.mailEmail)
+                AppPasswordGuidanceView(email: appState.mailEmail, host: appState.mailHost)
 
                 DisclosureGroup("Advanced (IMAP server)") {
                     TextField("IMAP host", text: $appState.mailHost)

@@ -34,6 +34,16 @@ final class CredentialGuidanceTests: XCTestCase {
         XCTAssertNil(EmailProviderKind.forEmail("me@"))
     }
 
+    func testClassifiesKnownProviderHosts() {
+        XCTAssertEqual(EmailProviderKind.forHost("imap.gmail.com"), .gmail)
+        XCTAssertEqual(EmailProviderKind.forHost(" IMAP.MAIL.ATT.NET "), .att)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.mail.yahoo.com"), .yahoo)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.aol.com"), .aol)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.mail.me.com"), .icloud)
+        XCTAssertNil(EmailProviderKind.forHost("imap.example.org"))
+        XCTAssertNil(EmailProviderKind.forHost(""))
+    }
+
     /// Host suggestion still routes through this classifier, so the item-41
     /// hosts must be exactly preserved.
     func testHostsMatchItem41() {
@@ -68,6 +78,30 @@ final class CredentialGuidanceTests: XCTestCase {
         let guidance = CredentialGuidance.forEmail("me@gmail.com")
         XCTAssertEqual(guidance.credentialName, "app password")
         XCTAssertTrue(guidance.steps.contains { $0.contains("2-Step Verification") })
+    }
+
+    func testCustomDomainCanUseConfiguredHostFallbackForGuidance() {
+        let gmailGuidance = CredentialGuidance.forEmail(
+            "priya@company.example",
+            host: "imap.gmail.com"
+        )
+        XCTAssertEqual(gmailGuidance.providerName, "Gmail")
+        XCTAssertTrue(gmailGuidance.steps.contains { $0.contains("Google Account") })
+
+        let iCloudGuidance = CredentialGuidance.forEmail(
+            "me@family.example",
+            host: "imap.mail.me.com"
+        )
+        XCTAssertEqual(iCloudGuidance.providerName, "iCloud")
+        XCTAssertEqual(iCloudGuidance.credentialName, "app-specific password")
+    }
+
+    func testRecognizedEmailDomainWinsOverConfiguredHostFallback() {
+        let guidance = CredentialGuidance.forEmail(
+            "me@yahoo.com",
+            host: "imap.gmail.com"
+        )
+        XCTAssertEqual(guidance.providerName, "Yahoo")
     }
 
     func testYahooAlternateDomainsUseYahooGuidance() {

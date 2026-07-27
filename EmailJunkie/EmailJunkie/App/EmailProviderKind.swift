@@ -31,6 +31,13 @@ enum EmailProviderKind: Equatable, CaseIterable {
         }
     }
 
+    /// Classifies a configured IMAP host, or `nil` when it is not one of the
+    /// provider defaults we know how to guide.
+    static func forHost(_ host: String) -> EmailProviderKind? {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return allCases.first { $0.imapHost == normalized }
+    }
+
     /// The IMAP host for this provider (its SMTP host is derived from it).
     var imapHost: String {
         switch self {

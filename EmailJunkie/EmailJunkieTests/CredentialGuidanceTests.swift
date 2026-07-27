@@ -74,6 +74,10 @@ final class CredentialGuidanceTests: XCTestCase {
         for address in ["me@yahoo.com", "me@ymail.com", "me@rocketmail.com"] {
             let guidance = CredentialGuidance.forEmail(address)
             XCTAssertEqual(guidance.providerName, "Yahoo")
+            XCTAssertFalse(
+                guidance.steps.contains { $0.lowercased().contains("2-step") },
+                "Yahoo app-password guidance must not require enabling 2-step verification"
+            )
             XCTAssertEqual(
                 guidance.url?.absoluteString,
                 "https://login.yahoo.com/account/security"
@@ -85,6 +89,10 @@ final class CredentialGuidanceTests: XCTestCase {
         let guidance = CredentialGuidance.forEmail("me@icloud.com")
         XCTAssertEqual(guidance.credentialName, "app-specific password")
         XCTAssertEqual(guidance.url?.absoluteString, "https://appleid.apple.com")
+        XCTAssertTrue(
+            guidance.steps.contains { $0.contains("two-factor authentication") },
+            "iCloud guidance must name the prerequisite for app-specific passwords"
+        )
     }
 
     /// The single most-missed fact — the normal password won't work — must be

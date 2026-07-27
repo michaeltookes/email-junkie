@@ -86,7 +86,6 @@ struct CredentialGuidance: Equatable {
                 credentialName: "app password",
                 steps: [
                     "Sign in at account.yahoo.com → Account security.",
-                    "Turn on 2-step verification if it isn't already on.",
                     "Choose Generate app password (or Manage app passwords), name it, and generate.",
                     "Copy the password and paste it here."
                 ],
@@ -109,6 +108,7 @@ struct CredentialGuidance: Equatable {
                 credentialName: "app-specific password",
                 steps: [
                     "Sign in at appleid.apple.com.",
+                    "Turn on two-factor authentication if it isn't already enabled.",
                     "Go to Sign-In and Security → App-Specific Passwords.",
                     "Create one for Email Junkie, then paste it here."
                 ],

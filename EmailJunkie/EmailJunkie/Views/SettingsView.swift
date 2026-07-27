@@ -64,14 +64,7 @@ struct SettingsView: View {
                     }
                     .disabled(appState.isConnecting)
 
-                    DisclosureGroup("How do I get an app password?") {
-                        Text("In your Google Account, turn on 2-Step Verification, then go "
-                             + "to Security \u{2192} App passwords and generate one. Paste the "
-                             + "16-character password here \u{2014} no Google Cloud setup "
-                             + "needed.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    AppPasswordGuidanceView(email: appState.mailEmail)
 
                     DisclosureGroup("Advanced (IMAP server)") {
                         TextField("IMAP host", text: $appState.mailHost)

@@ -1,0 +1,119 @@
+import Foundation
+
+/// Provider-specific instructions for creating the app-specific credential IMAP
+/// requires, shown on the connect screen (item 43). Non-Gmail users (AT&T,
+/// Yahoo, iCloud) otherwise hit Gmail-only copy and have to hunt through their
+/// provider's help pages.
+struct CredentialGuidance: Equatable {
+    /// Human name of the provider, e.g. "AT&T", "Gmail".
+    let providerName: String
+    /// What the provider calls the credential, e.g. "Secure Mail Key",
+    /// "app password", "app-specific password".
+    let credentialName: String
+    /// Ordered, plain-language steps to obtain the credential.
+    let steps: [String]
+    /// A deep link to the provider's credential page, when one is stable.
+    let url: URL?
+
+    /// The disclosure label, phrased around the provider's own credential name
+    /// so AT&T users see "Secure Mail Key", not "app password".
+    var title: String {
+        "Getting your \(credentialName)"
+    }
+
+    /// The point every provider shares and users most often miss: the normal
+    /// account password does not work over IMAP.
+    var passwordWontWorkNote: String {
+        "Your normal \(providerName) password won't work here — you need "
+            + "\(Self.article(for: credentialName)) \(credentialName)."
+    }
+
+    /// Guidance for an email address, always returning something usable: a
+    /// recognized provider's specific steps, or generic advice for the rest.
+    static func forEmail(_ email: String) -> CredentialGuidance {
+        guard let kind = EmailProviderKind.forEmail(email) else { return .generic }
+        return forKind(kind)
+    }
+
+    static func forKind(_ kind: EmailProviderKind) -> CredentialGuidance {
+        switch kind {
+        case .gmail:
+            return CredentialGuidance(
+                providerName: "Gmail",
+                credentialName: "app password",
+                steps: [
+                    "Turn on 2-Step Verification in your Google Account — app passwords require it.",
+                    "Go to myaccount.google.com → Security → App passwords.",
+                    "Create a password for Mail, then paste the 16-character password here."
+                ],
+                url: URL(string: "https://myaccount.google.com/apppasswords")
+            )
+        case .att:
+            return CredentialGuidance(
+                providerName: "AT&T",
+                credentialName: "Secure Mail Key",
+                steps: [
+                    "Sign in at signin.att.net.",
+                    "Go to Profile → Sign-in info → Manage secure mail keys.",
+                    "Select your att.net address, then Add secure mail key.",
+                    "Copy the key and paste it here."
+                ],
+                url: URL(string: "https://signin.att.net")
+            )
+        case .yahoo:
+            return CredentialGuidance(
+                providerName: "Yahoo",
+                credentialName: "app password",
+                steps: [
+                    "Sign in at account.yahoo.com → Account security.",
+                    "Turn on 2-step verification if it isn't already on.",
+                    "Choose Generate app password (or Manage app passwords), name it, and generate.",
+                    "Copy the password and paste it here."
+                ],
+                url: URL(string: "https://login.yahoo.com/account/security")
+            )
+        case .aol:
+            return CredentialGuidance(
+                providerName: "AOL",
+                credentialName: "app password",
+                steps: [
+                    "Sign in at login.aol.com → Account security.",
+                    "Choose Generate app password (or Manage app passwords).",
+                    "Generate one for Mail, then paste it here."
+                ],
+                url: URL(string: "https://login.aol.com/account/security")
+            )
+        case .icloud:
+            return CredentialGuidance(
+                providerName: "iCloud",
+                credentialName: "app-specific password",
+                steps: [
+                    "Sign in at appleid.apple.com.",
+                    "Go to Sign-In and Security → App-Specific Passwords.",
+                    "Create one for Email Junkie, then paste it here."
+                ],
+                url: URL(string: "https://appleid.apple.com")
+            )
+        }
+    }
+
+    /// Fallback for unrecognized domains — still steers the user to the right
+    /// kind of credential rather than leaving them stuck on Gmail-only copy.
+    static let generic = CredentialGuidance(
+        providerName: "your email provider",
+        credentialName: "app password",
+        steps: [
+            "Most providers need an app-specific password — not your normal password — for IMAP access.",
+            "Find it in your provider's account security settings; look for "
+                + "\"app password\", \"app-specific password\", or \"secure mail key\".",
+            "Generate one and paste it here. You may also need to set the IMAP server under Advanced."
+        ],
+        url: nil
+    )
+
+    /// "a" / "an" for the credential name, so the note reads naturally.
+    private static func article(for noun: String) -> String {
+        let vowels: Set<Character> = ["a", "e", "i", "o", "u"]
+        return vowels.contains(noun.lowercased().first ?? "x") ? "an" : "a"
+    }
+}

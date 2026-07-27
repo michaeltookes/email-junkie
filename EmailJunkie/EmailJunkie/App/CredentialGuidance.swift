@@ -108,8 +108,8 @@ struct CredentialGuidance: Equatable {
                 credentialName: "app-specific password",
                 steps: [
                     "Sign in at appleid.apple.com.",
-                    "Turn on two-factor authentication if it isn't already enabled.",
-                    "Go to Sign-In and Security → App-Specific Passwords.",
+                    "Enable two-factor authentication if needed, then go to "
+                        + "Sign-In and Security → App-Specific Passwords.",
                     "Create one for Email Junkie, then paste it here."
                 ],
                 url: URL(string: "https://appleid.apple.com")

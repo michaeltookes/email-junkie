@@ -83,14 +83,14 @@ final class CredentialGuidanceTests: XCTestCase {
     func testCustomDomainCanUseConfiguredHostFallbackForGuidance() {
         let gmailGuidance = CredentialGuidance.forEmail(
             "priya@company.example",
-            host: "imap.gmail.com"
+            explicitHostFallback: "imap.gmail.com"
         )
         XCTAssertEqual(gmailGuidance.providerName, "Gmail")
         XCTAssertTrue(gmailGuidance.steps.contains { $0.contains("Google Account") })
 
         let iCloudGuidance = CredentialGuidance.forEmail(
             "me@family.example",
-            host: "imap.mail.me.com"
+            explicitHostFallback: "imap.mail.me.com"
         )
         XCTAssertEqual(iCloudGuidance.providerName, "iCloud")
         XCTAssertEqual(iCloudGuidance.credentialName, "app-specific password")
@@ -99,7 +99,7 @@ final class CredentialGuidanceTests: XCTestCase {
     func testRecognizedEmailDomainWinsOverConfiguredHostFallback() {
         let guidance = CredentialGuidance.forEmail(
             "me@yahoo.com",
-            host: "imap.gmail.com"
+            explicitHostFallback: "imap.gmail.com"
         )
         XCTAssertEqual(guidance.providerName, "Yahoo")
     }
@@ -168,5 +168,9 @@ final class CredentialGuidanceTests: XCTestCase {
 
     func testEmptyEmailGetsGenericGuidanceNotACrash() {
         XCTAssertEqual(CredentialGuidance.forEmail(""), CredentialGuidance.generic)
+        XCTAssertEqual(
+            CredentialGuidance.forEmail("", explicitHostFallback: "imap.gmail.com"),
+            CredentialGuidance.generic
+        )
     }
 }

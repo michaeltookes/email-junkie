@@ -73,13 +73,16 @@ final class AppStateMailProviderTests: XCTestCase {
         app.applySuggestedHostIfDefault()
         XCTAssertEqual(app.mailHost, "")
         XCTAssertEqual(
-            CredentialGuidance.forEmail(app.mailEmail, host: app.mailHost),
+            CredentialGuidance.forEmail(app.mailEmail, explicitHostFallback: app.mailHost),
             CredentialGuidance.generic
         )
 
         app.mailHost = "imap.gmail.com"
         XCTAssertEqual(
-            CredentialGuidance.forEmail(app.mailEmail, host: app.mailHost).providerName,
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.mailHost
+            ).providerName,
             "Gmail"
         )
     }

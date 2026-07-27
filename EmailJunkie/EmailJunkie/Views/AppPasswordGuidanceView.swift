@@ -7,7 +7,9 @@ struct AppPasswordGuidanceView: View {
     let email: String
     let host: String
 
-    private var guidance: CredentialGuidance { CredentialGuidance.forEmail(email, host: host) }
+    private var guidance: CredentialGuidance {
+        CredentialGuidance.forEmail(email, explicitHostFallback: host)
+    }
 
     var body: some View {
         DisclosureGroup(guidance.title) {

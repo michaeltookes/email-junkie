@@ -56,7 +56,7 @@ enum EmailProviderKind: Equatable, CaseIterable {
     }
 
     /// The lowercased domain of an email address, or `nil` if malformed.
-    private static func domain(of email: String) -> String? {
+    static func domain(of email: String) -> String? {
         let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard let at = trimmed.lastIndex(of: "@") else { return nil }
         let domain = String(trimmed[trimmed.index(after: at)...])

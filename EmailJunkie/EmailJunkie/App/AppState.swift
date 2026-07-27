@@ -255,6 +255,7 @@ final class AppState: ObservableObject {
 
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
+        markMailHostVerifiedForGuidance()
         refreshLLMConnectionStatus()
 
         setupAutoSave()
@@ -351,7 +352,7 @@ final class AppState: ObservableObject {
             return
         }
         mailAppPassword = ""
-        mailHostExplicitlyEditedEmail = nil
+        markMailHostVerifiedForGuidance()
         isAccountConnected = false
         stopWatching()
         resetMessagePreviewForAccountChange()
@@ -400,7 +401,7 @@ final class AppState: ObservableObject {
         mailHost = credentials.host
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
-        mailHostExplicitlyEditedEmail = nil
+        markMailHostVerifiedForGuidance()
 
         try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
@@ -428,7 +429,7 @@ final class AppState: ObservableObject {
         mailHost = settings.mailHost
         mailPort = settings.mailPort
         mailAppPassword = appPassword ?? ""
-        mailHostExplicitlyEditedEmail = nil
+        markMailHostVerifiedForGuidance()
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
     }
 

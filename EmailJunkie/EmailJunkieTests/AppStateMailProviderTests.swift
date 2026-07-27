@@ -126,6 +126,39 @@ final class AppStateMailProviderTests: XCTestCase {
         )
     }
 
+    func testDisconnectPreservesVerifiedProviderHostGuidanceForCustomDomain() async {
+        let provider = FakeAppMailProvider(result: .success(()))
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(),
+            secrets: InMemorySecretStore(),
+            mailProvider: provider
+        )
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.gmail.com")
+        app.mailAppPassword = "verified-pw"
+
+        await app.testConnection()
+
+        XCTAssertNil(app.connectionError)
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(provider.lastCredentials?.host, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+
+        app.disconnectMail()
+
+        XCTAssertFalse(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, "me@company.example")
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(
+            CredentialGuidance.forEmail(
+                app.mailEmail,
+                explicitHostFallback: app.credentialGuidanceHostFallback
+            ).providerName,
+            "Gmail"
+        )
+    }
+
     func testClearingExplicitHostRemovesGuidanceFallback() {
         let app = makeAppState()
         app.updateMailEmailFromUser("me@company.example")

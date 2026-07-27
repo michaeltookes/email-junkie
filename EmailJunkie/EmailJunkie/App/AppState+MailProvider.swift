@@ -63,6 +63,15 @@ extension AppState {
         mailHostExplicitlyEditedEmail = nil
     }
 
+    func markMailHostVerifiedForGuidance() {
+        guard EmailProviderKind.forEmail(mailEmail) == nil,
+              EmailProviderKind.forHost(mailHost) != nil else {
+            mailHostExplicitlyEditedEmail = nil
+            return
+        }
+        mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+    }
+
     private static func normalizedEmailForHostTracking(_ email: String) -> String? {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return normalized.isEmpty ? nil : normalized

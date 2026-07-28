@@ -243,9 +243,10 @@ extension AppState {
 
     /// Sent searches can only use IMAP's day-granularity `SINCE`; this exact
     /// envelope-date filter prevents same-day messages sent before generation
-    /// from blocking a later draft.
+    /// from blocking a later draft. A related Sent message with an unparseable
+    /// date is kept so stale-thread protection does not miss a manual reply.
     static func isMessage(_ message: MailMessage, onOrAfterGenerationDate generationDate: Date) -> Bool {
-        guard let messageDate = parsedMessageDate(message.date) else { return false }
+        guard let messageDate = parsedMessageDate(message.date) else { return true }
         return messageDate >= generationDate
     }
 }

@@ -122,6 +122,24 @@ final class AppStateStaleThreadTests: XCTestCase {
         XCTAssertEqual(verdict, .stale(.alreadyReplied))
     }
 
+    func testVerdictDetectsAlreadyRepliedFromSentDateWithTrailingComment() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 -0800 (PST)"
+            )])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
+    }
+
     func testVerdictDetectsBlankSubjectAlreadyRepliedFromRecentSent() async {
         let provider = SearchStubMailProvider(
             threadResult: result([message(id: 5, subject: "")]),
@@ -160,6 +178,42 @@ final class AppStateStaleThreadTests: XCTestCase {
 
         XCTAssertEqual(verdict, .fresh)
         XCTAssertEqual(provider.searchRequests.last?.criteria.since, AppState.dayFloor(draft().generatedAt))
+    }
+
+    func testVerdictIgnoresSameDaySentReplyBeforeDraftGenerationWithTrailingComment() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 09:00:00 +0000 (UTC)"
+            )])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .fresh)
+    }
+
+    func testVerdictTreatsUnparseableSentReplyDateConservatively() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "not a date"
+            )])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
     }
 
     func testVerdictFailsOpenWhenSearchErrors() async {

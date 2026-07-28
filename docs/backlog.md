@@ -61,14 +61,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Sparkle auto-update works against a published appcast.
     - Pipeline mirrors the Prompter release workflow.
 
-12. **Stale-thread / conflict detection before send**
-    Re-check thread state at approval time so an approved draft is never sent into a changed conversation.
-    *As Priya, I want the app to notice if a thread changed before it sends my approved draft, so that I never send a duplicate or out-of-context reply.*
-    - Before sending/saving (item 9), the source thread is re-fetched and compared to when the draft was generated.
-    - If a new reply arrived, the user already replied, or the message was archived/deleted, the send is blocked and the user is warned with options (regenerate, send anyway, discard).
-    - Especially enforced in auto-send mode, where a stale send is silent and embarrassing.
-    - Detection logic is covered by tests against representative thread-change cases.
-
 44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
     Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
     *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*

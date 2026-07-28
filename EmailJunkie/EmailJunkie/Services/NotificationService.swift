@@ -65,6 +65,9 @@ final class UserNotificationService: NSObject, DraftNotifying {
     private let center = UNUserNotificationCenter.current()
 
     static let categoryIdentifier = "DRAFT_READY"
+    /// Category for a flagged "needs input" draft — Deny only, no Approve, since
+    /// there is nothing safe to send (item 13).
+    static let needsInputCategoryIdentifier = "DRAFT_NEEDS_INPUT"
     static let approveActionIdentifier = "APPROVE_DRAFT"
     static let denyActionIdentifier = "DENY_DRAFT"
 
@@ -83,10 +86,17 @@ final class UserNotificationService: NSObject, DraftNotifying {
     func notify(for draft: Draft, sendBehavior: SendBehavior) {
         let content = UNMutableNotificationContent()
         let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
-        content.title = "Reply ready for \(sender)"
-        content.subtitle = draft.sourceSubject
-        content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
-        content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
+        if let needsInfo = draft.needsInfo {
+            content.title = "Reply to \(sender) needs your input"
+            content.subtitle = draft.sourceSubject
+            content.body = Self.snippet(needsInfo.summary)
+            content.categoryIdentifier = Self.needsInputCategoryIdentifier
+        } else {
+            content.title = "Reply ready for \(sender)"
+            content.subtitle = draft.sourceSubject
+            content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
+            content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
+        }
         content.userInfo = Self.notificationUserInfo(for: draft, sendBehavior: sendBehavior)
         content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
 
@@ -150,8 +160,18 @@ final class UserNotificationService: NSObject, DraftNotifying {
         return [approve, deny]
     }
 
+    /// The Deny-only action set for a flagged draft — no Approve, since it must
+    /// not be sent (item 13).
+    static func needsInputActions() -> [UNNotificationAction] {
+        [UNNotificationAction(
+            identifier: Self.denyActionIdentifier,
+            title: "Dismiss",
+            options: [.authenticationRequired, .destructive]
+        )]
+    }
+
     private func registerCategory() {
-        let categories = Set(SendBehavior.allCases.map { sendBehavior in
+        var categories = Set(SendBehavior.allCases.map { sendBehavior in
             UNNotificationCategory(
                 identifier: Self.categoryIdentifier(for: sendBehavior),
                 actions: Self.draftActions(for: sendBehavior),
@@ -159,6 +179,12 @@ final class UserNotificationService: NSObject, DraftNotifying {
                 options: []
             )
         })
+        categories.insert(UNNotificationCategory(
+            identifier: Self.needsInputCategoryIdentifier,
+            actions: Self.needsInputActions(),
+            intentIdentifiers: [],
+            options: []
+        ))
         center.setNotificationCategories(categories)
     }
 

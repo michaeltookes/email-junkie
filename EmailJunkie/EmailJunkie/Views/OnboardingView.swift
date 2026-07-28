@@ -167,6 +167,7 @@ private struct OnboardingAccountStep: View {
                 TextField("Email address", text: mailEmailBinding)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
+                    .onSubmit { appState.commitMailEmailEditFromUser() }
                 SecureField("App password", text: $appState.mailAppPassword)
                     .textFieldStyle(.roundedBorder)
 

@@ -30,6 +30,28 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
         }
     }
 
+    func testIncompleteEditPreservesHostThroughValidLookingTLDPrefix() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(),
+            secrets: InMemorySecretStore()
+        )
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.gmail.com")
+
+        app.updateMailEmailFromUser("renamed@company")
+        app.updateMailEmailFromUser("renamed@company.ex")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+
+        app.updateMailEmailFromUser("renamed@company.example")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "renamed@company.example")
+        XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
+    }
+
     func testIncompleteEditClearsTrackedHostForDifferentDomainAfterRelaunch() {
         let persistence = AppStateMemoryPersistence()
         let firstLaunch = AppState(
@@ -46,9 +68,30 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
             secrets: InMemorySecretStore()
         )
         secondLaunch.updateMailEmailFromUser("me@other-company.example")
+        secondLaunch.commitMailEmailEditFromUser()
 
         XCTAssertEqual(secondLaunch.mailHost, "")
         XCTAssertNil(secondLaunch.credentialGuidanceHostFallback)
+    }
+
+    func testPendingDifferentRecognizedDomainCommitsBeforeConnection() async {
+        let provider = FakeAppMailProvider(result: .success(()))
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(),
+            secrets: InMemorySecretStore(),
+            mailProvider: provider
+        )
+        app.updateMailEmailFromUser("me@company.example")
+        app.updateMailHostFromUser("imap.company.example")
+        app.mailAppPassword = "app-password"
+
+        app.updateMailEmailFromUser("renamed@company")
+        app.updateMailEmailFromUser("me@yahoo.com")
+        await app.testConnection()
+
+        XCTAssertEqual(provider.lastCredentials?.host, "imap.mail.yahoo.com")
+        XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
     }
 
     private func assertPendingHostSurvivesRelaunch(_ configure: (AppState) -> Void) {

@@ -46,8 +46,9 @@ extension AppState {
                     return
                 }
 
-                mailHost = ""
-                markMailHostManagedByApp()
+                // A valid-looking domain can still be a mid-edit prefix; resolve
+                // mismatches only when the user submits or tests the connection.
+                return
             } else {
                 mailHostExplicitlyEditedBeforeEmail = false
                 mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
@@ -67,6 +68,14 @@ extension AppState {
             markMailHostManagedByApp()
         }
 
+        applySuggestedHostIfDefault()
+    }
+
+    /// Resolves an in-progress email edit before using the current inputs for a
+    /// connection attempt or explicit field submission.
+    func commitMailEmailEditFromUser() {
+        restorePendingMailHostGuidanceIfPossible(clearMismatchedDomain: true)
+        guard !mailHostExplicitlyEditedBeforeEmail else { return }
         applySuggestedHostIfDefault()
     }
 
@@ -136,7 +145,7 @@ extension AppState {
         mailHostExplicitlyEditedBeforeEmail = false
     }
 
-    private func restorePendingMailHostGuidanceIfPossible() {
+    private func restorePendingMailHostGuidanceIfPossible(clearMismatchedDomain: Bool = false) {
         guard mailHostExplicitlyEditedBeforeEmail else { return }
 
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,6 +161,7 @@ extension AppState {
 
         if let trackedDomain = mailHostExplicitlyEditedEmail.flatMap(Self.normalizedEmailDomainForHostTracking),
            trackedDomain != currentDomain {
+            guard clearMismatchedDomain else { return }
             mailHost = ""
             markMailHostManagedByApp()
         } else {

@@ -288,6 +288,7 @@ final class AppState: ObservableObject {
     /// Tests the mailbox connection and, on success, saves the credentials.
     func testConnection() async {
         connectionError = nil
+        commitMailEmailEditFromUser()
 
         let credentials = mailCredentials
         guard credentials.isComplete else {

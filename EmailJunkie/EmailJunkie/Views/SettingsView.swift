@@ -50,6 +50,7 @@ struct SettingsView: View {
                 } else {
                     TextField("Email address", text: mailEmailBinding)
                         .textContentType(.username)
+                        .onSubmit { appState.commitMailEmailEditFromUser() }
                     SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {

@@ -175,6 +175,59 @@ final class StaleThreadCheckTests: XCTestCase {
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
     }
 
+    func testIndirectThreadLinkMatchesNewParticipantReply() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 3, subject: "Re: Lunch?", from: MailAddress(email: "bob@x.com"), messageID: "<bob@x.com>"),
+                message(
+                    id: 5,
+                    subject: "Lunch?",
+                    from: MailAddress(email: "alice@x.com"),
+                    inReplyTo: "<bob@x.com>",
+                    messageID: "<orig@x.com>"
+                ),
+                message(
+                    id: 9,
+                    subject: "Re: Lunch?",
+                    from: MailAddress(email: "carol@x.com"),
+                    inReplyTo: "<bob@x.com>",
+                    messageID: "<carol@x.com>"
+                )
+            ],
+            threadTruncated: false,
+            sentReplies: []
+        )
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
+    func testSentReplyToKnownIntermediateMessageCountsAsAlreadyReplied() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 3, subject: "Re: Lunch?", from: MailAddress(email: "bob@x.com"), messageID: "<bob@x.com>"),
+                message(
+                    id: 5,
+                    subject: "Lunch?",
+                    from: MailAddress(email: "alice@x.com"),
+                    inReplyTo: "<bob@x.com>",
+                    messageID: "<orig@x.com>"
+                )
+            ],
+            threadTruncated: false,
+            sentReplies: [
+                message(
+                    id: 2,
+                    subject: "Re: Lunch?",
+                    from: MailAddress(email: "me@gmail.com"),
+                    to: [MailAddress(email: "bob@x.com")],
+                    inReplyTo: "<bob@x.com>"
+                )
+            ]
+        )
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
+    }
+
     func testRegenerationSourceUsesNewestRelatedMessage() throws {
         let source = try XCTUnwrap(StaleThreadCheck.regenerationSource(
             draft: draft(id: 5),

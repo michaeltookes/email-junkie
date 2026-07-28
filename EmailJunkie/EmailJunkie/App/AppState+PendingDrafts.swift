@@ -134,6 +134,9 @@ extension AppState {
         case .approve(let sendBehavior):
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             await approveDraft(draft, sendBehavior: sendBehavior)
+            if pendingStaleWarnings[identity] != nil {
+                openReviewHandler?()
+            }
         case .deny:
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             denyDraft(draft)

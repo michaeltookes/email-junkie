@@ -106,14 +106,18 @@ enum StaleThreadCheck {
             return .stale(.sourceMissing)
         }
 
+        let thread = relatedThreadMessages(draft: draft, threadMessages: threadMessages)
+
         // The user already replied by hand since the draft was generated.
-        let sent = sentReplies.filter { isRelatedSentReply($0, draft: draft) }
+        let threadMessageIDs = relatedThreadMessageIDs(draft: draft, threadMessages: thread)
+        let sent = sentReplies.filter {
+            isRelatedSentReply($0, draft: draft, relatedThreadMessageIDs: threadMessageIDs)
+        }
         if !sent.isEmpty {
             return .stale(.alreadyReplied)
         }
 
         // A related message with a higher UID than the source arrived after it.
-        let thread = relatedThreadMessages(draft: draft, threadMessages: threadMessages)
         if thread.contains(where: { isNewerThanSource($0, draft: draft) }) {
             return .stale(.newerReplyInThread)
         }
@@ -130,19 +134,46 @@ enum StaleThreadCheck {
     }
 
     private static func relatedThreadMessages(draft: Draft, threadMessages: [MailMessage]) -> [MailMessage] {
-        threadMessages.filter { isRelatedThreadMessage($0, draft: draft) }
+        let subjectMatches = threadMessages.filter { hasSameThreadSubject($0, draft: draft) }
+        let linkedUIDs = linkedThreadUIDs(draft: draft, subjectMessages: subjectMatches)
+        return subjectMatches.filter {
+            linkedUIDs.contains($0.id) || sharesParticipant($0, draft: draft, includeRecipients: false)
+        }
     }
 
-    private static func isRelatedThreadMessage(_ message: MailMessage, draft: Draft) -> Bool {
-        guard hasSameThreadSubject(message, draft: draft) else { return false }
-        if isSourceMessage(message, draft: draft) { return true }
-        if isDirectReplyToSource(message, draft: draft) { return true }
-        return sharesParticipant(message, draft: draft, includeRecipients: false)
+    private static func linkedThreadUIDs(draft: Draft, subjectMessages: [MailMessage]) -> Set<UInt32> {
+        var relatedUIDs = Set<UInt32>()
+        var relatedMessageIDs = Set<String>()
+        if let sourceMessageID = normalizedMessageID(draft.sourceMessageID) {
+            relatedMessageIDs.insert(sourceMessageID)
+        }
+
+        var changed = true
+        while changed {
+            changed = false
+            for message in subjectMessages where !relatedUIDs.contains(message.id) {
+                if isSourceMessage(message, draft: draft)
+                    || sharesThreadMessageID(message, relatedMessageIDs: relatedMessageIDs) {
+                    relatedUIDs.insert(message.id)
+                    insertThreadMessageIDs(from: message, into: &relatedMessageIDs)
+                    changed = true
+                }
+            }
+        }
+        return relatedUIDs
     }
 
-    private static func isRelatedSentReply(_ message: MailMessage, draft: Draft) -> Bool {
+    private static func isRelatedSentReply(
+        _ message: MailMessage,
+        draft: Draft,
+        relatedThreadMessageIDs: Set<String>
+    ) -> Bool {
         guard hasSameThreadSubject(message, draft: draft) else { return false }
         if isDirectReplyToSource(message, draft: draft) { return true }
+        if let inReplyTo = normalizedMessageID(message.inReplyTo),
+           relatedThreadMessageIDs.contains(inReplyTo) {
+            return true
+        }
 
         let sourceAddresses = sourceParticipantAddresses(for: draft)
         guard !sourceAddresses.isEmpty else { return false }
@@ -172,6 +203,31 @@ enum StaleThreadCheck {
 
     private static func isDirectReplyToSource(_ message: MailMessage, draft: Draft) -> Bool {
         matchesMessageID(message.inReplyTo, draft.sourceMessageID)
+    }
+
+    private static func sharesThreadMessageID(_ message: MailMessage, relatedMessageIDs: Set<String>) -> Bool {
+        messageThreadIDs(message).contains { relatedMessageIDs.contains($0) }
+    }
+
+    private static func relatedThreadMessageIDs(draft: Draft, threadMessages: [MailMessage]) -> Set<String> {
+        var ids = Set<String>()
+        if let sourceMessageID = normalizedMessageID(draft.sourceMessageID) {
+            ids.insert(sourceMessageID)
+        }
+        for message in threadMessages {
+            insertThreadMessageIDs(from: message, into: &ids)
+        }
+        return ids
+    }
+
+    private static func insertThreadMessageIDs(from message: MailMessage, into ids: inout Set<String>) {
+        for id in messageThreadIDs(message) {
+            ids.insert(id)
+        }
+    }
+
+    private static func messageThreadIDs(_ message: MailMessage) -> [String] {
+        [message.messageID, message.inReplyTo].compactMap(normalizedMessageID)
     }
 
     private static func sharesParticipant(
@@ -216,9 +272,12 @@ enum StaleThreadCheck {
     }
 
     private static func normalizedMessageID(_ value: String?) -> String? {
-        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard var trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else {
             return nil
+        }
+        if trimmed.hasPrefix("<"), trimmed.hasSuffix(">"), trimmed.count > 2 {
+            trimmed = String(trimmed.dropFirst().dropLast())
         }
         return trimmed
     }

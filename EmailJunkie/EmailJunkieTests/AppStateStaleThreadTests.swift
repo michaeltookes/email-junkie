@@ -10,6 +10,8 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
     var threadResult: MailSearchResult
     var sentResult: MailSearchResult
     var searchError: MailError?
+    var threadSearchError: MailError?
+    var sentSearchError: MailError?
     var bodyResult: Result<Data, MailError> = .success(Data("Please approve the budget.".utf8))
     private(set) var sendCount = 0
     private(set) var appendCount = 0
@@ -53,7 +55,12 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
     ) async throws -> MailSearchResult {
         if let searchError { throw searchError }
         searchRequests.append((mailbox, criteria))
-        return mailbox == .sent ? sentResult : threadResult
+        if mailbox == .sent {
+            if let sentSearchError { throw sentSearchError }
+            return sentResult
+        }
+        if let threadSearchError { throw threadSearchError }
+        return threadResult
     }
 
     func appendMessage(
@@ -204,6 +211,28 @@ final class AppStateStaleThreadTests: XCTestCase {
         XCTAssertEqual(verdict, .fresh, "a failed freshness check must never block a valid send")
     }
 
+    func testVerdictPreservesThreadConflictWhenSentSearchErrors() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?"), message(id: 9, subject: "Re: Lunch?")])
+        )
+        provider.sentSearchError = .resultTooLarge
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
+    func testVerdictTreatsOnlySentSearchErrorAsEmptyWhenThreadIsFresh() async {
+        let provider = SearchStubMailProvider(threadResult: result([message(id: 5, subject: "Lunch?")]))
+        provider.sentSearchError = .resultTooLarge
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .fresh)
+    }
+
     func testVerdictFreshWhenSourceMailboxUnknown() async {
         let provider = SearchStubMailProvider(threadResult: result([message(id: 99, subject: "Whatever")]))
         let appState = makeAppState(provider: provider)
@@ -297,6 +326,25 @@ final class AppStateStaleThreadTests: XCTestCase {
         XCTAssertEqual(provider.sendCount, 1)
         XCTAssertNil(appState.pendingStaleWarnings[draft().identity], "the warning clears after send anyway")
         XCTAssertTrue(appState.pendingDrafts.isEmpty, "the sent draft leaves the queue")
+    }
+
+    func testNotificationApprovalOpensReviewWindowWhenStaleWarningRaised() async {
+        let staleDraft = draft()
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?"), message(id: 9, subject: "Re: Lunch?")])
+        )
+        let appState = makeAppState(provider: provider)
+        appState.pendingDrafts = [staleDraft]
+        appState.pendingDraftCount = 1
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
+
+        await appState.handleNotificationAction(.approve(.autoSend), identity: staleDraft.identity)
+
+        XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
+        XCTAssertTrue(openedReview)
+        XCTAssertEqual(provider.sendCount, 0)
+        XCTAssertEqual(appState.pendingDrafts, [staleDraft])
     }
 
     func testRegeneratePendingDraftReplacesStaleDraft() async {

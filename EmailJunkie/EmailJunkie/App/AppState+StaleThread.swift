@@ -16,10 +16,11 @@ extension AppState {
     /// `.fresh` when the send is safe, or `.stale(reason)` when the source was
     /// archived/deleted, a newer reply arrived, or the user already replied.
     ///
-    /// **Fails open:** if the freshness check itself errors (transient search
+    /// **Fails open:** if the source-thread search itself errors (transient search
     /// failure, a provider that can't search, an unknown source mailbox), it
     /// returns `.fresh` so the check never becomes a new way for a valid send to
-    /// be blocked.
+    /// be blocked. If only the Sent search fails, source-thread conflicts are still
+    /// honored and the unavailable Sent result is treated as empty.
     func threadStalenessVerdict(
         for draft: Draft,
         credentials: MailAccountCredentials
@@ -28,15 +29,21 @@ extension AppState {
         let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
         guard !subject.isEmpty else { return .fresh }
 
+        let thread: MailSearchResult
         do {
-            let thread = try await mailProvider.searchMessages(
+            thread = try await mailProvider.searchMessages(
                 credentials,
                 mailbox: mailbox,
                 criteria: MailSearchCriteria(subject: subject),
                 offset: 0,
                 limit: threadInspectionLimit
             )
-            let sentSearchStart = Self.dayFloor(draft.generatedAt)
+        } catch {
+            return .fresh
+        }
+
+        let sentSearchStart = Self.dayFloor(draft.generatedAt)
+        do {
             let sent = try await mailProvider.searchMessages(
                 credentials,
                 mailbox: .sent,
@@ -54,7 +61,12 @@ extension AppState {
                 sentReplies: postGenerationSent
             )
         } catch {
-            return .fresh
+            return StaleThreadCheck.verdict(
+                draft: draft,
+                threadMessages: thread.messages,
+                threadTruncated: thread.hasMore,
+                sentReplies: []
+            )
         }
     }
 

@@ -86,39 +86,41 @@ extension AppState {
         }
     }
 
-    /// Discards a stale queued draft and re-drafts a fresh reply from the same
-    /// source message (item 12's "regenerate" option). Clears the draft's stale
-    /// warning; on success the fresh draft re-enters the queue.
+    /// Re-drafts a stale queued reply against the newest related source-thread
+    /// message (item 12's "regenerate" option). The old draft remains queued until
+    /// the replacement is successfully generated and persisted.
     func regeneratePendingDraft(_ draft: Draft) async {
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         guard !approvingDraftIDs.contains(draft.identity) else { return }
         guard let mailbox = Self.sourceMailbox(for: draft), mailbox.supportsReplyDrafting else {
             approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
             return
         }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            approvalError = "Connect an email account first."
+            return
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            approvalError = "This draft was generated for a different email account."
+            return
+        }
 
         approvalError = nil
-        pendingStaleWarnings.removeValue(forKey: draft.identity)
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }
 
         do {
-            try removePendingDraft(draft)
-        } catch {
-            approvalError = Self.draftMessage(for: error)
-            return
-        }
-
-        let message = MailMessage(
-            id: draft.id,
-            uidValidity: draft.sourceUIDValidity,
-            from: draft.sourceFrom,
-            replyTo: draft.sourceReplyTo,
-            subject: draft.sourceSubject,
-            date: "",
-            messageID: draft.sourceMessageID
-        )
-        do {
-            try await draftAndEnqueue(message, mailbox: mailbox, requireWatching: false)
+            let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+            guard let replacement = try await makePendingDraft(
+                for: message,
+                mailbox: mailbox,
+                requireWatching: false
+            ) else {
+                approvalError = "The draft could not be regenerated because account settings changed."
+                return
+            }
+            try replacePendingDraft(draft, with: replacement)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
@@ -187,6 +189,51 @@ extension AppState {
             notifier.removeNotification(identity: draft.identity)
         }
         return removalIndex
+    }
+
+    private func regenerationSource(
+        for draft: Draft,
+        mailbox: Mailbox,
+        credentials: MailAccountCredentials
+    ) async throws -> MailMessage {
+        let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
+        guard !subject.isEmpty else { throw DraftError.sourceMessageUnavailable }
+
+        let thread = try await mailProvider.searchMessages(
+            credentials,
+            mailbox: mailbox,
+            criteria: MailSearchCriteria(subject: subject),
+            offset: 0,
+            limit: threadInspectionLimit
+        )
+        guard let source = StaleThreadCheck.regenerationSource(
+            draft: draft,
+            threadMessages: thread.messages
+        ) else {
+            throw DraftError.sourceMessageUnavailable
+        }
+        return source
+    }
+
+    private func replacePendingDraft(_ draft: Draft, with replacement: Draft) throws {
+        let previousDrafts = pendingDrafts
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
+        pendingDrafts[index] = replacement
+        pendingDraftCount = pendingDrafts.count
+
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            pendingDrafts = previousDrafts
+            pendingDraftCount = previousDrafts.count
+            logger.error("Failed to persist regenerated draft: \(error.localizedDescription)")
+            throw error
+        }
+
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+        pendingStaleWarnings.removeValue(forKey: replacement.identity)
+        notifier.removeNotification(identity: draft.identity)
+        notifier.notify(for: replacement, sendBehavior: sendBehavior)
     }
 
     func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {

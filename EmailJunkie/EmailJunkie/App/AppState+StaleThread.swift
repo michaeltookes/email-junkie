@@ -43,11 +43,14 @@ extension AppState {
                 offset: 0,
                 limit: threadInspectionLimit
             )
+            let postGenerationSent = sent.messages.filter {
+                Self.isMessage($0, onOrAfterGenerationDate: draft.generatedAt)
+            }
             return StaleThreadCheck.verdict(
                 draft: draft,
                 threadMessages: thread.messages,
                 threadTruncated: thread.hasMore,
-                sentReplies: sent.messages
+                sentReplies: postGenerationSent
             )
         } catch {
             return .fresh
@@ -76,5 +79,13 @@ extension AppState {
     /// same-day replies made after the draft was generated.
     static func dayFloor(_ date: Date) -> Date {
         Calendar.current.startOfDay(for: date)
+    }
+
+    /// Sent searches can only use IMAP's day-granularity `SINCE`; this exact
+    /// envelope-date filter prevents same-day messages sent before generation
+    /// from blocking a later draft.
+    static func isMessage(_ message: MailMessage, onOrAfterGenerationDate generationDate: Date) -> Bool {
+        guard let messageDate = parsedMessageDate(message.date) else { return false }
+        return messageDate >= generationDate
     }
 }

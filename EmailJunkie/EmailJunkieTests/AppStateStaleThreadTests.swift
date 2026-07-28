@@ -13,6 +13,9 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
     var bodyResult: Result<Data, MailError> = .success(Data("Please approve the budget.".utf8))
     private(set) var sendCount = 0
     private(set) var appendCount = 0
+    private(set) var lastBodyUID: UInt32?
+    private(set) var lastExpectedUIDValidity: UInt32?
+    private(set) var searchRequests: [(mailbox: Mailbox, criteria: MailSearchCriteria)] = []
 
     init(
         threadResult: MailSearchResult = .empty(offset: 0),
@@ -35,7 +38,11 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
         mailbox: Mailbox,
         uid: UInt32,
         expectedUIDValidity: UInt32?
-    ) async throws -> Data { try bodyResult.get() }
+    ) async throws -> Data {
+        lastBodyUID = uid
+        lastExpectedUIDValidity = expectedUIDValidity
+        return try bodyResult.get()
+    }
 
     func searchMessages(
         _ credentials: MailAccountCredentials,
@@ -45,6 +52,7 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
         limit: Int
     ) async throws -> MailSearchResult {
         if let searchError { throw searchError }
+        searchRequests.append((mailbox, criteria))
         return mailbox == .sent ? sentResult : threadResult
     }
 
@@ -82,8 +90,25 @@ final class AppStateStaleThreadTests: XCTestCase {
         )
     }
 
-    private func message(id: UInt32, subject: String) -> MailMessage {
-        MailMessage(id: id, uidValidity: 1, from: MailAddress(email: "x@x.com"), subject: subject, date: "")
+    private func message(
+        id: UInt32,
+        subject: String,
+        from: MailAddress? = MailAddress(email: "alice@x.com"),
+        to: [MailAddress] = [],
+        date: String = "",
+        inReplyTo: String? = nil,
+        messageID: String? = nil
+    ) -> MailMessage {
+        MailMessage(
+            id: id,
+            uidValidity: 1,
+            from: from,
+            to: to,
+            subject: subject,
+            date: date,
+            inReplyTo: inReplyTo,
+            messageID: messageID
+        )
     }
 
     private func result(_ messages: [MailMessage], hasMore: Bool = false) -> MailSearchResult {
@@ -135,13 +160,38 @@ final class AppStateStaleThreadTests: XCTestCase {
     func testVerdictDetectsAlreadyRepliedFromSent() async {
         let provider = SearchStubMailProvider(
             threadResult: result([message(id: 5, subject: "Lunch?")]),
-            sentResult: result([message(id: 2, subject: "Re: Lunch?")])
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )])
         )
         let appState = makeAppState(provider: provider)
 
         let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
 
         XCTAssertEqual(verdict, .stale(.alreadyReplied))
+    }
+
+    func testVerdictIgnoresSameDaySentReplyBeforeDraftGeneration() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 09:00:00 +0000"
+            )])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .fresh)
+        XCTAssertEqual(provider.searchRequests.last?.criteria.since, AppState.dayFloor(draft().generatedAt))
     }
 
     func testVerdictFailsOpenWhenSearchErrors() async {
@@ -214,7 +264,13 @@ final class AppStateStaleThreadTests: XCTestCase {
     func testQueueApprovalRaisesWarningAndDoesNotSendWhenStale() async {
         let provider = SearchStubMailProvider(
             threadResult: result([message(id: 5, subject: "Lunch?")]),
-            sentResult: result([message(id: 2, subject: "Re: Lunch?")])
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )])
         )
         let appState = makeAppState(provider: provider)
         appState.pendingDrafts = [draft()]
@@ -245,7 +301,10 @@ final class AppStateStaleThreadTests: XCTestCase {
 
     func testRegeneratePendingDraftReplacesStaleDraft() async {
         let provider = SearchStubMailProvider(
-            threadResult: result([message(id: 5, subject: "Lunch?"), message(id: 9, subject: "Re: Lunch?")])
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
         )
         let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
         appState.pendingDrafts = [draft()]
@@ -257,7 +316,53 @@ final class AppStateStaleThreadTests: XCTestCase {
 
         XCTAssertNil(appState.pendingStaleWarnings[draft().identity], "the warning clears on regenerate")
         XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertEqual(appState.pendingDrafts.first?.id, 9)
+        XCTAssertEqual(appState.pendingDrafts.first?.sourceMessageID, "<new@x.com>")
         XCTAssertEqual(appState.pendingDrafts.first?.body, "Regenerated reply.")
+        XCTAssertEqual(provider.lastBodyUID, 9)
+        XCTAssertEqual(provider.lastExpectedUIDValidity, 1)
         XCTAssertEqual(provider.sendCount, 0, "regenerate does not send")
+    }
+
+    func testRegeneratePendingDraftKeepsOriginalWhenGenerationFails() async {
+        let staleDraft = draft()
+        let provider = SearchStubMailProvider(
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
+        )
+        let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
+        appState.pendingDrafts = [staleDraft]
+
+        await appState.approveDraft(staleDraft)
+        provider.bodyResult = .failure(.commandFailed("body unavailable"))
+
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts, [staleDraft])
+        XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
+        XCTAssertNotNil(appState.approvalError)
+    }
+
+    func testRegeneratePendingDraftKeepsOriginalWhenReplacementSaveFails() async {
+        let staleDraft = draft()
+        let provider = SearchStubMailProvider(
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
+        )
+        let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
+        appState.pendingDrafts = [staleDraft]
+
+        await appState.approveDraft(staleDraft)
+        (appState.persistence as? AppStateMemoryPersistence)?.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts, [staleDraft])
+        XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
+        XCTAssertNotNil(appState.approvalError)
     }
 }

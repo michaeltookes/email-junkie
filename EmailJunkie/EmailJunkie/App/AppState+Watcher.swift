@@ -343,7 +343,7 @@ extension AppState {
         return date < startDate
     }
 
-    private static func parsedMessageDate(_ value: String) -> Date? {
+    static func parsedMessageDate(_ value: String) -> Date? {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
 

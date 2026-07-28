@@ -57,11 +57,10 @@ enum StaleThreadVerdict: Equatable {
 /// exhaustively unit-tested against representative thread-change cases (item 12).
 ///
 /// The inputs are re-fetched envelope-level views of the thread: the source
-/// mailbox's subject-search results and the Sent mailbox's subject-search
-/// results since the draft was generated. Ordering within a mailbox is by UID,
-/// which increases monotonically, so a message with a UID higher than the source
-/// arrived after it — the signal used for "a newer reply arrived" without having
-/// to parse the raw envelope date strings.
+/// mailbox's subject-search results and the Sent mailbox's post-generation
+/// subject-search results. Ordering within a mailbox is by UID, which increases
+/// monotonically, so a related message with a UID higher than the source arrived
+/// after it.
 enum StaleThreadCheck {
 
     /// Reply/forward prefixes stripped when reducing a subject to a thread key.
@@ -100,9 +99,7 @@ enum StaleThreadCheck {
         threadTruncated: Bool,
         sentReplies: [MailMessage]
     ) -> StaleThreadVerdict {
-        let key = normalizedSubjectKey(draft.sourceSubject)
-        let thread = threadMessages.filter { normalizedSubjectKey($0.subject) == key }
-        let sourcePresent = thread.contains { $0.id == draft.id }
+        let sourcePresent = threadMessages.contains { isSourceMessage($0, draft: draft) }
 
         // The source is gone — only trust this when the whole thread was seen.
         if !sourcePresent && !threadTruncated {
@@ -110,16 +107,124 @@ enum StaleThreadCheck {
         }
 
         // The user already replied by hand since the draft was generated.
-        let sent = sentReplies.filter { normalizedSubjectKey($0.subject) == key }
+        let sent = sentReplies.filter { isRelatedSentReply($0, draft: draft) }
         if !sent.isEmpty {
             return .stale(.alreadyReplied)
         }
 
-        // A message with a higher UID than the source arrived after it.
-        if thread.contains(where: { $0.id > draft.id }) {
+        // A related message with a higher UID than the source arrived after it.
+        let thread = relatedThreadMessages(draft: draft, threadMessages: threadMessages)
+        if thread.contains(where: { isNewerThanSource($0, draft: draft) }) {
             return .stale(.newerReplyInThread)
         }
 
         return .fresh
+    }
+
+    /// Picks the message a regeneration should answer. When a newer related reply
+    /// is available, this returns that message rather than the stale source UID.
+    static func regenerationSource(draft: Draft, threadMessages: [MailMessage]) -> MailMessage? {
+        relatedThreadMessages(draft: draft, threadMessages: threadMessages)
+            .filter { isUIDComparable($0, draft: draft) }
+            .max { $0.id < $1.id }
+    }
+
+    private static func relatedThreadMessages(draft: Draft, threadMessages: [MailMessage]) -> [MailMessage] {
+        threadMessages.filter { isRelatedThreadMessage($0, draft: draft) }
+    }
+
+    private static func isRelatedThreadMessage(_ message: MailMessage, draft: Draft) -> Bool {
+        guard hasSameThreadSubject(message, draft: draft) else { return false }
+        if isSourceMessage(message, draft: draft) { return true }
+        if isDirectReplyToSource(message, draft: draft) { return true }
+        return sharesParticipant(message, draft: draft, includeRecipients: false)
+    }
+
+    private static func isRelatedSentReply(_ message: MailMessage, draft: Draft) -> Bool {
+        guard hasSameThreadSubject(message, draft: draft) else { return false }
+        if isDirectReplyToSource(message, draft: draft) { return true }
+
+        let sourceAddresses = sourceParticipantAddresses(for: draft)
+        guard !sourceAddresses.isEmpty else { return false }
+        let sentRecipients = Set(message.to.compactMap { normalizedEmail($0.email) })
+        return !sentRecipients.isDisjoint(with: sourceAddresses)
+    }
+
+    private static func isSourceMessage(_ message: MailMessage, draft: Draft) -> Bool {
+        message.id == draft.id && isUIDComparable(message, draft: draft)
+    }
+
+    private static func isNewerThanSource(_ message: MailMessage, draft: Draft) -> Bool {
+        isUIDComparable(message, draft: draft) && message.id > draft.id
+    }
+
+    private static func isUIDComparable(_ message: MailMessage, draft: Draft) -> Bool {
+        guard let draftUIDValidity = draft.sourceUIDValidity,
+              let messageUIDValidity = message.uidValidity else {
+            return true
+        }
+        return draftUIDValidity == messageUIDValidity
+    }
+
+    private static func hasSameThreadSubject(_ message: MailMessage, draft: Draft) -> Bool {
+        normalizedSubjectKey(message.subject) == normalizedSubjectKey(draft.sourceSubject)
+    }
+
+    private static func isDirectReplyToSource(_ message: MailMessage, draft: Draft) -> Bool {
+        matchesMessageID(message.inReplyTo, draft.sourceMessageID)
+    }
+
+    private static func sharesParticipant(
+        _ message: MailMessage,
+        draft: Draft,
+        includeRecipients: Bool
+    ) -> Bool {
+        let sourceAddresses = sourceParticipantAddresses(for: draft)
+        guard !sourceAddresses.isEmpty else { return false }
+
+        var messageAddresses = Set<String>()
+        if let from = message.from?.email, let normalized = normalizedEmail(from) {
+            messageAddresses.insert(normalized)
+        }
+        if let replyTo = message.replyTo?.email, let normalized = normalizedEmail(replyTo) {
+            messageAddresses.insert(normalized)
+        }
+        if includeRecipients {
+            for recipient in message.to {
+                if let normalized = normalizedEmail(recipient.email) {
+                    messageAddresses.insert(normalized)
+                }
+            }
+        }
+        return !messageAddresses.isDisjoint(with: sourceAddresses)
+    }
+
+    private static func sourceParticipantAddresses(for draft: Draft) -> Set<String> {
+        [
+            draft.sourceReplyTo?.email,
+            draft.sourceFrom?.email
+        ].compactMap { $0.flatMap(normalizedEmail) }
+            .reduce(into: Set<String>()) { $0.insert($1) }
+    }
+
+    private static func matchesMessageID(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs = normalizedMessageID(lhs),
+              let rhs = normalizedMessageID(rhs) else {
+            return false
+        }
+        return lhs == rhs
+    }
+
+    private static func normalizedMessageID(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func normalizedEmail(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

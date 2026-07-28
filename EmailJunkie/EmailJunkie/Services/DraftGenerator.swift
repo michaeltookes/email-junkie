@@ -17,6 +17,8 @@ enum DraftError: Error, Equatable {
     /// The draft is flagged as needing the user's input, so it cannot be sent or
     /// saved as-is (item 13).
     case needsUserInput
+    /// Regeneration could not find a current source message to draft against.
+    case sourceMessageUnavailable
 }
 
 /// The result of asking the model for a reply: either a ready-to-send body, or a

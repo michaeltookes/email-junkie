@@ -21,8 +21,14 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
     public var from: MailAddress?
     /// The address replies should be sent to, when it differs from `From`.
     public var replyTo: MailAddress?
+    /// Envelope recipients. This is especially useful for Sent-mail searches,
+    /// where `From` is usually the connected account and the recipient links the
+    /// sent message back to the source conversation.
+    public var to: [MailAddress]
     public var subject: String
     public var date: String
+    /// The RFC 5322 `In-Reply-To` value, when the server provides it.
+    public var inReplyTo: String?
     /// The RFC 5322 `Message-ID` (with angle brackets), when the server provides
     /// it. Used to thread replies via `In-Reply-To`/`References`.
     public var messageID: String?
@@ -32,16 +38,20 @@ public struct MailMessage: Equatable, Sendable, Identifiable {
         uidValidity: UInt32? = nil,
         from: MailAddress?,
         replyTo: MailAddress? = nil,
+        to: [MailAddress] = [],
         subject: String,
         date: String,
+        inReplyTo: String? = nil,
         messageID: String? = nil
     ) {
         self.id = id
         self.uidValidity = uidValidity
         self.from = from
         self.replyTo = replyTo
+        self.to = to
         self.subject = subject
         self.date = date
+        self.inReplyTo = inReplyTo
         self.messageID = messageID
     }
 }

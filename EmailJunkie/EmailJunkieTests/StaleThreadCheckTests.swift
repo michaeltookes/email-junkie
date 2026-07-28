@@ -25,8 +25,24 @@ final class StaleThreadCheckTests: XCTestCase {
         )
     }
 
-    private func message(id: UInt32, subject: String) -> MailMessage {
-        MailMessage(id: id, uidValidity: 1, from: MailAddress(email: "x@x.com"), subject: subject, date: "")
+    private func message(
+        id: UInt32,
+        subject: String,
+        from: MailAddress? = MailAddress(email: "alice@x.com"),
+        to: [MailAddress] = [],
+        inReplyTo: String? = nil,
+        messageID: String? = nil
+    ) -> MailMessage {
+        MailMessage(
+            id: id,
+            uidValidity: 1,
+            from: from,
+            to: to,
+            subject: subject,
+            date: "",
+            inReplyTo: inReplyTo,
+            messageID: messageID
+        )
     }
 
     // MARK: - Subject normalization
@@ -87,7 +103,12 @@ final class StaleThreadCheckTests: XCTestCase {
             draft: draft(id: 5),
             threadMessages: [message(id: 5, subject: "Lunch?"), message(id: 8, subject: "Re: Lunch?")],
             threadTruncated: false,
-            sentReplies: [message(id: 2, subject: "Re: Lunch?")]
+            sentReplies: [message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")]
+            )]
         )
         XCTAssertEqual(verdict, .stale(.alreadyReplied))
     }
@@ -97,7 +118,12 @@ final class StaleThreadCheckTests: XCTestCase {
             draft: draft(id: 5),
             threadMessages: [],
             threadTruncated: false,
-            sentReplies: [message(id: 2, subject: "Re: Lunch?")]
+            sentReplies: [message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")]
+            )]
         )
         XCTAssertEqual(verdict, .stale(.sourceMissing))
     }
@@ -111,5 +137,54 @@ final class StaleThreadCheckTests: XCTestCase {
             sentReplies: [message(id: 30, subject: "Newsletter")]
         )
         XCTAssertEqual(verdict, .fresh)
+    }
+
+    func testSameSubjectDifferentConversationIsIgnored() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5, subject: "Status update"),
+            threadMessages: [
+                message(id: 5, subject: "Status update"),
+                message(id: 20, subject: "Re: Status update", from: MailAddress(email: "mallory@x.com"))
+            ],
+            threadTruncated: false,
+            sentReplies: [message(
+                id: 30,
+                subject: "Re: Status update",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "mallory@x.com")]
+            )]
+        )
+        XCTAssertEqual(verdict, .fresh)
+    }
+
+    func testDirectThreadLinkMatchesDifferentParticipant() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?"),
+                message(
+                    id: 9,
+                    subject: "Re: Lunch?",
+                    from: MailAddress(email: "carol@x.com"),
+                    inReplyTo: "<orig@x.com>"
+                )
+            ],
+            threadTruncated: false,
+            sentReplies: []
+        )
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
+    func testRegenerationSourceUsesNewestRelatedMessage() throws {
+        let source = try XCTUnwrap(StaleThreadCheck.regenerationSource(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 20, subject: "Re: Lunch?", from: MailAddress(email: "mallory@x.com")),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ]
+        ))
+        XCTAssertEqual(source.id, 9)
+        XCTAssertEqual(source.messageID, "<new@x.com>")
     }
 }

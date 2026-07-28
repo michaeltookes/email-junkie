@@ -75,16 +75,29 @@ extension AppState {
         }
     }
 
-    /// Builds a reply draft for a watcher-selected message and appends it to the
-    /// pending queue. Unlike `generateDraft`, this does not touch the Settings
-    /// preview state, so an active preview and the watcher don't clobber each
-    /// other. Throws on missing configuration or provider/LLM errors.
+    /// Builds a watcher-selected reply and appends it to the pending queue. Unlike
+    /// `generateDraft`, this avoids Settings preview state.
     @discardableResult
     func draftAndEnqueue(
         _ message: MailMessage,
         mailbox: Mailbox = .inbox,
         requireWatching: Bool = true
     ) async throws -> Bool {
+        guard let draft = try await makePendingDraft(
+            for: message,
+            mailbox: mailbox,
+            requireWatching: requireWatching
+        ) else { return false }
+        try enqueuePendingDraft(draft)
+        return true
+    }
+
+    /// Builds a watcher-style queued draft without persisting it.
+    func makePendingDraft(
+        for message: MailMessage,
+        mailbox: Mailbox = .inbox,
+        requireWatching: Bool = true
+    ) async throws -> Draft? {
         guard mailbox.supportsReplyDrafting else {
             throw DraftError.unsupportedSourceMailbox
         }
@@ -102,7 +115,7 @@ extension AppState {
             credentials: credentials,
             llmConfiguration: llmConfiguration,
             requireWatching: requireWatching
-        ) else { return false }
+        ) else { return nil }
         let incomingText = MailBodyText.plainText(from: data)
         let context = ReplyContext(
             senderName: message.from?.name,
@@ -115,7 +128,7 @@ extension AppState {
             credentials: credentials,
             llmConfiguration: llmConfiguration,
             requireWatching: requireWatching
-        ) else { return false }
+        ) else { return nil }
         let draft = Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
@@ -132,8 +145,7 @@ extension AppState {
             generatedAt: Date(),
             needsInfo: Self.needsInfo(from: outcome)
         )
-        try enqueuePendingDraft(draft)
-        return true
+        return draft
     }
 
     // MARK: - Helpers

@@ -18,6 +18,8 @@ extension AppState {
             return "Draft replies are only available for incoming mail."
         case DraftError.needsUserInput:
             return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
+        case DraftError.sourceMessageUnavailable:
+            return "No current message was found to regenerate from. Send anyway or discard this draft."
         case DraftDispatchError.noRecipient:
             return "This draft has no recipient address to send to."
         case DraftDispatchError.staleThread(let reason):

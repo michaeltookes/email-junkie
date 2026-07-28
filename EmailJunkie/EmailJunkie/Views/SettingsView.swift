@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var openedBody: MailBodyPreview?
     @State private var generatedDraft: Draft?
+    @FocusState private var isMailEmailFocused: Bool
 
     var body: some View {
         Form {
@@ -50,7 +51,13 @@ struct SettingsView: View {
                 } else {
                     TextField("Email address", text: mailEmailBinding)
                         .textContentType(.username)
+                        .focused($isMailEmailFocused)
                         .onSubmit { appState.commitMailEmailEditFromUser() }
+                        .onChange(of: isMailEmailFocused) { _, isFocused in
+                            if !isFocused {
+                                appState.commitMailEmailEditFromUser()
+                            }
+                        }
                     SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {

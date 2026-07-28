@@ -152,6 +152,7 @@ private struct OnboardingError: View {
 
 private struct OnboardingAccountStep: View {
     @EnvironmentObject var appState: AppState
+    @FocusState private var isMailEmailFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -167,7 +168,13 @@ private struct OnboardingAccountStep: View {
                 TextField("Email address", text: mailEmailBinding)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isMailEmailFocused)
                     .onSubmit { appState.commitMailEmailEditFromUser() }
+                    .onChange(of: isMailEmailFocused) { _, isFocused in
+                        if !isFocused {
+                            appState.commitMailEmailEditFromUser()
+                        }
+                    }
                 SecureField("App password", text: $appState.mailAppPassword)
                     .textFieldStyle(.roundedBorder)
 

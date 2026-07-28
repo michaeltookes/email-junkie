@@ -82,6 +82,11 @@ private struct PendingDraftCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if draft.isFlagged {
+                Label("Needs your input", systemImage: "exclamationmark.bubble")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
             HStack(alignment: .top, spacing: 12) {
                 incomingColumn
                 Divider()
@@ -92,7 +97,11 @@ private struct PendingDraftCard: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(cardStroke, lineWidth: draft.isFlagged ? 1.5 : 1))
+    }
+
+    private var cardStroke: Color {
+        draft.isFlagged ? Color.orange.opacity(0.5) : Color.secondary.opacity(0.15)
     }
 
     private var incomingColumn: some View {
@@ -121,24 +130,32 @@ private struct PendingDraftCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private var replyColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Proposed reply")
+            Text(draft.isFlagged ? "Can't draft this one" : "Proposed reply")
                 .font(.caption).bold()
                 .foregroundStyle(.secondary)
-            if let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
-                Text("To: \(recipient)").font(.caption).foregroundStyle(.secondary)
+            if let needsInfo = draft.needsInfo {
+                ScrollView {
+                    DraftNeedsInfoView(needsInfo: needsInfo)
+                }
+                .frame(maxHeight: 180)
+            } else {
+                if let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
+                    Text("To: \(recipient)").font(.caption).foregroundStyle(.secondary)
+                }
+                Text(draft.replySubject)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    Text(draft.body)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
             }
-            Text(draft.replySubject)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ScrollView {
-                Text(draft.body)
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 180)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -149,16 +166,19 @@ private struct PendingDraftCard: View {
                 ProgressView().controlSize(.small)
             }
             Spacer()
-            Button("Deny", role: .destructive) {
+            Button(draft.isFlagged ? "Dismiss" : "Deny", role: .destructive) {
                 appState.denyDraft(draft)
             }
             .disabled(isBusy)
 
-            Button(appState.approveActionLabel) {
-                Task { await appState.approveDraft(draft) }
+            // A flagged draft can't be approved — there is nothing safe to send.
+            if !draft.isFlagged {
+                Button(appState.approveActionLabel) {
+                    Task { await appState.approveDraft(draft) }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(isBusy)
             }
-            .keyboardShortcut(.defaultAction)
-            .disabled(isBusy)
         }
     }
 }

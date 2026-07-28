@@ -61,13 +61,25 @@ final class DraftGeneratorTests: XCTestCase {
     func testReturnsCleanedReplyBody() async throws {
         let generator = DraftGenerator()
 
-        let body = try await generator.makeDraft(
+        let outcome = try await generator.makeDraft(
             replyingTo: context(),
             voiceProfile: nil,
             model: "m"
         ) { _ in LLMResponse(text: "Subject: Re: Lunch Thursday?\n\nYes, noon works for me!\n") }
 
-        XCTAssertEqual(body, "Yes, noon works for me!", "leading Subject line and whitespace stripped")
+        XCTAssertEqual(
+            outcome,
+            .ready("Yes, noon works for me!"),
+            "leading Subject line and whitespace stripped"
+        )
+    }
+
+    /// The system prompt must tell the model how to flag a low-confidence reply,
+    /// or it will fabricate one (item 13).
+    func testSystemPromptInstructsTheNeedsInfoProtocol() {
+        let prompt = DraftGenerator.systemPrompt(voiceProfile: nil)
+        XCTAssertTrue(prompt.contains(DraftGenerator.needsInfoSentinel))
+        XCTAssertTrue(prompt.contains("do NOT"), "must forbid fabricating missing facts")
     }
 
     func testEmptyReplyThrows() async {

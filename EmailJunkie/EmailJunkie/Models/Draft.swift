@@ -1,6 +1,21 @@
 import EmailJunkieMail
 import Foundation
 
+/// Why the assistant couldn't confidently draft a reply — the reply would need
+/// information only the user has (item 13). Attached to a `Draft` so the flagged
+/// state persists through the pending queue and survives relaunch.
+struct DraftNeedsInfo: Codable, Equatable {
+    /// One-line explanation of why a confident reply isn't possible.
+    var summary: String
+    /// Specific things the user would need to supply to complete the reply.
+    var missing: [String]
+
+    init(summary: String, missing: [String] = []) {
+        self.summary = summary
+        self.missing = missing
+    }
+}
+
 /// A generated reply draft, associated with the message it replies to so it can
 /// be threaded and sent correctly later (items 9 & 12).
 struct Draft: Codable, Identifiable, Equatable {
@@ -25,12 +40,21 @@ struct Draft: Codable, Identifiable, Equatable {
     var incomingBody: String?
     /// The reply subject (`Re: …`).
     var replySubject: String
-    /// The generated reply body.
+    /// The generated reply body. Empty when the draft is flagged as needing the
+    /// user's input (`needsInfo` set) — there is no fabricated reply to send.
     var body: String
     /// The model that produced the draft.
     var model: String
     /// When the draft was generated.
     var generatedAt: Date
+    /// Set when the assistant declined to fabricate a reply because it needs
+    /// information only the user has (item 13). A flagged draft is never sent or
+    /// saved until the user resolves it.
+    var needsInfo: DraftNeedsInfo?
+
+    /// Whether this draft is flagged as needing the user's input rather than
+    /// carrying a ready-to-send reply.
+    var isFlagged: Bool { needsInfo != nil }
 
     init(
         id: UInt32,
@@ -45,7 +69,8 @@ struct Draft: Codable, Identifiable, Equatable {
         replySubject: String,
         body: String,
         model: String,
-        generatedAt: Date
+        generatedAt: Date,
+        needsInfo: DraftNeedsInfo? = nil
     ) {
         self.id = id
         self.sourceUIDValidity = sourceUIDValidity
@@ -60,6 +85,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.body = body
         self.model = model
         self.generatedAt = generatedAt
+        self.needsInfo = needsInfo
     }
 
     /// A stable identity across the pending queue and notifications, scoped by

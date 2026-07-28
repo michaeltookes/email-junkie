@@ -58,11 +58,16 @@ struct DraftView: View {
             .padding()
             Divider()
             ScrollView {
-                Text(draft.body)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                if let needsInfo = draft.needsInfo {
+                    DraftNeedsInfoView(needsInfo: needsInfo)
+                        .padding()
+                } else {
+                    Text(draft.body)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
             }
             Divider()
             HStack {
@@ -76,16 +81,19 @@ struct DraftView: View {
                         .foregroundStyle(.red)
                 }
                 Spacer()
-                Button {
-                    Task { await approveDisplayedDraft() }
-                } label: {
-                    if isBusy {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text(appState.sendBehavior == .autoSend ? "Send now" : "Save to Drafts")
+                // A flagged draft has no reply to send — offer no dispatch action.
+                if !draft.isFlagged {
+                    Button {
+                        Task { await approveDisplayedDraft() }
+                    } label: {
+                        if isBusy {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(appState.sendBehavior == .autoSend ? "Send now" : "Save to Drafts")
+                        }
                     }
+                    .disabled(isBusy || isDone)
                 }
-                .disabled(isBusy || isDone)
             }
             .padding()
         }

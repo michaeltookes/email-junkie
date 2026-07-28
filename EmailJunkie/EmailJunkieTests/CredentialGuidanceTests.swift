@@ -48,6 +48,12 @@ final class CredentialGuidanceTests: XCTestCase {
         XCTAssertNil(EmailProviderKind.forHost(""))
     }
 
+    func testProviderHostClassificationRequiresDNSLabelBoundaries() {
+        XCTAssertNil(EmailProviderKind.forHost("imap.gmail.com.example"))
+        XCTAssertNil(EmailProviderKind.forHost("imap.yahoo-backup.company.example"))
+        XCTAssertNil(EmailProviderKind.forHost("imap.xmail.icloud.com"))
+    }
+
     /// Host suggestion still routes through this classifier, so the item-41
     /// hosts must be exactly preserved.
     func testHostsMatchItem41() {

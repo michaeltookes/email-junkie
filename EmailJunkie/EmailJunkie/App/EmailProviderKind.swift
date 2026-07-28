@@ -35,19 +35,19 @@ enum EmailProviderKind: Equatable, CaseIterable {
     /// provider defaults we know how to guide.
     static func forHost(_ host: String) -> EmailProviderKind? {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if gmailHostFragments.contains(where: normalized.contains) {
+        if normalized.hasDNSLabelSuffix(in: gmailHostSuffixes) {
             return .gmail
         }
-        if attHostFragments.contains(where: normalized.contains) {
+        if normalized.hasDNSLabelSuffix(in: attHostSuffixes) {
             return .att
         }
-        if yahooHostFragments.contains(where: normalized.contains) {
+        if normalized.hasDNSLabelSuffix(in: yahooHostSuffixes) {
             return .yahoo
         }
-        if aolHostFragments.contains(where: normalized.contains) {
+        if normalized.hasDNSLabelSuffix(in: aolHostSuffixes) {
             return .aol
         }
-        if icloudHostSuffixes.contains(where: normalized.hasSuffix) {
+        if normalized.hasDNSLabelSuffix(in: icloudHostSuffixes) {
             return .icloud
         }
         return nil
@@ -78,9 +78,17 @@ enum EmailProviderKind: Equatable, CaseIterable {
         return domain.isEmpty ? nil : domain
     }
 
-    private static let gmailHostFragments = ["gmail", "googlemail"]
-    private static let attHostFragments = ["att.net", "mail.att", "sbcglobal", "bellsouth"]
-    private static let yahooHostFragments = ["yahoo", "ymail", "rocketmail"]
-    private static let aolHostFragments = ["aol"]
+    private static let gmailHostSuffixes = ["gmail.com", "googlemail.com"]
+    private static let attHostSuffixes = ["att.net", "sbcglobal.net", "bellsouth.net"]
+    private static let yahooHostSuffixes = ["yahoo.com", "ymail.com", "rocketmail.com"]
+    private static let aolHostSuffixes = ["aol.com"]
     private static let icloudHostSuffixes = ["mail.me.com", "mail.icloud.com"]
+}
+
+private extension String {
+    func hasDNSLabelSuffix(in suffixes: [String]) -> Bool {
+        suffixes.contains { suffix in
+            self == suffix || hasSuffix("." + suffix)
+        }
+    }
 }

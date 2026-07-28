@@ -38,6 +38,7 @@ struct DraftView: View {
     @State private var isDispatching = false
     @State private var dispatchConfirmation: String?
     @State private var dispatchError: String?
+    @State private var staleReason: StaleThreadReason?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -98,9 +99,30 @@ struct DraftView: View {
             .padding()
         }
         .frame(width: 480, height: 460)
+        .confirmationDialog(
+            staleReason?.headline ?? "",
+            isPresented: staleWarningBinding,
+            titleVisibility: .visible
+        ) {
+            Button(appState.sendBehavior == .autoSend ? "Send anyway" : "Save anyway", role: .destructive) {
+                Task { await approveDisplayedDraft(force: true) }
+            }
+            Button("Cancel", role: .cancel) { staleReason = nil }
+        } message: {
+            if let staleReason {
+                Text(staleReason.detail)
+            }
+        }
     }
 
-    private func approveDisplayedDraft() async {
+    private var staleWarningBinding: Binding<Bool> {
+        Binding(
+            get: { staleReason != nil },
+            set: { if !$0 { staleReason = nil } }
+        )
+    }
+
+    private func approveDisplayedDraft(force: Bool = false) async {
         guard !isDispatching else { return }
         dispatchConfirmation = nil
         dispatchError = nil
@@ -108,7 +130,14 @@ struct DraftView: View {
         defer { isDispatching = false }
 
         do {
-            dispatchConfirmation = try await appState.approveDraftPreview(draft)
+            dispatchConfirmation = try await appState.approveDraftPreview(draft, force: force)
+            staleReason = nil
+        } catch let error as DraftDispatchError {
+            if case .staleThread(let reason) = error {
+                staleReason = reason
+            } else {
+                dispatchError = AppState.draftMessage(for: error)
+            }
         } catch {
             dispatchError = AppState.draftMessage(for: error)
         }

@@ -80,6 +80,8 @@ private struct PendingDraftCard: View {
 
     private var isBusy: Bool { appState.approvingDraftIDs.contains(draft.identity) }
 
+    private var staleReason: StaleThreadReason? { appState.pendingStaleWarnings[draft.identity] }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.isFlagged {
@@ -93,7 +95,11 @@ private struct PendingDraftCard: View {
                 replyColumn
             }
             Divider()
-            actions
+            if let staleReason {
+                staleWarning(staleReason)
+            } else {
+                actions
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
@@ -180,5 +186,39 @@ private struct PendingDraftCard: View {
                 .disabled(isBusy)
             }
         }
+    }
+
+    /// The conflict warning shown when a draft's thread changed since it was
+    /// generated (item 12), offering send-anyway / regenerate / discard.
+    private func staleWarning(_ reason: StaleThreadReason) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(reason.headline, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(reason.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                Button("Discard", role: .destructive) {
+                    appState.denyDraft(draft)
+                }
+                .disabled(isBusy)
+                Button("Regenerate") {
+                    Task { await appState.regeneratePendingDraft(draft) }
+                }
+                .disabled(isBusy)
+                Button("\(appState.approveActionLabel) anyway") {
+                    Task { await appState.approveDraft(draft, force: true) }
+                }
+                .disabled(isBusy)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.08)))
     }
 }

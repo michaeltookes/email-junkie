@@ -14,6 +14,18 @@ enum DraftError: Error, Equatable {
     case emptyDraft
     /// The selected source mailbox cannot produce a safe reply recipient.
     case unsupportedSourceMailbox
+    /// The draft is flagged as needing the user's input, so it cannot be sent or
+    /// saved as-is (item 13).
+    case needsUserInput
+}
+
+/// The result of asking the model for a reply: either a ready-to-send body, or a
+/// flag that the reply needs information only the user has (item 13). Keeping
+/// these as distinct cases means a "needs input" outcome can never be mistaken
+/// for a sendable reply.
+enum DraftOutcome: Equatable {
+    case ready(String)
+    case needsInfo(DraftNeedsInfo)
 }
 
 /// Produces a reply body from an incoming message and the user's voice profile
@@ -30,12 +42,16 @@ struct DraftGenerator {
     /// Character cap on the quoted thread history included for context.
     var maxThreadChars = 3000
 
+    /// The sentinel the model emits (as the first line) when it can't draft a
+    /// confident reply without information only the user has.
+    static let needsInfoSentinel = "NEEDS_INFO:"
+
     func makeDraft(
         replyingTo context: ReplyContext,
         voiceProfile: VoiceProfile?,
         model: String,
         complete: Complete
-    ) async throws -> String {
+    ) async throws -> DraftOutcome {
         let request = LLMRequest(
             system: Self.systemPrompt(voiceProfile: voiceProfile),
             messages: [LLMMessage(
@@ -47,9 +63,43 @@ struct DraftGenerator {
             temperature: 0.7
         )
         let response = try await complete(request)
-        let body = Self.cleaned(response.text)
+        return try Self.parseOutcome(response.text)
+    }
+
+    // MARK: - Outcome parsing
+
+    /// Classifies the model's raw output as a ready reply or a "needs input"
+    /// flag. The flag is only honored when the sentinel is the first non-empty
+    /// line, so a normal reply that merely mentions "needs info" is not
+    /// misclassified.
+    static func parseOutcome(_ text: String) throws -> DraftOutcome {
+        let lines = text.components(separatedBy: "\n")
+        let firstMeaningful = lines.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let firstTrimmed = firstMeaningful?.trimmingCharacters(in: .whitespaces) ?? ""
+
+        if firstTrimmed.uppercased().hasPrefix(needsInfoSentinel) {
+            return .needsInfo(parseNeedsInfo(lines: lines, sentinelLine: firstTrimmed))
+        }
+
+        let body = cleaned(text)
         guard !body.isEmpty else { throw DraftError.emptyDraft }
-        return body
+        return .ready(body)
+    }
+
+    /// Extracts the one-line reason (after the sentinel) and any "- " bulleted
+    /// missing items that follow it.
+    private static func parseNeedsInfo(lines: [String], sentinelLine: String) -> DraftNeedsInfo {
+        let summary = String(sentinelLine.dropFirst(needsInfoSentinel.count))
+            .trimmingCharacters(in: .whitespaces)
+        let missing = lines
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("- ") || $0.hasPrefix("* ") }
+            .map { String($0.dropFirst(2)).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let cleanedSummary = summary.isEmpty
+            ? "This reply needs information only you have."
+            : summary
+        return DraftNeedsInfo(summary: cleanedSummary, missing: missing)
     }
 
     // MARK: - Prompt
@@ -65,9 +115,21 @@ struct DraftGenerator {
         inform your reply, but reply only to the latest message and do not quote \
         the earlier messages back.
         """
+        let confidence = """
+        If you cannot write a confident, complete reply because it would require \
+        specific information only the user has — a fact, date, decision, number, \
+        price, or attachment that is not present anywhere in this thread — do NOT \
+        guess or fabricate it. Instead, respond with exactly this format and \
+        nothing else:
+        \(needsInfoSentinel) <one short sentence on why you can't draft it yet>
+        - <a specific piece of information you need from the user>
+        - <another, if applicable>
+        Only use this when the reply genuinely depends on missing information; a \
+        reply that just needs a normal judgment call should still be written.
+        """
         let voice = voiceProfile?.promptBlock()
             ?? "Write in a natural, concise, and professional tone."
-        return base + "\n\n" + voice
+        return base + "\n\n" + confidence + "\n\n" + voice
     }
 
     private static func userPrompt(_ context: ReplyContext, maxChars: Int, maxThreadChars: Int) -> String {

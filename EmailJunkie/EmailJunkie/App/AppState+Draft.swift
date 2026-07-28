@@ -53,13 +53,13 @@ extension AppState {
                 subject: message.subject,
                 body: MailBodyText.plainText(from: data)
             )
-            let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+            let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
             guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
                 return nil
             }
             let draft = Self.draftPreview(
                 for: message,
-                body: body,
+                outcome: outcome,
                 llmConfiguration: llmConfiguration,
                 credentials: credentials,
                 mailbox: mailbox
@@ -102,7 +102,7 @@ extension AppState {
             subject: message.subject,
             body: incomingText
         )
-        let body = try await makeReplyBody(context: context, llmConfiguration: llmConfiguration)
+        let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
         guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
         let draft = Draft(
             id: message.id,
@@ -115,9 +115,10 @@ extension AppState {
             sourceMessageID: message.messageID,
             incomingBody: Self.truncatedIncomingBody(incomingText),
             replySubject: Self.replySubject(for: message.subject),
-            body: body,
+            body: Self.body(from: outcome),
             model: llmConfiguration.model,
-            generatedAt: Date()
+            generatedAt: Date(),
+            needsInfo: Self.needsInfo(from: outcome)
         )
         try enqueuePendingDraft(draft)
         return true
@@ -164,7 +165,7 @@ extension AppState {
 
     private static func draftPreview(
         for message: MailMessage,
-        body: String,
+        outcome: DraftOutcome,
         llmConfiguration: DraftLLMConfiguration,
         credentials: MailAccountCredentials,
         mailbox: Mailbox
@@ -179,10 +180,28 @@ extension AppState {
             sourceReplyTo: message.replyTo,
             sourceMessageID: message.messageID,
             replySubject: replySubject(for: message.subject),
-            body: body,
+            body: body(from: outcome),
             model: llmConfiguration.model,
-            generatedAt: Date()
+            generatedAt: Date(),
+            needsInfo: needsInfo(from: outcome)
         )
+    }
+
+    /// The sendable reply body for an outcome; empty for a flagged one, which has
+    /// no fabricated reply.
+    static func body(from outcome: DraftOutcome) -> String {
+        switch outcome {
+        case .ready(let body): return body
+        case .needsInfo: return ""
+        }
+    }
+
+    /// The "needs input" flag for an outcome, or `nil` for a ready reply.
+    static func needsInfo(from outcome: DraftOutcome) -> DraftNeedsInfo? {
+        switch outcome {
+        case .ready: return nil
+        case .needsInfo(let info): return info
+        }
     }
 
     private func isCurrentDraftRequest(
@@ -221,10 +240,10 @@ extension AppState {
         draftGeneration == requestGeneration
     }
 
-    private func makeReplyBody(
+    private func makeReplyOutcome(
         context: ReplyContext,
         llmConfiguration: DraftLLMConfiguration
-    ) async throws -> String {
+    ) async throws -> DraftOutcome {
         let profile = voiceProfile
         return try await DraftGenerator().makeDraft(
             replyingTo: context,
@@ -253,6 +272,11 @@ extension AppState {
     /// Dispatches a preview sheet's displayed draft without reading mutable
     /// global preview state. The sheet owns its own progress/error UI.
     func approveDraftPreview(_ draft: Draft) async throws -> String {
+        // A flagged draft has no fabricated reply — it must never be sent or
+        // saved until the user resolves it (item 13).
+        guard !draft.isFlagged else {
+            throw DraftError.needsUserInput
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             throw DraftDispatchError.missingCredentials
@@ -292,6 +316,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard !draft.isFlagged else {
+            draftError = Self.draftMessage(for: DraftError.needsUserInput)
+            return
+        }
         guard draftSourceAllowsReplyDispatch(draft) else {
             draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
             return
@@ -322,6 +350,10 @@ extension AppState {
         draftSavedMessage = nil
 
         guard let draft = generatedDraft else { return }
+        guard !draft.isFlagged else {
+            draftError = Self.draftMessage(for: DraftError.needsUserInput)
+            return
+        }
         guard draftSourceAllowsReplyDispatch(draft) else {
             draftError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
             return
@@ -431,6 +463,8 @@ extension AppState {
             return "The model returned an empty reply. Try again."
         case DraftError.unsupportedSourceMailbox:
             return "Draft replies are only available for incoming mail."
+        case DraftError.needsUserInput:
+            return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
         case DraftDispatchError.noRecipient:
             return "This draft has no recipient address to send to."
         case is LLMError:

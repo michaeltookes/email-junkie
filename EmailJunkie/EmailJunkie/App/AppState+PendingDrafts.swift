@@ -23,6 +23,12 @@ extension AppState {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
 
         approvalError = nil
+        // A flagged draft needs the user's input first — never send or save it,
+        // even via a notification "Approve" action in auto-send mode (item 13).
+        guard !draft.isFlagged else {
+            approvalError = Self.draftMessage(for: DraftError.needsUserInput)
+            return
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             approvalError = "Connect an email account first."

@@ -50,6 +50,22 @@ final class DraftOutcomeTests: XCTestCase {
         XCTAssertTrue(info.missing.isEmpty)
     }
 
+    func testSentinelAfterLeadingSubjectLineFlagsNeedsInfo() throws {
+        let text = """
+        Subject: Re: Budget
+
+        NEEDS_INFO: I can't approve this without the figure only you have.
+        - The approved budget amount
+        """
+
+        let outcome = try DraftGenerator.parseOutcome(text)
+        guard case .needsInfo(let info) = outcome else {
+            return XCTFail("expected needsInfo, got \(outcome)")
+        }
+        XCTAssertEqual(info.summary, "I can't approve this without the figure only you have.")
+        XCTAssertEqual(info.missing, ["The approved budget amount"])
+    }
+
     func testAsteriskBulletsAreAlsoParsedAsMissingItems() throws {
         let outcome = try DraftGenerator.parseOutcome("NEEDS_INFO: Missing details.\n* The budget cap\n* The deadline")
         guard case .needsInfo(let info) = outcome else {

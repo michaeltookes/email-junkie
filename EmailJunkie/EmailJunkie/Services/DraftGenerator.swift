@@ -70,10 +70,11 @@ struct DraftGenerator {
 
     /// Classifies the model's raw output as a ready reply or a "needs input"
     /// flag. The flag is only honored when the sentinel is the first non-empty
-    /// line, so a normal reply that merely mentions "needs info" is not
-    /// misclassified.
+    /// line after tolerated cleanup, so a normal reply that merely mentions
+    /// "needs info" is not misclassified.
     static func parseOutcome(_ text: String) throws -> DraftOutcome {
-        let lines = text.components(separatedBy: "\n")
+        let body = cleaned(text)
+        let lines = body.components(separatedBy: "\n")
         let firstMeaningful = lines.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let firstTrimmed = firstMeaningful?.trimmingCharacters(in: .whitespaces) ?? ""
 
@@ -81,7 +82,6 @@ struct DraftGenerator {
             return .needsInfo(parseNeedsInfo(lines: lines, sentinelLine: firstTrimmed))
         }
 
-        let body = cleaned(text)
         guard !body.isEmpty else { throw DraftError.emptyDraft }
         return .ready(body)
     }

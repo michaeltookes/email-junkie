@@ -204,6 +204,25 @@ final class StaleThreadCheckTests: XCTestCase {
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
     }
 
+    func testDirectThreadLinkMatchesWhenSubjectChanged() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(
+                    id: 9,
+                    subject: "Updated plan",
+                    from: MailAddress(email: "carol@x.com"),
+                    inReplyTo: "<orig@x.com>",
+                    messageID: "<carol@x.com>"
+                )
+            ],
+            threadTruncated: false,
+            sentReplies: []
+        )
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
     func testIndirectThreadLinkMatchesNewParticipantReply() {
         let verdict = StaleThreadCheck.verdict(
             draft: draft(id: 5),
@@ -228,6 +247,26 @@ final class StaleThreadCheckTests: XCTestCase {
             sentReplies: []
         )
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
+    func testSentReplyWithChangedSubjectCountsAsAlreadyRepliedWhenThreadLinked() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")
+            ],
+            threadTruncated: false,
+            sentReplies: [
+                message(
+                    id: 2,
+                    subject: "Updated plan",
+                    from: MailAddress(email: "me@gmail.com"),
+                    to: [MailAddress(email: "alice@x.com")],
+                    inReplyTo: "<orig@x.com>"
+                )
+            ]
+        )
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
     }
 
     func testSentReplyToKnownIntermediateMessageCountsAsAlreadyReplied() {

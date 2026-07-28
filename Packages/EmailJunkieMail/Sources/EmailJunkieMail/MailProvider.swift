@@ -271,16 +271,29 @@ public enum MailReadState: Sendable, Equatable, Hashable {
     case readOnly
 }
 
+/// A single IMAP `HEADER` search predicate.
+public struct MailHeaderSearch: Sendable, Equatable, Hashable {
+    public var field: String
+    public var value: String
+
+    public init(field: String, value: String) {
+        self.field = field
+        self.value = value
+    }
+}
+
 /// Criteria for a server-side mailbox search. Every set field is combined with
 /// `AND`; leaving them all unset matches every message (newest first). Blank
 /// text fields are ignored, so an empty search box behaves like "recent mail".
-public struct MailSearchCriteria: Sendable, Equatable {
+public struct MailSearchCriteria: Sendable, Equatable, Hashable {
     /// Free-text keyword matched against the whole message (IMAP `TEXT`).
     public var text: String?
     /// Matched against the `From` header (IMAP `FROM`).
     public var from: String?
     /// Matched against the `Subject` header (IMAP `SUBJECT`).
     public var subject: String?
+    /// Matched against arbitrary message headers (IMAP `HEADER`).
+    public var headers: [MailHeaderSearch]
     /// Only messages on/after this calendar day (IMAP `SINCE`).
     public var since: Date?
     /// Only messages before this calendar day (IMAP `BEFORE`).
@@ -297,6 +310,7 @@ public struct MailSearchCriteria: Sendable, Equatable {
         text: String? = nil,
         from: String? = nil,
         subject: String? = nil,
+        headers: [MailHeaderSearch] = [],
         since: Date? = nil,
         before: Date? = nil,
         readState: MailReadState = .any,
@@ -306,6 +320,7 @@ public struct MailSearchCriteria: Sendable, Equatable {
         self.text = text
         self.from = from
         self.subject = subject
+        self.headers = headers
         self.since = since
         self.before = before
         self.readState = readState
@@ -317,6 +332,7 @@ public struct MailSearchCriteria: Sendable, Equatable {
     /// first". Blank/whitespace-only text fields do not count as a filter.
     public var isEmpty: Bool {
         Self.isBlank(text) && Self.isBlank(from) && Self.isBlank(subject)
+            && headers.allSatisfy { Self.isBlank($0.field) || Self.isBlank($0.value) }
             && since == nil && before == nil && readState == .any && !flaggedOnly && maximumUID == nil
     }
 

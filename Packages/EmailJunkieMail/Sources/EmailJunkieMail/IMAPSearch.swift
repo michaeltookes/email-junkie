@@ -392,6 +392,10 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         if let text = trimmed(criteria.text) { keys.append(.text(ByteBuffer(string: text))) }
         if let from = trimmed(criteria.from) { keys.append(.from(ByteBuffer(string: from))) }
         if let subject = trimmed(criteria.subject) { keys.append(.subject(ByteBuffer(string: subject))) }
+        for header in criteria.headers {
+            guard let field = trimmed(header.field), let value = trimmed(header.value) else { continue }
+            keys.append(.header(field, ByteBuffer(string: value)))
+        }
         return keys
     }
 

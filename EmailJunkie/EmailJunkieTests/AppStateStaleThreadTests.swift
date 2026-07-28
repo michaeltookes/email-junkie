@@ -177,7 +177,10 @@ final class AppStateStaleThreadTests: XCTestCase {
         let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
 
         XCTAssertEqual(verdict, .fresh)
-        XCTAssertEqual(provider.searchRequests.last?.criteria.since, AppState.dayFloor(draft().generatedAt))
+        let sentSubjectSearch = provider.searchRequests.first {
+            $0.mailbox == .sent && $0.criteria.subject == "lunch?"
+        }
+        XCTAssertEqual(sentSubjectSearch?.criteria.since, AppState.dayFloor(draft().generatedAt))
     }
 
     func testVerdictIgnoresSameDaySentReplyBeforeDraftGenerationWithTrailingComment() async {

@@ -12,6 +12,11 @@ private enum RegenerationReplacementError: LocalizedError {
     }
 }
 
+private struct RegenerationSourceMessage {
+    var message: MailMessage
+    var mailbox: Mailbox
+}
+
 /// Approval-queue actions on `AppState`: approve (send/save per the send-behavior
 /// setting) or deny (discard) a watcher-produced draft, plus routing of the
 /// native-notification actions. Kept separate so `AppState` stays within limits.
@@ -152,11 +157,11 @@ extension AppState {
         defer { approvingDraftIDs.remove(draft.identity) }
 
         do {
-            let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+            let source = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
             _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
             guard var replacement = try await makePendingDraft(
-                for: message,
-                mailbox: mailbox,
+                for: source.message,
+                mailbox: source.mailbox,
                 requireWatching: false,
                 credentials: credentials
             ) else {
@@ -192,11 +197,11 @@ extension AppState {
             throw DraftDispatchError.accountMismatch
         }
 
-        let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+        let source = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
         _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
         guard var replacement = try await makePendingDraft(
-            for: message,
-            mailbox: mailbox,
+            for: source.message,
+            mailbox: source.mailbox,
             requireWatching: false,
             credentials: credentials
         ) else {
@@ -280,7 +285,7 @@ extension AppState {
         for draft: Draft,
         mailbox: Mailbox,
         credentials: MailAccountCredentials
-    ) async throws -> MailMessage {
+    ) async throws -> RegenerationSourceMessage {
         let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
         let thread = try await sourceThreadInspectionResult(
             credentials,
@@ -292,9 +297,40 @@ extension AppState {
             draft: draft,
             threadMessages: thread.messages
         ) else {
+            return try await movedRegenerationSource(for: draft, credentials: credentials)
+        }
+        return RegenerationSourceMessage(message: source, mailbox: mailbox)
+    }
+
+    private func movedRegenerationSource(
+        for draft: Draft,
+        credentials: MailAccountCredentials
+    ) async throws -> RegenerationSourceMessage {
+        guard let sourceMessageID = StaleThreadCheck.messageIDSearchValue(draft.sourceMessageID) else {
             throw DraftError.sourceMessageUnavailable
         }
-        return source
+
+        let source = try await exactHeaderInspectionResult(
+            credentials,
+            mailbox: .allMail,
+            field: "Message-ID",
+            value: sourceMessageID
+        )
+        let replies = await supplementalHeaderInspectionResult(
+            credentials,
+            mailbox: .allMail,
+            seedMessageIDs: [sourceMessageID],
+            includeSourceMessages: false
+        )
+        let thread = Self.mergedInspectionResult(source, replies)
+        guard let message = StaleThreadCheck.regenerationSource(
+            draft: draft,
+            threadMessages: thread.messages,
+            requireUIDComparable: false
+        ) else {
+            throw DraftError.sourceMessageUnavailable
+        }
+        return RegenerationSourceMessage(message: message, mailbox: .allMail)
     }
 
     private func replacePendingDraft(

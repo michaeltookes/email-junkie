@@ -21,6 +21,10 @@ extension AppState {
     /// fallback scans recent mailbox pages. Keep that broad scan bounded.
     var blankSubjectInspectionPageLimit: Int { 4 }
 
+    /// Exact header searches are used only to follow a known thread chain across
+    /// subject edits, so keep their breadth bounded too.
+    var linkedHeaderInspectionSearchLimit: Int { 12 }
+
     /// Re-checks a draft's target thread immediately before dispatch. Returns
     /// `.fresh` when the send is safe, or `.stale(reason)` when the source was
     /// archived/deleted, a newer reply arrived, or the user already replied.
@@ -51,11 +55,16 @@ extension AppState {
 
         let sentSearchStart = Self.dayFloor(draft.generatedAt)
         do {
+            let relatedMessageIDs = StaleThreadCheck.relatedMessageIDSearchValues(
+                draft: draft,
+                threadMessages: thread.messages
+            )
             let sent = try await sentThreadInspectionResult(
                 credentials,
                 subject: subject,
                 since: sentSearchStart,
-                draft: draft
+                draft: draft,
+                relatedMessageIDs: relatedMessageIDs
             )
             let postGenerationSent = sent.messages.filter {
                 Self.isMessage($0, onOrAfterGenerationDate: draft.generatedAt)
@@ -92,30 +101,46 @@ extension AppState {
             return .continuePaging
         }
 
+        let primary: MailSearchResult
         if subject.isEmpty {
-            return try await pagedBlankSubjectInspectionResult(
+            primary = try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: mailbox,
                 maxPages: blankSubjectInspectionPageLimit,
                 pageDecision: sourcePageDecision
             )
+        } else {
+            primary = try await pagedSubjectInspectionResult(
+                credentials,
+                mailbox: mailbox,
+                criteria: MailSearchCriteria(subject: subject),
+                pageDecision: sourcePageDecision
+            )
         }
-        return try await pagedSubjectInspectionResult(
+
+        let seedMessageIDs = StaleThreadCheck.relatedMessageIDSearchValues(
+            draft: draft,
+            threadMessages: primary.messages
+        )
+        let supplemental = await supplementalHeaderInspectionResult(
             credentials,
             mailbox: mailbox,
-            criteria: MailSearchCriteria(subject: subject),
-            pageDecision: sourcePageDecision
+            seedMessageIDs: seedMessageIDs,
+            includeSourceMessages: true
         )
+        return Self.mergedInspectionResult(primary, supplemental)
     }
 
     private func sentThreadInspectionResult(
         _ credentials: MailAccountCredentials,
         subject: String,
         since: Date,
-        draft: Draft
+        draft: Draft,
+        relatedMessageIDs: Set<String>
     ) async throws -> MailSearchResult {
+        let primary: MailSearchResult
         if subject.isEmpty {
-            return try await pagedBlankSubjectInspectionResult(
+            primary = try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: .sent,
                 pageDecision: { page in
@@ -125,18 +150,28 @@ extension AppState {
                     return .stop(hasMoreRelevantMessages: false)
                 }
             )
+        } else {
+            primary = try await pagedSubjectInspectionResult(
+                credentials,
+                mailbox: .sent,
+                criteria: MailSearchCriteria(subject: subject, since: since),
+                pageDecision: { page in
+                    if Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt) {
+                        return .continuePaging
+                    }
+                    return .stop(hasMoreRelevantMessages: false)
+                }
+            )
         }
-        return try await pagedSubjectInspectionResult(
+
+        let supplemental = await supplementalHeaderInspectionResult(
             credentials,
             mailbox: .sent,
-            criteria: MailSearchCriteria(subject: subject, since: since),
-            pageDecision: { page in
-                if Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt) {
-                    return .continuePaging
-                }
-                return .stop(hasMoreRelevantMessages: false)
-            }
+            seedMessageIDs: relatedMessageIDs,
+            since: since,
+            includeSourceMessages: false
         )
+        return Self.mergedInspectionResult(primary, supplemental)
     }
 
     private func pagedSubjectInspectionResult(
@@ -249,6 +284,121 @@ extension AppState {
                 )
             }
             offset += pageSize
+        }
+    }
+
+    func exactHeaderInspectionResult(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        field: String,
+        value: String,
+        since: Date? = nil
+    ) async throws -> MailSearchResult {
+        try await mailProvider.searchMessages(
+            credentials,
+            mailbox: mailbox,
+            criteria: MailSearchCriteria(
+                headers: [MailHeaderSearch(field: field, value: value)],
+                since: since
+            ),
+            offset: 0,
+            limit: threadInspectionLimit
+        )
+    }
+
+    func supplementalHeaderInspectionResult(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        seedMessageIDs: Set<String>,
+        since: Date? = nil,
+        includeSourceMessages: Bool
+    ) async -> MailSearchResult {
+        let seeds = seedMessageIDs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !seeds.isEmpty else { return .empty(offset: 0) }
+
+        var pending = Array(seeds).sorted()
+        var searched = Set<String>()
+        var searchesRun = 0
+        var merged = MailSearchResult.empty(offset: 0)
+
+        while let messageID = pending.first, searchesRun < linkedHeaderInspectionSearchLimit {
+            pending.removeFirst()
+            guard searched.insert(messageID).inserted else { continue }
+
+            if includeSourceMessages, searchesRun < linkedHeaderInspectionSearchLimit {
+                if let source = try? await exactHeaderInspectionResult(
+                    credentials,
+                    mailbox: mailbox,
+                    field: "Message-ID",
+                    value: messageID,
+                    since: since
+                ) {
+                    searchesRun += 1
+                    merged = Self.mergedInspectionResult(merged, source)
+                    appendNewMessageIDs(from: source.messages, searched: searched, pending: &pending)
+                }
+            }
+
+            guard searchesRun < linkedHeaderInspectionSearchLimit else { break }
+            if let replies = try? await exactHeaderInspectionResult(
+                credentials,
+                mailbox: mailbox,
+                field: "In-Reply-To",
+                value: messageID,
+                since: since
+            ) {
+                searchesRun += 1
+                merged = Self.mergedInspectionResult(merged, replies)
+                appendNewMessageIDs(from: replies.messages, searched: searched, pending: &pending)
+            }
+        }
+
+        return merged
+    }
+
+    static func mergedInspectionResult(
+        _ primary: MailSearchResult,
+        _ supplemental: MailSearchResult
+    ) -> MailSearchResult {
+        guard !supplemental.messages.isEmpty else {
+            return MailSearchResult(
+                messages: primary.messages,
+                totalMatches: primary.totalMatches,
+                offset: primary.offset,
+                hasMore: primary.hasMore || supplemental.hasMore
+            )
+        }
+
+        var messages = primary.messages
+        var seen = Set(messages.map(messageDeduplicationKey))
+        for message in supplemental.messages where seen.insert(messageDeduplicationKey(message)).inserted {
+            messages.append(message)
+        }
+        return MailSearchResult(
+            messages: messages,
+            totalMatches: messages.count,
+            offset: 0,
+            hasMore: primary.hasMore || supplemental.hasMore
+        )
+    }
+
+    private static func messageDeduplicationKey(_ message: MailMessage) -> String {
+        if let messageID = StaleThreadCheck.messageIDSearchValue(message.messageID) {
+            return "message-id:\(messageID)"
+        }
+        let validity = message.uidValidity.map(String.init) ?? "?"
+        return "uid:\(validity):\(message.id)"
+    }
+
+    private func appendNewMessageIDs(
+        from messages: [MailMessage],
+        searched: Set<String>,
+        pending: inout [String]
+    ) {
+        for message in messages {
+            guard let messageID = StaleThreadCheck.messageIDSearchValue(message.messageID) else { continue }
+            guard !searched.contains(messageID), !pending.contains(messageID) else { continue }
+            pending.append(messageID)
         }
     }
 

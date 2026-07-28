@@ -12,10 +12,12 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
     var threadSearchError: MailError?
     var sentSearchError: MailError?
     var pageResults: [Mailbox: [Int: MailSearchResult]] = [:]
+    var searchHandler: ((Mailbox, MailSearchCriteria, Int, Int) -> MailSearchResult?)?
     var bodyResult: Result<Data, MailError> = .success(Data("Please approve the budget.".utf8))
     private(set) var sendCount = 0
     private(set) var appendCount = 0
     private(set) var lastBodyUID: UInt32?
+    private(set) var lastBodyMailbox: Mailbox?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var searchRequests: [(mailbox: Mailbox, criteria: MailSearchCriteria, offset: Int, limit: Int)] = []
     private(set) var pageRequests: [(mailbox: Mailbox, offset: Int, limit: Int, snapshotMessageCount: Int?)] = []
@@ -43,6 +45,7 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
         expectedUIDValidity: UInt32?
     ) async throws -> Data {
         lastBodyUID = uid
+        lastBodyMailbox = mailbox
         lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()
     }
@@ -56,6 +59,12 @@ final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
     ) async throws -> MailSearchResult {
         if let searchError { throw searchError }
         searchRequests.append((mailbox, criteria, offset, limit))
+        if let handled = searchHandler?(mailbox, criteria, offset, limit) {
+            return handled
+        }
+        if !criteria.headers.isEmpty {
+            return .empty(offset: offset)
+        }
         if mailbox == .sent {
             if let sentSearchError { throw sentSearchError }
             return pageResults[mailbox]?[offset] ?? sentResult
@@ -121,6 +130,7 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
     private func message(
         id: UInt32,
         subject: String,
+        uidValidity: UInt32? = 1,
         from: MailAddress? = MailAddress(email: "alice@x.com"),
         to: [MailAddress] = [],
         date: String = "",
@@ -129,7 +139,7 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
     ) -> MailMessage {
         MailMessage(
             id: id,
-            uidValidity: 1,
+            uidValidity: uidValidity,
             from: from,
             to: to,
             subject: subject,
@@ -141,6 +151,10 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
 
     private func result(_ messages: [MailMessage], hasMore: Bool = false) -> MailSearchResult {
         MailSearchResult(messages: messages, totalMatches: messages.count, offset: 0, hasMore: hasMore)
+    }
+
+    private func hasHeader(_ criteria: MailSearchCriteria, field: String, value: String) -> Bool {
+        criteria.headers.contains(MailHeaderSearch(field: field, value: value))
     }
 
     private func makeAppState(
@@ -260,7 +274,9 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
         )
 
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
-        let inboxRequests = provider.searchRequests.filter { $0.mailbox == .inbox }
+        let inboxRequests = provider.searchRequests.filter {
+            $0.mailbox == .inbox && $0.criteria.subject == "lunch?"
+        }
         XCTAssertEqual(inboxRequests.map { $0.offset }, [0, 50])
         XCTAssertEqual(inboxRequests.map { $0.criteria.subject }, ["lunch?", "lunch?"])
         XCTAssertNil(inboxRequests.first?.criteria.maximumUID)
@@ -304,11 +320,116 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
         )
 
         XCTAssertEqual(verdict, .stale(.alreadyReplied))
-        let sentRequests = provider.searchRequests.filter { $0.mailbox == .sent }
+        let sentRequests = provider.searchRequests.filter {
+            $0.mailbox == .sent && $0.criteria.subject == "lunch?"
+        }
         XCTAssertEqual(sentRequests.map { $0.offset }, [0, 50])
         XCTAssertEqual(sentRequests.map { $0.criteria.subject }, ["lunch?", "lunch?"])
         XCTAssertNil(sentRequests.first?.criteria.maximumUID)
         XCTAssertEqual(sentRequests.last?.criteria.maximumUID, 300)
+    }
+
+    func testVerdictFindsChangedSubjectReplyByHeaderSearch() async {
+        let source = message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")
+        let changedSubjectReply = message(
+            id: 9,
+            subject: "Updated plan",
+            from: MailAddress(email: "carol@x.com"),
+            inReplyTo: "<orig@x.com>",
+            messageID: "<new@x.com>"
+        )
+        let provider = SearchStubMailProvider()
+        provider.searchHandler = { [weak self] mailbox, criteria, _, _ in
+            guard let self else { return nil }
+            if mailbox == .inbox && criteria.subject == "lunch?" { return self.result([source]) }
+            if mailbox == .inbox && self.hasHeader(criteria, field: "Message-ID", value: "orig@x.com") {
+                return self.result([source])
+            }
+            if mailbox == .inbox && self.hasHeader(criteria, field: "In-Reply-To", value: "orig@x.com") {
+                return self.result([changedSubjectReply])
+            }
+            return .empty(offset: 0)
+        }
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(),
+            credentials: appState.mailCredentials
+        )
+
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+        XCTAssertTrue(provider.searchRequests.contains {
+            $0.mailbox == .inbox && hasHeader($0.criteria, field: "In-Reply-To", value: "orig@x.com")
+        })
+    }
+
+    func testVerdictFindsChangedSubjectSentReplyByHeaderSearch() async {
+        let source = message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")
+        let sentReply = message(
+            id: 2,
+            subject: "Updated plan",
+            from: MailAddress(email: "me@gmail.com"),
+            to: [MailAddress(email: "alice@x.com")],
+            date: "Tue, 14 Nov 2023 23:00:00 +0000",
+            inReplyTo: "<orig@x.com>",
+            messageID: "<sent@x.com>"
+        )
+        let provider = SearchStubMailProvider()
+        provider.searchHandler = { [weak self] mailbox, criteria, _, _ in
+            guard let self else { return nil }
+            if mailbox == .inbox && criteria.subject == "lunch?" { return self.result([source]) }
+            if mailbox == .sent && criteria.subject == "lunch?" { return .empty(offset: 0) }
+            if mailbox == .sent && self.hasHeader(criteria, field: "In-Reply-To", value: "orig@x.com") {
+                return self.result([sentReply])
+            }
+            return .empty(offset: 0)
+        }
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(),
+            credentials: appState.mailCredentials
+        )
+
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
+        XCTAssertTrue(provider.searchRequests.contains {
+            $0.mailbox == .sent && hasHeader($0.criteria, field: "In-Reply-To", value: "orig@x.com")
+        })
+    }
+
+    func testRegeneratePendingDraftFallsBackToAllMailForMovedSource() async {
+        let staleDraft = draft()
+        let movedSource = message(id: 50, subject: "Lunch?", uidValidity: 99, messageID: "<orig@x.com>")
+        let newerReply = message(
+            id: 55,
+            subject: "Updated plan",
+            uidValidity: 99,
+            inReplyTo: "<orig@x.com>",
+            messageID: "<new@x.com>"
+        )
+        let provider = SearchStubMailProvider()
+        provider.searchHandler = { [weak self] mailbox, criteria, _, _ in
+            guard let self else { return nil }
+            if mailbox == .inbox && criteria.subject == "lunch?" { return .empty(offset: 0) }
+            if mailbox == .allMail && self.hasHeader(criteria, field: "Message-ID", value: "orig@x.com") {
+                return self.result([movedSource])
+            }
+            if mailbox == .allMail && self.hasHeader(criteria, field: "In-Reply-To", value: "orig@x.com") {
+                return self.result([newerReply])
+            }
+            return .empty(offset: 0)
+        }
+        let appState = makeAppState(provider: provider, llmText: "Regenerated moved-source reply.")
+        appState.pendingDrafts = [staleDraft]
+
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertEqual(appState.pendingDrafts.first?.id, 55)
+        XCTAssertEqual(appState.pendingDrafts.first?.sourceMailbox, Mailbox.allMail.imapName)
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Regenerated moved-source reply.")
+        XCTAssertEqual(provider.lastBodyUID, 55)
+        XCTAssertEqual(provider.lastBodyMailbox, .allMail)
     }
 
     func testRegeneratePendingDraftDoesNotReinsertApprovedReplacement() async throws {

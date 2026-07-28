@@ -56,11 +56,11 @@ enum StaleThreadVerdict: Equatable {
 /// Pure stale-thread evaluation, isolated from IMAP so the detection rules can be
 /// exhaustively unit-tested against representative thread-change cases (item 12).
 ///
-/// The inputs are re-fetched envelope-level views of the thread: the source
-/// mailbox's subject-search results and the Sent mailbox's post-generation
-/// subject-search results. Ordering within a mailbox is by UID, which increases
-/// monotonically, so a related message with a UID higher than the source arrived
-/// after it.
+/// The inputs are re-fetched envelope-level views of the thread: source-mailbox
+/// candidates and post-generation Sent candidates, including exact header-search
+/// supplements when a known thread chain spans subject edits. Ordering within a
+/// mailbox is by UID, which increases monotonically, so a related message with a
+/// UID higher than the source arrived after it.
 enum StaleThreadCheck {
 
     /// Reply/forward prefixes stripped when reducing a subject to a thread key.
@@ -88,11 +88,11 @@ enum StaleThreadCheck {
     ///
     /// - Parameters:
     ///   - draft: the reply about to be dispatched.
-    ///   - threadMessages: subject-search results from the source mailbox.
+    ///   - threadMessages: source mailbox candidates for the draft's thread.
     ///   - threadTruncated: whether that search had more pages — when true, the
     ///     source's absence from this page is inconclusive, so "source missing"
     ///     is not claimed.
-    ///   - sentReplies: subject-search results from Sent since the draft was made.
+    ///   - sentReplies: Sent candidates since the draft was made.
     static func verdict(
         draft: Draft,
         threadMessages: [MailMessage],
@@ -127,25 +127,38 @@ enum StaleThreadCheck {
 
     /// Picks the message a regeneration should answer. When a newer related reply
     /// is available, this returns that message rather than the stale source UID.
-    static func regenerationSource(draft: Draft, threadMessages: [MailMessage]) -> MailMessage? {
+    static func regenerationSource(
+        draft: Draft,
+        threadMessages: [MailMessage],
+        requireUIDComparable: Bool = true
+    ) -> MailMessage? {
         relatedThreadMessages(draft: draft, threadMessages: threadMessages)
-            .filter { isUIDComparable($0, draft: draft) }
+            .filter { !requireUIDComparable || isUIDComparable($0, draft: draft) }
             .max { $0.id < $1.id }
     }
 
+    static func messageIDSearchValue(_ value: String?) -> String? {
+        normalizedMessageID(value)
+    }
+
+    static func relatedMessageIDSearchValues(draft: Draft, threadMessages: [MailMessage]) -> Set<String> {
+        let thread = relatedThreadMessages(draft: draft, threadMessages: threadMessages)
+        return relatedThreadMessageIDs(draft: draft, threadMessages: thread)
+    }
+
     private static func relatedThreadMessages(draft: Draft, threadMessages: [MailMessage]) -> [MailMessage] {
-        let subjectMatches = threadMessages.filter { hasSameThreadSubject($0, draft: draft) }
-        let linkage = linkedThreadLinkage(draft: draft, subjectMessages: subjectMatches)
-        return subjectMatches.filter {
+        let linkage = linkedThreadLinkage(draft: draft, candidateMessages: threadMessages)
+        return threadMessages.filter {
             linkage.relatedUIDs.contains($0.id)
-                || (canUseParticipantFallback($0, relatedThreadMessageIDs: linkage.relatedMessageIDs)
+                || (hasSameThreadSubject($0, draft: draft)
+                    && canUseParticipantFallback($0, relatedThreadMessageIDs: linkage.relatedMessageIDs)
                     && sharesParticipant($0, draft: draft, includeRecipients: false))
         }
     }
 
     private static func linkedThreadLinkage(
         draft: Draft,
-        subjectMessages: [MailMessage]
+        candidateMessages: [MailMessage]
     ) -> (relatedUIDs: Set<UInt32>, relatedMessageIDs: Set<String>) {
         var relatedUIDs = Set<UInt32>()
         var relatedMessageIDs = Set<String>()
@@ -156,7 +169,7 @@ enum StaleThreadCheck {
         var changed = true
         while changed {
             changed = false
-            for message in subjectMessages where !relatedUIDs.contains(message.id) {
+            for message in candidateMessages where !relatedUIDs.contains(message.id) {
                 if isSourceMessage(message, draft: draft)
                     || sharesThreadMessageID(message, relatedMessageIDs: relatedMessageIDs) {
                     relatedUIDs.insert(message.id)
@@ -173,13 +186,13 @@ enum StaleThreadCheck {
         draft: Draft,
         relatedThreadMessageIDs: Set<String>
     ) -> Bool {
-        guard hasSameThreadSubject(message, draft: draft) else { return false }
         if isDirectReplyToSource(message, draft: draft) { return true }
         if let inReplyTo = normalizedMessageID(message.inReplyTo),
            relatedThreadMessageIDs.contains(inReplyTo) {
             return true
         }
 
+        guard hasSameThreadSubject(message, draft: draft) else { return false }
         let sourceAddresses = sourceParticipantAddresses(for: draft)
         guard !sourceAddresses.isEmpty else { return false }
         guard canUseParticipantFallback(message, relatedThreadMessageIDs: relatedThreadMessageIDs) else { return false }

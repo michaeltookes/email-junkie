@@ -43,6 +43,9 @@ final class SuspendedThreadSearchMailProvider: MailProvider, @unchecked Sendable
         offset: Int,
         limit: Int
     ) async throws -> MailSearchResult {
+        if !criteria.headers.isEmpty {
+            return .empty(offset: offset)
+        }
         if mailbox == .sent {
             return sentResult
         }

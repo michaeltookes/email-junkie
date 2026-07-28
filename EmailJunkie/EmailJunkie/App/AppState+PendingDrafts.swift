@@ -157,7 +157,8 @@ extension AppState {
             guard var replacement = try await makePendingDraft(
                 for: message,
                 mailbox: mailbox,
-                requireWatching: false
+                requireWatching: false,
+                credentials: credentials
             ) else {
                 approvalError = "The draft could not be regenerated because account settings changed."
                 return
@@ -196,10 +197,12 @@ extension AppState {
         guard var replacement = try await makePendingDraft(
             for: message,
             mailbox: mailbox,
-            requireWatching: false
+            requireWatching: false,
+            credentials: credentials
         ) else {
             throw DraftDispatchError.accountChanged
         }
+        _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
         replacement.generatedAt = draft.generatedAt
         generatedDraft = replacement
         return replacement

@@ -210,6 +210,44 @@ final class AppStateAsyncReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(appState.approvalError, accountChangedMessage)
     }
 
+    func testRegenerateDraftPreviewDoesNotReplaceAfterAccountChangesDuringDraftGeneration() async {
+        let staleDraft = draft()
+        let provider = SearchStubMailProvider(
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
+        )
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: SendBehavior.autoSend.rawValue
+        ))
+        let llm = SuspendedLLMProvider()
+        let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+        appState.mailAppPassword = "app-pw"
+        appState.generatedDraft = staleDraft
+
+        let regeneration = Task { try await appState.regenerateDraftPreview(staleDraft) }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+        switchAccount(appState)
+        llm.completeDraft(with: .success(LLMResponse(text: "Late regenerated preview.")))
+
+        do {
+            _ = try await regeneration.value
+            XCTFail("expected account-changed rejection")
+        } catch let error as DraftDispatchError {
+            XCTAssertEqual(error, .accountChanged)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertEqual(appState.generatedDraft, staleDraft)
+    }
+
     func testRegenerateDraftPreviewReplacesDisplayedDraftWithNewestRelatedMessage() async throws {
         let staleDraft = draft()
         let provider = SearchStubMailProvider(

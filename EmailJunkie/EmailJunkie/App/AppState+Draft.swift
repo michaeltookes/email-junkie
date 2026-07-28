@@ -96,7 +96,8 @@ extension AppState {
     func makePendingDraft(
         for message: MailMessage,
         mailbox: Mailbox = .inbox,
-        requireWatching: Bool = true
+        requireWatching: Bool = true,
+        credentials capturedCredentials: MailAccountCredentials? = nil
     ) async throws -> Draft? {
         guard mailbox.supportsReplyDrafting else {
             throw DraftError.unsupportedSourceMailbox
@@ -104,7 +105,7 @@ extension AppState {
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             throw DraftError.emptyDraft
         }
-        let credentials = mailCredentials
+        let credentials = capturedCredentials ?? mailCredentials
         let data = try await mailProvider.fetchBodyText(
             credentials,
             mailbox: mailbox,

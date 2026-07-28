@@ -50,8 +50,9 @@ extension AppState {
                 // mismatches only when the user submits or tests the connection.
                 return
             } else {
-                mailHostExplicitlyEditedBeforeEmail = false
-                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                // Without a prior domain, wait for submit/test before binding the
+                // host to a valid-looking address that may still be mid-typing.
+                return
             }
         } else if hasHostAssociatedWithTrackedEmail {
             guard let currentDomain = Self.normalizedEmailDomainForHostTracking(email) else {

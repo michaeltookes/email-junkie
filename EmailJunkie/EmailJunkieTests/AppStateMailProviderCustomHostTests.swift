@@ -21,6 +21,7 @@ final class AppStateMailProviderCustomHostTests: XCTestCase {
 
         app.updateMailHostFromUser("imap.proxy.example")
         app.updateMailEmailFromUser("me@yahoo.com")
+        app.commitMailEmailEditFromUser()
 
         XCTAssertEqual(app.mailHost, "imap.proxy.example")
         XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.proxy.example")

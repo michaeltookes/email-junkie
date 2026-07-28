@@ -318,6 +318,7 @@ final class AppStateMailProviderTests: XCTestCase {
 
         app.updateMailHostFromUser("imap.gmail.com")
         app.updateMailEmailFromUser("me@company.example")
+        app.commitMailEmailEditFromUser()
 
         XCTAssertEqual(app.mailHost, "imap.gmail.com")
         XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")

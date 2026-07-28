@@ -52,6 +52,28 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
         XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
     }
 
+    func testHostEnteredBeforeEmailPreservesHostThroughValidLookingTLDPrefixUntilCommit() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(),
+            secrets: InMemorySecretStore()
+        )
+        app.updateMailHostFromUser("imap.gmail.com")
+
+        app.updateMailEmailFromUser("me@company.ex")
+        app.updateMailEmailFromUser("me@company.example")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertTrue(app.buildSettings().mailHostGuidancePendingEmail)
+
+        app.commitMailEmailEditFromUser()
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
+        XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "me@company.example")
+        XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
+    }
+
     func testIncompleteEditClearsTrackedHostForDifferentDomainAfterRelaunch() {
         let persistence = AppStateMemoryPersistence()
         let firstLaunch = AppState(
@@ -108,6 +130,7 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
             secrets: InMemorySecretStore()
         )
         secondLaunch.updateMailEmailFromUser("me@company.example")
+        secondLaunch.commitMailEmailEditFromUser()
 
         XCTAssertEqual(secondLaunch.mailHost, "imap.gmail.com")
         XCTAssertEqual(secondLaunch.credentialGuidanceHostFallback, "imap.gmail.com")

@@ -98,6 +98,16 @@ final class StaleThreadCheckTests: XCTestCase {
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
     }
 
+    func testBlankSubjectStillDetectsThreadConflicts() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5, subject: "Re:"),
+            threadMessages: [message(id: 5, subject: ""), message(id: 8, subject: "Re:")],
+            threadTruncated: false,
+            sentReplies: []
+        )
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+    }
+
     func testAlreadyRepliedTakesPrecedenceOverNewerReply() {
         let verdict = StaleThreadCheck.verdict(
             draft: draft(id: 5),

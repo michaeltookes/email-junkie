@@ -27,30 +27,24 @@ extension AppState {
     ) async -> StaleThreadVerdict {
         guard let mailbox = Self.sourceMailbox(for: draft) else { return .fresh }
         let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
-        guard !subject.isEmpty else { return .fresh }
 
         let thread: MailSearchResult
         do {
-            thread = try await mailProvider.searchMessages(
+            thread = try await sourceThreadInspectionResult(
                 credentials,
                 mailbox: mailbox,
-                criteria: MailSearchCriteria(subject: subject),
-                offset: 0,
-                limit: threadInspectionLimit
+                subject: subject
             )
         } catch {
             return .fresh
         }
 
         let sentSearchStart = Self.dayFloor(draft.generatedAt)
-        let sentCriteria = MailSearchCriteria(subject: subject, since: sentSearchStart)
         do {
-            let sent = try await mailProvider.searchMessages(
+            let sent = try await sentThreadInspectionResult(
                 credentials,
-                mailbox: .sent,
-                criteria: sentCriteria,
-                offset: 0,
-                limit: threadInspectionLimit
+                subject: subject,
+                since: sentSearchStart
             )
             let postGenerationSent = sent.messages.filter {
                 Self.isMessage($0, onOrAfterGenerationDate: draft.generatedAt)
@@ -69,6 +63,52 @@ extension AppState {
                 sentReplies: []
             )
         }
+    }
+
+    func sourceThreadInspectionResult(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        subject: String
+    ) async throws -> MailSearchResult {
+        if subject.isEmpty {
+            return try await mailProvider.fetchMessagePage(
+                credentials,
+                mailbox: mailbox,
+                offset: 0,
+                limit: threadInspectionLimit,
+                snapshotMessageCount: nil
+            )
+        }
+        return try await mailProvider.searchMessages(
+            credentials,
+            mailbox: mailbox,
+            criteria: MailSearchCriteria(subject: subject),
+            offset: 0,
+            limit: threadInspectionLimit
+        )
+    }
+
+    private func sentThreadInspectionResult(
+        _ credentials: MailAccountCredentials,
+        subject: String,
+        since: Date
+    ) async throws -> MailSearchResult {
+        if subject.isEmpty {
+            return try await mailProvider.fetchMessagePage(
+                credentials,
+                mailbox: .sent,
+                offset: 0,
+                limit: threadInspectionLimit,
+                snapshotMessageCount: nil
+            )
+        }
+        return try await mailProvider.searchMessages(
+            credentials,
+            mailbox: .sent,
+            criteria: MailSearchCriteria(subject: subject, since: since),
+            offset: 0,
+            limit: threadInspectionLimit
+        )
     }
 
     /// Reverse-maps a draft's persisted source-mailbox tag to a `Mailbox`.

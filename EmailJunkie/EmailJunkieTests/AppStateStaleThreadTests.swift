@@ -164,6 +164,21 @@ final class AppStateStaleThreadTests: XCTestCase {
         XCTAssertEqual(verdict, .stale(.newerReplyInThread))
     }
 
+    func testVerdictChecksBlankSubjectThreadsWithBoundedPages() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: ""), message(id: 9, subject: "Re:")])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(subject: "Re:"),
+            credentials: appState.mailCredentials
+        )
+
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+        XCTAssertEqual(provider.searchRequests.first?.criteria, MailSearchCriteria())
+    }
+
     func testVerdictDetectsAlreadyRepliedFromSent() async {
         let provider = SearchStubMailProvider(
             threadResult: result([message(id: 5, subject: "Lunch?")]),
@@ -178,6 +193,27 @@ final class AppStateStaleThreadTests: XCTestCase {
         let appState = makeAppState(provider: provider)
 
         let verdict = await appState.threadStalenessVerdict(for: draft(), credentials: appState.mailCredentials)
+
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
+    }
+
+    func testVerdictDetectsBlankSubjectAlreadyRepliedFromRecentSent() async {
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re:",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )])
+        )
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(subject: "Re:"),
+            credentials: appState.mailCredentials
+        )
 
         XCTAssertEqual(verdict, .stale(.alreadyReplied))
     }
@@ -412,5 +448,53 @@ final class AppStateStaleThreadTests: XCTestCase {
         XCTAssertEqual(appState.pendingDrafts, [staleDraft])
         XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
         XCTAssertNotNil(appState.approvalError)
+    }
+
+    func testRegeneratePendingDraftPreservesManualReplyWarning() async {
+        let staleDraft = draft()
+        let provider = SearchStubMailProvider(
+            threadResult: result([message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")]),
+            sentResult: result([message(
+                id: 2,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )])
+        )
+        let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
+        appState.pendingDrafts = [staleDraft]
+
+        await appState.approveDraft(staleDraft)
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertEqual(appState.pendingDrafts.first?.generatedAt, staleDraft.generatedAt)
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Regenerated reply.")
+        XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .alreadyReplied)
+        XCTAssertEqual(provider.sendCount, 0)
+    }
+
+    func testRegeneratePendingDraftDeduplicatesExistingReplacement() async {
+        let staleDraft = draft()
+        var existingReplacement = draft(id: 9)
+        existingReplacement.sourceMessageID = "<new@x.com>"
+        existingReplacement.body = "Watcher reply."
+        let provider = SearchStubMailProvider(
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
+        )
+        let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
+        appState.pendingDrafts = [staleDraft, existingReplacement]
+
+        await appState.approveDraft(staleDraft)
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertEqual(Set(appState.pendingDrafts.map(\.identity)).count, 1)
+        XCTAssertEqual(appState.pendingDrafts.first?.id, 9)
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Regenerated reply.")
     }
 }

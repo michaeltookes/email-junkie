@@ -116,7 +116,7 @@ extension AppState {
 
         do {
             let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
-            guard let replacement = try await makePendingDraft(
+            guard var replacement = try await makePendingDraft(
                 for: message,
                 mailbox: mailbox,
                 requireWatching: false
@@ -124,7 +124,12 @@ extension AppState {
                 approvalError = "The draft could not be regenerated because account settings changed."
                 return
             }
-            try replacePendingDraft(draft, with: replacement)
+            replacement.generatedAt = draft.generatedAt
+            let replacementWarning = await threadStalenessVerdict(
+                for: replacement,
+                credentials: credentials
+            ).reason
+            try replacePendingDraft(draft, with: replacement, staleReason: replacementWarning)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
@@ -204,14 +209,10 @@ extension AppState {
         credentials: MailAccountCredentials
     ) async throws -> MailMessage {
         let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
-        guard !subject.isEmpty else { throw DraftError.sourceMessageUnavailable }
-
-        let thread = try await mailProvider.searchMessages(
+        let thread = try await sourceThreadInspectionResult(
             credentials,
             mailbox: mailbox,
-            criteria: MailSearchCriteria(subject: subject),
-            offset: 0,
-            limit: threadInspectionLimit
+            subject: subject
         )
         guard let source = StaleThreadCheck.regenerationSource(
             draft: draft,
@@ -222,10 +223,17 @@ extension AppState {
         return source
     }
 
-    private func replacePendingDraft(_ draft: Draft, with replacement: Draft) throws {
+    private func replacePendingDraft(
+        _ draft: Draft,
+        with replacement: Draft,
+        staleReason: StaleThreadReason?
+    ) throws {
         let previousDrafts = pendingDrafts
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
-        pendingDrafts[index] = replacement
+        pendingDrafts.removeAll {
+            $0.identity == draft.identity || $0.identity == replacement.identity
+        }
+        pendingDrafts.insert(replacement, at: min(index, pendingDrafts.count))
         pendingDraftCount = pendingDrafts.count
 
         do {
@@ -239,7 +247,13 @@ extension AppState {
 
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         pendingStaleWarnings.removeValue(forKey: replacement.identity)
+        if let staleReason {
+            pendingStaleWarnings[replacement.identity] = staleReason
+        }
         notifier.removeNotification(identity: draft.identity)
+        if replacement.identity != draft.identity {
+            notifier.removeNotification(identity: replacement.identity)
+        }
         notifier.notify(for: replacement, sendBehavior: sendBehavior)
     }
 

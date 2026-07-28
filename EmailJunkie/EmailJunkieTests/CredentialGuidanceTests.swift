@@ -36,10 +36,14 @@ final class CredentialGuidanceTests: XCTestCase {
 
     func testClassifiesKnownProviderHosts() {
         XCTAssertEqual(EmailProviderKind.forHost("imap.gmail.com"), .gmail)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.googlemail.com"), .gmail)
         XCTAssertEqual(EmailProviderKind.forHost(" IMAP.MAIL.ATT.NET "), .att)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.sbcglobal.net"), .att)
         XCTAssertEqual(EmailProviderKind.forHost("imap.mail.yahoo.com"), .yahoo)
+        XCTAssertEqual(EmailProviderKind.forHost("imap.ymail.com"), .yahoo)
         XCTAssertEqual(EmailProviderKind.forHost("imap.aol.com"), .aol)
         XCTAssertEqual(EmailProviderKind.forHost("imap.mail.me.com"), .icloud)
+        XCTAssertEqual(EmailProviderKind.forHost("p99-imap.mail.icloud.com"), .icloud)
         XCTAssertNil(EmailProviderKind.forHost("imap.example.org"))
         XCTAssertNil(EmailProviderKind.forHost(""))
     }
@@ -83,14 +87,14 @@ final class CredentialGuidanceTests: XCTestCase {
     func testCustomDomainCanUseConfiguredHostFallbackForGuidance() {
         let gmailGuidance = CredentialGuidance.forEmail(
             "priya@company.example",
-            explicitHostFallback: "imap.gmail.com"
+            explicitHostFallback: "imap.googlemail.com"
         )
         XCTAssertEqual(gmailGuidance.providerName, "Gmail")
         XCTAssertTrue(gmailGuidance.steps.contains { $0.contains("Google Account") })
 
         let iCloudGuidance = CredentialGuidance.forEmail(
             "me@family.example",
-            explicitHostFallback: "imap.mail.me.com"
+            explicitHostFallback: "p99-imap.mail.icloud.com"
         )
         XCTAssertEqual(iCloudGuidance.providerName, "iCloud")
         XCTAssertEqual(iCloudGuidance.credentialName, "app-specific password")

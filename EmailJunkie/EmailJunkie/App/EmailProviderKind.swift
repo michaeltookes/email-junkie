@@ -35,7 +35,22 @@ enum EmailProviderKind: Equatable, CaseIterable {
     /// provider defaults we know how to guide.
     static func forHost(_ host: String) -> EmailProviderKind? {
         let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return allCases.first { $0.imapHost == normalized }
+        if gmailHostFragments.contains(where: normalized.contains) {
+            return .gmail
+        }
+        if attHostFragments.contains(where: normalized.contains) {
+            return .att
+        }
+        if yahooHostFragments.contains(where: normalized.contains) {
+            return .yahoo
+        }
+        if aolHostFragments.contains(where: normalized.contains) {
+            return .aol
+        }
+        if icloudHostSuffixes.contains(where: normalized.hasSuffix) {
+            return .icloud
+        }
+        return nil
     }
 
     /// The IMAP host for this provider (its SMTP host is derived from it).
@@ -63,4 +78,9 @@ enum EmailProviderKind: Equatable, CaseIterable {
         return domain.isEmpty ? nil : domain
     }
 
+    private static let gmailHostFragments = ["gmail", "googlemail"]
+    private static let attHostFragments = ["att.net", "mail.att", "sbcglobal", "bellsouth"]
+    private static let yahooHostFragments = ["yahoo", "ymail", "rocketmail"]
+    private static let aolHostFragments = ["aol"]
+    private static let icloudHostSuffixes = ["mail.me.com", "mail.icloud.com"]
 }

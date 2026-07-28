@@ -298,52 +298,6 @@ extension AppState {
         }
     }
 
-    /// Dispatches a preview sheet's displayed draft without reading mutable
-    /// global preview state. The sheet owns its own progress/error UI.
-    ///
-    /// Unless `force` is set, the draft's thread is re-checked first (item 12);
-    /// if it changed since the draft was generated, this throws
-    /// `DraftDispatchError.staleThread` so the sheet can warn before sending.
-    /// Passing `force: true` is the user's "send anyway" override.
-    func approveDraftPreview(_ draft: Draft, force: Bool = false) async throws -> String {
-        // A flagged draft has no fabricated reply — it must never be sent or
-        // saved until the user resolves it (item 13).
-        guard !draft.isFlagged else {
-            throw DraftError.needsUserInput
-        }
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            throw DraftDispatchError.missingCredentials
-        }
-        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            throw DraftDispatchError.accountMismatch
-        }
-        guard draftSourceAllowsReplyDispatch(draft) else {
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            throw DraftError.unsupportedSourceMailbox
-        }
-        if !force, case .stale(let reason) = await threadStalenessVerdict(for: draft, credentials: credentials) {
-            throw DraftDispatchError.staleThread(reason)
-        }
-
-        switch sendBehavior {
-        case .autoSend:
-            try await performSend(draft, credentials: credentials)
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            return "Sent."
-        case .saveAsDraft:
-            try await performSave(draft, credentials: credentials)
-            return "Saved to your Drafts."
-        }
-    }
-
     /// Sends the current generated draft immediately over SMTP.
     func sendGeneratedDraft() async {
         guard !isSendingDraft, !isSavingDraft else { return }

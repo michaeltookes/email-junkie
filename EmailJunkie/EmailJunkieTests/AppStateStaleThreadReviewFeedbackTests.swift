@@ -144,7 +144,7 @@ final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
     }
 
     private func makeAppState(
-        provider: SearchStubMailProvider,
+        provider: MailProvider,
         llmText: String = "Fresh reply."
     ) -> AppState {
         let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])

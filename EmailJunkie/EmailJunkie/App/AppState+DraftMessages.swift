@@ -8,10 +8,8 @@ extension AppState {
     /// Maps a draft-generation or dispatch error to a short, user-facing message.
     static func draftMessage(for error: Error) -> String {
         switch error {
-        case DraftDispatchError.missingCredentials:
-            return "Connect an email account first."
-        case DraftDispatchError.accountMismatch:
-            return "This draft was generated for a different email account."
+        case let error as DraftDispatchError:
+            return draftDispatchMessage(for: error)
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
         case DraftError.unsupportedSourceMailbox:
@@ -20,14 +18,25 @@ extension AppState {
             return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
         case DraftError.sourceMessageUnavailable:
             return "No current message was found to regenerate from. Send anyway or discard this draft."
-        case DraftDispatchError.noRecipient:
-            return "This draft has no recipient address to send to."
-        case DraftDispatchError.staleThread(let reason):
-            return "\(reason.headline). \(reason.detail)"
         case is LLMError:
             return llmMessage(for: error)
         default:
             return message(for: error)
+        }
+    }
+
+    private static func draftDispatchMessage(for error: DraftDispatchError) -> String {
+        switch error {
+        case .missingCredentials:
+            return "Connect an email account first."
+        case .accountMismatch:
+            return "This draft was generated for a different email account."
+        case .accountChanged:
+            return "The email account changed before this action finished. Try again with the current account."
+        case .noRecipient:
+            return "This draft has no recipient address to send to."
+        case .staleThread(let reason):
+            return "\(reason.headline). \(reason.detail)"
         }
     }
 }
@@ -38,6 +47,9 @@ enum DraftDispatchError: Error, Equatable {
     case missingCredentials
     /// The draft was generated under a different mail account.
     case accountMismatch
+    /// The connected account changed while an async freshness or regeneration
+    /// operation was in flight.
+    case accountChanged
     /// The draft has no resolvable recipient address.
     case noRecipient
     /// The source thread changed since the draft was generated (item 12); carries

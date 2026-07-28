@@ -36,50 +36,78 @@ extension AppState {
         sendBehavior approvalSendBehavior: SendBehavior? = nil,
         force: Bool = false
     ) async {
-        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
-        guard !approvingDraftIDs.contains(draft.identity) else { return }
+        do {
+            guard let credentials = try queuedApprovalCredentials(for: draft) else { return }
+            approvingDraftIDs.insert(draft.identity)
+            defer { approvingDraftIDs.remove(draft.identity) }
+
+            try await approveQueuedDraft(
+                draft,
+                sendBehavior: approvalSendBehavior,
+                force: force,
+                credentials: credentials
+            )
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+        }
+    }
+
+    private func queuedApprovalCredentials(for draft: Draft) throws -> MailAccountCredentials? {
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return nil }
+        guard !approvingDraftIDs.contains(draft.identity) else { return nil }
 
         approvalError = nil
         // A flagged draft needs the user's input first — never send or save it,
         // even via a notification "Approve" action in auto-send mode (item 13).
         guard !draft.isFlagged else {
-            approvalError = Self.draftMessage(for: DraftError.needsUserInput)
-            return
+            throw DraftError.needsUserInput
         }
         let credentials = mailCredentials
         guard credentials.isComplete else {
-            approvalError = "Connect an email account first."
-            return
+            throw DraftDispatchError.missingCredentials
         }
         guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
-            approvalError = "This draft was generated for a different email account."
-            return
+            throw DraftDispatchError.accountMismatch
         }
         guard draftSourceAllowsReplyDispatch(draft) else {
-            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
-            return
+            throw DraftError.unsupportedSourceMailbox
         }
+        return credentials
+    }
 
-        approvingDraftIDs.insert(draft.identity)
-        defer { approvingDraftIDs.remove(draft.identity) }
-
-        if !force, case .stale(let reason) = await threadStalenessVerdict(for: draft, credentials: credentials) {
-            recordPendingStaleWarning(reason, for: draft)
-            return
+    private func approveQueuedDraft(
+        _ draft: Draft,
+        sendBehavior approvalSendBehavior: SendBehavior?,
+        force: Bool,
+        credentials: MailAccountCredentials
+    ) async throws {
+        var dispatchCredentials = credentials
+        if !force {
+            let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
+            dispatchCredentials = freshness.credentials
+            if let reason = freshness.reason {
+                recordPendingStaleWarning(reason, for: draft)
+                return
+            }
         }
         pendingStaleWarnings.removeValue(forKey: draft.identity)
 
-        do {
-            switch approvalSendBehavior ?? sendBehavior {
-            case .autoSend:
-                try await performSend(draft, credentials: credentials)
-            case .saveAsDraft:
-                try await performSave(draft, credentials: credentials)
-            }
-            try finalizeApprovedDraft(draft)
-        } catch {
-            approvalError = Self.draftMessage(for: error)
+        switch approvalSendBehavior ?? sendBehavior {
+        case .autoSend:
+            try await performSend(draft, credentials: dispatchCredentials)
+        case .saveAsDraft:
+            try await performSave(draft, credentials: dispatchCredentials)
         }
+        try finalizeApprovedDraft(draft)
+    }
+
+    private func currentFreshnessCheck(
+        for draft: Draft,
+        credentials: MailAccountCredentials
+    ) async throws -> (reason: StaleThreadReason?, credentials: MailAccountCredentials) {
+        let verdict = await threadStalenessVerdict(for: draft, credentials: credentials)
+        let currentCredentials = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+        return (verdict.reason, currentCredentials)
     }
 
     private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
@@ -125,6 +153,7 @@ extension AppState {
 
         do {
             let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+            _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
             guard var replacement = try await makePendingDraft(
                 for: message,
                 mailbox: mailbox,
@@ -138,10 +167,42 @@ extension AppState {
                 for: replacement,
                 credentials: credentials
             ).reason
+            _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
             try replacePendingDraft(draft, with: replacement, staleReason: replacementWarning)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
+    }
+
+    /// Rebuilds a preview-sheet draft against the newest related source message.
+    /// The preview is not queued; the caller owns the sheet's replacement state.
+    func regenerateDraftPreview(_ draft: Draft) async throws -> Draft {
+        guard let mailbox = Self.sourceMailbox(for: draft), mailbox.supportsReplyDrafting else {
+            throw DraftError.unsupportedSourceMailbox
+        }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftDispatchError.accountMismatch
+        }
+
+        let message = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+        _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+        guard var replacement = try await makePendingDraft(
+            for: message,
+            mailbox: mailbox,
+            requireWatching: false
+        ) else {
+            throw DraftDispatchError.accountChanged
+        }
+        replacement.generatedAt = draft.generatedAt
+        generatedDraft = replacement
+        return replacement
     }
 
     /// Routes a native-notification action back into the queue.
@@ -287,5 +348,25 @@ extension AppState {
 
     private func normalizedEmail(_ email: String) -> String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    func draftDispatchCredentialsStillCurrent(
+        _ expectedCredentials: MailAccountCredentials,
+        for draft: Draft
+    ) throws -> MailAccountCredentials {
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard credentials == expectedCredentials else {
+            throw DraftDispatchError.accountChanged
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            throw DraftDispatchError.accountMismatch
+        }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            throw DraftError.unsupportedSourceMailbox
+        }
+        return credentials
     }
 }

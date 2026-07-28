@@ -84,6 +84,7 @@ extension AppState {
 
     private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
         pendingStaleWarnings[draft.identity] = reason
+        approvalError = Self.draftMessage(for: DraftDispatchError.staleThread(reason))
     }
 
     /// Denies (discards) a pending draft without sending or saving it.
@@ -239,9 +240,7 @@ extension AppState {
     ) throws {
         let previousDrafts = pendingDrafts
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
-        if replacement.identity != draft.identity, isReplacementDraftUnavailable(replacement) {
-            throw RegenerationReplacementError.alreadyApproved
-        }
+        try ensureReplacementDraftIsAvailable(replacement, replacing: draft)
         pendingDrafts.removeAll {
             $0.identity == draft.identity || $0.identity == replacement.identity
         }
@@ -267,6 +266,13 @@ extension AppState {
             notifier.removeNotification(identity: replacement.identity)
         }
         notifier.notify(for: replacement, sendBehavior: sendBehavior)
+    }
+
+    private func ensureReplacementDraftIsAvailable(_ replacement: Draft, replacing draft: Draft) throws {
+        guard replacement.identity != draft.identity else { return }
+        guard !isReplacementDraftUnavailable(replacement) else {
+            throw RegenerationReplacementError.alreadyApproved
+        }
     }
 
     private func isReplacementDraftUnavailable(_ replacement: Draft) -> Bool {

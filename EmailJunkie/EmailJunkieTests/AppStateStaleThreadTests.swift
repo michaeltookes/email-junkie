@@ -303,6 +303,7 @@ final class AppStateStaleThreadTests: XCTestCase {
         await appState.handleNotificationAction(.approve(.autoSend), identity: staleDraft.identity)
 
         XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
+        XCTAssertNotNil(appState.approvalError)
         XCTAssertTrue(openedReview)
         XCTAssertEqual(provider.sendCount, 0)
         XCTAssertEqual(appState.pendingDrafts, [staleDraft])

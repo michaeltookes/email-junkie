@@ -164,10 +164,14 @@ extension AppState {
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard settings.schemaVersion < Settings.mailHostGuidanceSchemaVersion,
               settings.mailHostGuidanceEmail == nil,
-              EmailProviderKind.forEmail(mailEmail) == nil,
               Self.normalizedEmailDomainForHostTracking(mailEmail) != nil,
               !host.isEmpty else {
             return false
+        }
+
+        if let suggestedHost = Self.suggestedIMAPHost(forEmail: mailEmail) {
+            return host != suggestedHost
+                && (!EmailProviderKind.allHosts.contains(host) || settings.onboardingCompleted)
         }
 
         return host != Settings.default.mailHost || settings.onboardingCompleted

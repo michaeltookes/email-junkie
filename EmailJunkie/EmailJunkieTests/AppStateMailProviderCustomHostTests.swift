@@ -46,6 +46,43 @@ final class AppStateMailProviderCustomHostTests: XCTestCase {
         XCTAssertNil(app.credentialGuidanceHostFallback)
     }
 
+    func testLegacyCustomHostForRecognizedDomainMigratesGuidance() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.mailHostGuidanceSchemaVersion - 1,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@yahoo.com",
+                mailHost: "imap.proxy.example"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "imap.proxy.example")
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.proxy.example")
+        XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "me@yahoo.com")
+
+        app.updateMailEmailFromUser("me@gmail.com")
+
+        XCTAssertEqual(app.mailHost, "imap.gmail.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+    }
+
+    func testLegacySuggestedHostForRecognizedDomainStaysManaged() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(settings: Settings(
+                schemaVersion: Settings.mailHostGuidanceSchemaVersion - 1,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@yahoo.com",
+                mailHost: "imap.mail.yahoo.com"
+            )),
+            secrets: InMemorySecretStore()
+        )
+
+        XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+        XCTAssertNil(app.buildSettings().mailHostGuidanceEmail)
+    }
+
     private func makeAppState() -> AppState {
         AppState(
             persistence: AppStateMemoryPersistence(),

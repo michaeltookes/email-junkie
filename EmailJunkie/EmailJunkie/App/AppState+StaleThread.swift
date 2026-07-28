@@ -82,12 +82,13 @@ extension AppState {
                 }
             )
         }
-        return try await mailProvider.searchMessages(
+        return try await pagedSubjectInspectionResult(
             credentials,
             mailbox: mailbox,
             criteria: MailSearchCriteria(subject: subject),
-            offset: 0,
-            limit: threadInspectionLimit
+            shouldStopAfterPage: { page in
+                page.contains { Self.isSourceMessage($0, for: draft) }
+            }
         )
     }
 
@@ -106,13 +107,58 @@ extension AppState {
                 }
             )
         }
-        return try await mailProvider.searchMessages(
+        return try await pagedSubjectInspectionResult(
             credentials,
             mailbox: .sent,
             criteria: MailSearchCriteria(subject: subject, since: since),
-            offset: 0,
-            limit: threadInspectionLimit
+            shouldStopAfterPage: { page in
+                !Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt)
+            }
         )
+    }
+
+    private func pagedSubjectInspectionResult(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria baseCriteria: MailSearchCriteria,
+        shouldStopAfterPage: ([MailMessage]) -> Bool
+    ) async throws -> MailSearchResult {
+        let pageSize = max(1, threadInspectionLimit)
+        var criteria = baseCriteria
+        var offset = 0
+        var snapshotTotalMatches: Int?
+        var snapshotMaximumUID: UInt32?
+        var messages: [MailMessage] = []
+        var hasMore = false
+
+        while true {
+            let page = try await mailProvider.searchMessages(
+                credentials,
+                mailbox: mailbox,
+                criteria: criteria,
+                offset: offset,
+                limit: pageSize
+            )
+            if snapshotTotalMatches == nil {
+                snapshotTotalMatches = page.totalMatches
+                snapshotMaximumUID = page.messages.map(\.id).max()
+            }
+            messages.append(contentsOf: page.messages)
+            hasMore = page.hasMore
+
+            if shouldStopAfterPage(page.messages) || !page.hasMore || page.messages.isEmpty {
+                return MailSearchResult(
+                    messages: messages,
+                    totalMatches: snapshotTotalMatches ?? page.totalMatches,
+                    offset: 0,
+                    hasMore: hasMore
+                )
+            }
+            if criteria.maximumUID == nil {
+                criteria.maximumUID = snapshotMaximumUID
+            }
+            offset += pageSize
+        }
     }
 
     private func pagedBlankSubjectInspectionResult(

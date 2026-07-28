@@ -86,6 +86,7 @@ extension AppState {
         force: Bool,
         credentials: MailAccountCredentials
     ) async throws {
+        let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
         var dispatchCredentials = credentials
         if !force {
             let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
@@ -97,7 +98,7 @@ extension AppState {
         }
         pendingStaleWarnings.removeValue(forKey: draft.identity)
 
-        switch approvalSendBehavior ?? sendBehavior {
+        switch effectiveSendBehavior {
         case .autoSend:
             try await performSend(draft, credentials: dispatchCredentials)
         case .saveAsDraft:
@@ -310,15 +311,45 @@ extension AppState {
             throw DraftError.sourceMessageUnavailable
         }
 
+        var lastError: Error?
+        var searchedMailboxSuccessfully = false
+        for mailbox in movedRegenerationSearchMailboxes(for: credentials) {
+            do {
+                let source = try await movedRegenerationSource(
+                    for: draft,
+                    credentials: credentials,
+                    mailbox: mailbox,
+                    sourceMessageID: sourceMessageID
+                )
+                searchedMailboxSuccessfully = true
+                if let source {
+                    return source
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        if !searchedMailboxSuccessfully, let lastError {
+            throw lastError
+        }
+        throw DraftError.sourceMessageUnavailable
+    }
+
+    private func movedRegenerationSource(
+        for draft: Draft,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        sourceMessageID: String
+    ) async throws -> RegenerationSourceMessage? {
         let source = try await exactHeaderInspectionResult(
             credentials,
-            mailbox: .allMail,
+            mailbox: mailbox,
             field: "Message-ID",
             value: sourceMessageID
         )
         let replies = await supplementalHeaderInspectionResult(
             credentials,
-            mailbox: .allMail,
+            mailbox: mailbox,
             seedMessageIDs: [sourceMessageID],
             includeSourceMessages: false
         )
@@ -328,9 +359,29 @@ extension AppState {
             threadMessages: thread.messages,
             requireUIDComparable: false
         ) else {
-            throw DraftError.sourceMessageUnavailable
+            return nil
         }
-        return RegenerationSourceMessage(message: message, mailbox: .allMail)
+        return RegenerationSourceMessage(message: message, mailbox: mailbox)
+    }
+
+    private func movedRegenerationSearchMailboxes(for credentials: MailAccountCredentials) -> [Mailbox] {
+        var mailboxes: [Mailbox] = []
+        var seen = Set<String>()
+        for mailbox in [Mailbox.allMail, .archive] {
+            let liveMailbox = Self.liveSearchMailbox(mailbox, credentials: credentials)
+            let liveName = liveMailbox.imapName(using: credentials.mailboxNaming).lowercased()
+            guard seen.insert(liveName).inserted else { continue }
+            mailboxes.append(liveMailbox)
+        }
+        return mailboxes
+    }
+
+    private static func liveSearchMailbox(
+        _ mailbox: Mailbox,
+        credentials: MailAccountCredentials
+    ) -> Mailbox {
+        let liveName = mailbox.imapName(using: credentials.mailboxNaming)
+        return liveName == mailbox.imapName ? mailbox : .named(liveName)
     }
 
     private func replacePendingDraft(

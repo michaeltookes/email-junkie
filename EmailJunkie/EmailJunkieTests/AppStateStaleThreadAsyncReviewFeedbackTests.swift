@@ -193,6 +193,46 @@ final class AppStateAsyncReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(provider.appendCount, 0)
     }
 
+    func testApproveDraftKeepsOriginalSendBehaviorWhenSettingChangesDuringStaleLookup() async {
+        let pendingDraft = draft()
+        let provider = SuspendedThreadSearchMailProvider(threadResult: .success(result([
+            message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")
+        ])))
+        let appState = makeAppState(provider: provider)
+        appState.sendBehavior = .saveAsDraft
+        appState.pendingDrafts = [pendingDraft]
+
+        let approval = Task { await appState.approveDraft(pendingDraft) }
+        await fulfillment(of: [provider.didStartThreadSearch], timeout: 1)
+        appState.sendBehavior = .autoSend
+        provider.completeThreadSearch()
+        await approval.value
+
+        XCTAssertEqual(provider.sendCount, 0)
+        XCTAssertEqual(provider.appendCount, 1)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
+    func testApproveDraftPreviewKeepsOriginalSendBehaviorWhenSettingChangesDuringStaleLookup() async throws {
+        let previewDraft = draft()
+        let provider = SuspendedThreadSearchMailProvider(threadResult: .success(result([
+            message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>")
+        ])))
+        let appState = makeAppState(provider: provider)
+        appState.sendBehavior = .saveAsDraft
+        appState.generatedDraft = previewDraft
+
+        let approval = Task { try await appState.approveDraftPreview(previewDraft) }
+        await fulfillment(of: [provider.didStartThreadSearch], timeout: 1)
+        appState.sendBehavior = .autoSend
+        provider.completeThreadSearch()
+        let confirmation = try await approval.value
+
+        XCTAssertEqual(confirmation, "Saved to your Drafts.")
+        XCTAssertEqual(provider.sendCount, 0)
+        XCTAssertEqual(provider.appendCount, 1)
+    }
+
     func testRegeneratePendingDraftDoesNotFetchReplacementAfterAccountChangesDuringSourceLookup() async {
         let staleDraft = draft()
         let provider = SuspendedThreadSearchMailProvider(threadResult: .success(result([

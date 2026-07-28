@@ -308,4 +308,43 @@ final class StaleThreadCheckTests: XCTestCase {
         XCTAssertEqual(source.id, 9)
         XCTAssertEqual(source.messageID, "<new@x.com>")
     }
+
+    func testRegenerationSourceIgnoresOutgoingRelatedMessages() throws {
+        let source = try XCTUnwrap(StaleThreadCheck.regenerationSource(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(
+                    id: 12,
+                    subject: "Re: Lunch?",
+                    from: MailAddress(email: "me@gmail.com"),
+                    to: [MailAddress(email: "alice@x.com")],
+                    inReplyTo: "<orig@x.com>",
+                    messageID: "<sent@x.com>"
+                ),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ]
+        ))
+        XCTAssertEqual(source.id, 9)
+        XCTAssertEqual(source.messageID, "<new@x.com>")
+    }
+
+    func testRegenerationSourceFallsBackToOriginalWhenOnlyNewerRelatedMessageIsOutgoing() throws {
+        let source = try XCTUnwrap(StaleThreadCheck.regenerationSource(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(
+                    id: 12,
+                    subject: "Re: Lunch?",
+                    from: MailAddress(email: "me@gmail.com"),
+                    to: [MailAddress(email: "alice@x.com")],
+                    inReplyTo: "<orig@x.com>",
+                    messageID: "<sent@x.com>"
+                )
+            ]
+        ))
+        XCTAssertEqual(source.id, 5)
+        XCTAssertEqual(source.messageID, "<orig@x.com>")
+    }
 }

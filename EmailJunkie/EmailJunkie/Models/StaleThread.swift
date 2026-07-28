@@ -133,6 +133,7 @@ enum StaleThreadCheck {
         requireUIDComparable: Bool = true
     ) -> MailMessage? {
         relatedThreadMessages(draft: draft, threadMessages: threadMessages)
+            .filter { isIncomingRegenerationCandidate($0, draft: draft) }
             .filter { !requireUIDComparable || isUIDComparable($0, draft: draft) }
             .max { $0.id < $1.id }
     }
@@ -198,6 +199,15 @@ enum StaleThreadCheck {
         guard canUseParticipantFallback(message, relatedThreadMessageIDs: relatedThreadMessageIDs) else { return false }
         let sentRecipients = Set(message.to.compactMap { normalizedEmail($0.email) })
         return !sentRecipients.isDisjoint(with: sourceAddresses)
+    }
+
+    private static func isIncomingRegenerationCandidate(_ message: MailMessage, draft: Draft) -> Bool {
+        guard let accountEmail = draft.sourceAccountEmail.flatMap(normalizedEmail),
+              let fromEmail = message.from?.email,
+              let normalizedFrom = normalizedEmail(fromEmail) else {
+            return true
+        }
+        return normalizedFrom != accountEmail
     }
 
     private static func isSourceMessage(_ message: MailMessage, draft: Draft) -> Bool {

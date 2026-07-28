@@ -14,13 +14,14 @@ extension AppState {
     /// Passing `force: true` is the user's "send anyway" override.
     func approveDraftPreview(_ draft: Draft, force: Bool = false) async throws -> String {
         let credentials = try previewDraftCredentials(for: draft)
+        let effectiveSendBehavior = sendBehavior
         let dispatchCredentials = try await previewDispatchCredentials(
             for: draft,
             credentials: credentials,
             force: force
         )
 
-        switch sendBehavior {
+        switch effectiveSendBehavior {
         case .autoSend:
             try await performSend(draft, credentials: dispatchCredentials)
             if generatedDraft == draft {

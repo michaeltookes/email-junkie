@@ -156,6 +156,12 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 
+    /// Stale-thread warnings raised at approval time, keyed by draft identity
+    /// (item 12). A non-nil entry means the queued draft's thread changed since it
+    /// was generated; the review UI surfaces the reason with send-anyway /
+    /// regenerate / discard options instead of dispatching.
+    @Published var pendingStaleWarnings: [String: StaleThreadReason] = [:]
+
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
 

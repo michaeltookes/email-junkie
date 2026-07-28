@@ -80,7 +80,11 @@ extension AppState {
     /// preview state, so an active preview and the watcher don't clobber each
     /// other. Throws on missing configuration or provider/LLM errors.
     @discardableResult
-    func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws -> Bool {
+    func draftAndEnqueue(
+        _ message: MailMessage,
+        mailbox: Mailbox = .inbox,
+        requireWatching: Bool = true
+    ) async throws -> Bool {
         guard mailbox.supportsReplyDrafting else {
             throw DraftError.unsupportedSourceMailbox
         }
@@ -94,7 +98,7 @@ extension AppState {
             uid: message.id,
             expectedUIDValidity: message.uidValidity
         )
-        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        guard isCurrentDraftContext(credentials: credentials, llmConfiguration: llmConfiguration, requireWatching: requireWatching) else { return false }
         let incomingText = MailBodyText.plainText(from: data)
         let context = ReplyContext(
             senderName: message.from?.name,
@@ -103,7 +107,7 @@ extension AppState {
             body: incomingText
         )
         let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
-        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        guard isCurrentDraftContext(credentials: credentials, llmConfiguration: llmConfiguration, requireWatching: requireWatching) else { return false }
         let draft = Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
@@ -214,11 +218,16 @@ extension AppState {
             && currentDraftLLMConfiguration == llmConfiguration
     }
 
-    private func isCurrentWatcherDraftRequest(
+    /// Whether the account/LLM context is still the one an in-flight draft began
+    /// with. `requireWatching` additionally demands the watcher still be running
+    /// (the watcher path); manual regeneration (item 12) passes `false` so it
+    /// works from the review window regardless of watch state.
+    private func isCurrentDraftContext(
         credentials: MailAccountCredentials,
-        llmConfiguration: DraftLLMConfiguration
+        llmConfiguration: DraftLLMConfiguration,
+        requireWatching: Bool
     ) -> Bool {
-        watchStatus == .watching
+        (!requireWatching || watchStatus == .watching)
             && mailCredentials == credentials
             && currentDraftLLMConfiguration == llmConfiguration
     }
@@ -271,7 +280,12 @@ extension AppState {
 
     /// Dispatches a preview sheet's displayed draft without reading mutable
     /// global preview state. The sheet owns its own progress/error UI.
-    func approveDraftPreview(_ draft: Draft) async throws -> String {
+    ///
+    /// Unless `force` is set, the draft's thread is re-checked first (item 12);
+    /// if it changed since the draft was generated, this throws
+    /// `DraftDispatchError.staleThread` so the sheet can warn before sending.
+    /// Passing `force: true` is the user's "send anyway" override.
+    func approveDraftPreview(_ draft: Draft, force: Bool = false) async throws -> String {
         // A flagged draft has no fabricated reply — it must never be sent or
         // saved until the user resolves it (item 13).
         guard !draft.isFlagged else {
@@ -292,6 +306,9 @@ extension AppState {
                 generatedDraft = nil
             }
             throw DraftError.unsupportedSourceMailbox
+        }
+        if !force, case .stale(let reason) = await threadStalenessVerdict(for: draft, credentials: credentials) {
+            throw DraftDispatchError.staleThread(reason)
         }
 
         switch sendBehavior {
@@ -467,6 +484,8 @@ extension AppState {
             return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
         case DraftDispatchError.noRecipient:
             return "This draft has no recipient address to send to."
+        case DraftDispatchError.staleThread(let reason):
+            return "\(reason.headline). \(reason.detail)"
         case is LLMError:
             return llmMessage(for: error)
         default:
@@ -483,6 +502,9 @@ enum DraftDispatchError: Error, Equatable {
     case accountMismatch
     /// The draft has no resolvable recipient address.
     case noRecipient
+    /// The source thread changed since the draft was generated (item 12); carries
+    /// why so the UI can warn precisely before a "send anyway" override.
+    case staleThread(StaleThreadReason)
 }
 
 private struct DraftLLMConfiguration: Equatable {

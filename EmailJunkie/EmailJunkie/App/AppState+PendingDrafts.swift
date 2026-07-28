@@ -18,7 +18,16 @@ extension AppState {
     /// Approves a pending draft: sends it or saves it as a Gmail draft per the
     /// supplied send behavior (defaulting to the current setting), then removes
     /// it from the queue on success.
-    func approveDraft(_ draft: Draft, sendBehavior approvalSendBehavior: SendBehavior? = nil) async {
+    ///
+    /// Unless `force` is set, the draft's thread is re-checked first (item 12);
+    /// if it changed, the send is blocked and a `pendingStaleWarnings` entry is
+    /// raised so the review card can warn with send-anyway / regenerate / discard.
+    /// Passing `force: true` is the user's "send anyway" override.
+    func approveDraft(
+        _ draft: Draft,
+        sendBehavior approvalSendBehavior: SendBehavior? = nil,
+        force: Bool = false
+    ) async {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         guard !approvingDraftIDs.contains(draft.identity) else { return }
 
@@ -46,6 +55,12 @@ extension AppState {
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }
 
+        if !force, case .stale(let reason) = await threadStalenessVerdict(for: draft, credentials: credentials) {
+            pendingStaleWarnings[draft.identity] = reason
+            return
+        }
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+
         do {
             switch approvalSendBehavior ?? sendBehavior {
             case .autoSend:
@@ -63,8 +78,47 @@ extension AppState {
     func denyDraft(_ draft: Draft) {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
         approvalError = nil
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
         do {
             try removePendingDraft(draft)
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+        }
+    }
+
+    /// Discards a stale queued draft and re-drafts a fresh reply from the same
+    /// source message (item 12's "regenerate" option). Clears the draft's stale
+    /// warning; on success the fresh draft re-enters the queue.
+    func regeneratePendingDraft(_ draft: Draft) async {
+        guard !approvingDraftIDs.contains(draft.identity) else { return }
+        guard let mailbox = Self.sourceMailbox(for: draft), mailbox.supportsReplyDrafting else {
+            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
+            return
+        }
+
+        approvalError = nil
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+        approvingDraftIDs.insert(draft.identity)
+        defer { approvingDraftIDs.remove(draft.identity) }
+
+        do {
+            try removePendingDraft(draft)
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+            return
+        }
+
+        let message = MailMessage(
+            id: draft.id,
+            uidValidity: draft.sourceUIDValidity,
+            from: draft.sourceFrom,
+            replyTo: draft.sourceReplyTo,
+            subject: draft.sourceSubject,
+            date: "",
+            messageID: draft.sourceMessageID
+        )
+        do {
+            try await draftAndEnqueue(message, mailbox: mailbox, requireWatching: false)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }

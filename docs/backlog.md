@@ -69,14 +69,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Especially enforced in auto-send mode, where a stale send is silent and embarrassing.
     - Detection logic is covered by tests against representative thread-change cases.
 
-13. **Low-confidence / "needs info" draft handling**
-    When the model can't draft well without facts only the user has, flag it instead of hallucinating.
-    *As Priya, I want the app to tell me when it can't confidently draft a reply, so that I trust the drafts it does produce.*
-    - The engine detects low-confidence or missing-information cases (e.g. the reply requires data not in the thread).
-    - Instead of a fabricated reply, the user is shown a clear "needs your input" state with what's missing.
-    - No auto-send ever fires on a flagged draft.
-    - Flagged items appear distinctly in the approval UI and activity history (item 21).
-
 44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
     Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
     *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*

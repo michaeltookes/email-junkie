@@ -152,6 +152,7 @@ private struct OnboardingError: View {
 
 private struct OnboardingAccountStep: View {
     @EnvironmentObject var appState: AppState
+    @FocusState private var isMailEmailFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -164,10 +165,16 @@ private struct OnboardingAccountStep: View {
                 ConnectedBadge(text: "Connected as \(appState.mailEmail)")
                 Button("Disconnect", role: .destructive) { appState.disconnectMail() }
             } else {
-                TextField("Email address", text: $appState.mailEmail)
+                TextField("Email address", text: mailEmailBinding)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
-                    .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
+                    .focused($isMailEmailFocused)
+                    .onSubmit { appState.commitMailEmailEditFromUser() }
+                    .onChange(of: isMailEmailFocused) { _, isFocused in
+                        if !isFocused {
+                            appState.commitMailEmailEditFromUser()
+                        }
+                    }
                 SecureField("App password", text: $appState.mailAppPassword)
                     .textFieldStyle(.roundedBorder)
 
@@ -182,16 +189,13 @@ private struct OnboardingAccountStep: View {
                 }
                 .disabled(appState.isConnecting)
 
-                DisclosureGroup("How do I get an app password?") {
-                    Text("In your Google Account, turn on 2-Step Verification, then go to "
-                         + "Security \u{2192} App passwords and generate one. Paste the "
-                         + "16-character password here \u{2014} no Google Cloud setup needed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                AppPasswordGuidanceView(
+                    email: appState.mailEmail,
+                    explicitHostFallback: appState.credentialGuidanceHostFallback
+                )
 
                 DisclosureGroup("Advanced (IMAP server)") {
-                    TextField("IMAP host", text: $appState.mailHost)
+                    TextField("IMAP host", text: mailHostBinding)
                         .textFieldStyle(.roundedBorder)
                     TextField("Port", value: $appState.mailPort, format: .number)
                         .textFieldStyle(.roundedBorder)
@@ -207,6 +211,20 @@ private struct OnboardingAccountStep: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
         }
+    }
+
+    private var mailHostBinding: Binding<String> {
+        Binding(
+            get: { appState.mailHost },
+            set: { appState.updateMailHostFromUser($0) }
+        )
+    }
+
+    private var mailEmailBinding: Binding<String> {
+        Binding(
+            get: { appState.mailEmail },
+            set: { appState.updateMailEmailFromUser($0) }
+        )
     }
 }
 

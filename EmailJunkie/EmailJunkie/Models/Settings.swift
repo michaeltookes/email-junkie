@@ -19,10 +19,16 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 6
+    static let currentSchemaVersion = 8
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
+
+    /// Schema version that introduced persisted IMAP host guidance ownership.
+    static let mailHostGuidanceSchemaVersion = 7
+
+    /// Schema version that introduced host ownership before an email is entered.
+    static let pendingMailHostGuidanceSchemaVersion = 8
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -35,6 +41,12 @@ struct Settings: Codable, Equatable {
 
     /// The IMAP host.
     var mailHost: String
+
+    /// Email address the configured host was explicitly or successfully tied to.
+    var mailHostGuidanceEmail: String?
+
+    /// Whether the configured host was explicitly entered before an email existed.
+    var mailHostGuidancePendingEmail: Bool
 
     /// The IMAP port.
     var mailPort: Int
@@ -63,6 +75,8 @@ struct Settings: Codable, Equatable {
         pollIntervalSeconds: Int,
         mailEmail: String = "",
         mailHost: String = "imap.gmail.com",
+        mailHostGuidanceEmail: String? = nil,
+        mailHostGuidancePendingEmail: Bool = false,
         mailPort: Int = 993,
         llmProvider: String = "anthropic",
         llmModel: String = "",
@@ -74,6 +88,8 @@ struct Settings: Codable, Equatable {
         self.pollIntervalSeconds = pollIntervalSeconds
         self.mailEmail = mailEmail
         self.mailHost = mailHost
+        self.mailHostGuidanceEmail = mailHostGuidanceEmail
+        self.mailHostGuidancePendingEmail = mailHostGuidancePendingEmail
         self.mailPort = mailPort
         self.llmProvider = llmProvider
         self.llmModel = llmModel
@@ -89,7 +105,8 @@ struct Settings: Codable, Equatable {
     )
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailPort
+        case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
+        case mailHostGuidancePendingEmail, mailPort
         case llmProvider, llmModel, llmVerifiedModel, sendBehavior, onboardingCompleted
     }
 
@@ -99,6 +116,9 @@ struct Settings: Codable, Equatable {
         pollIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds) ?? 300
         mailEmail = try container.decodeIfPresent(String.self, forKey: .mailEmail) ?? ""
         mailHost = try container.decodeIfPresent(String.self, forKey: .mailHost) ?? "imap.gmail.com"
+        mailHostGuidanceEmail = try container.decodeIfPresent(String.self, forKey: .mailHostGuidanceEmail)
+        mailHostGuidancePendingEmail =
+            try container.decodeIfPresent(Bool.self, forKey: .mailHostGuidancePendingEmail) ?? false
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
@@ -112,8 +132,19 @@ struct Settings: Codable, Equatable {
         var copy = self
         copy.pollIntervalSeconds = min(max(pollIntervalSeconds, 30), 3600)
         copy.mailPort = min(max(mailPort, 1), 65535)
-        if copy.mailHost.isEmpty {
+        let hasStoredGuidanceHost = !copy.mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if copy.mailHost.isEmpty && copy.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             copy.mailHost = "imap.gmail.com"
+        }
+        if let guidanceEmail = copy.mailHostGuidanceEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           !guidanceEmail.isEmpty {
+            copy.mailHostGuidanceEmail = guidanceEmail
+        } else {
+            copy.mailHostGuidanceEmail = nil
+        }
+        if copy.mailHostGuidancePendingEmail,
+           !hasStoredGuidanceHost {
+            copy.mailHostGuidancePendingEmail = false
         }
         return copy
     }

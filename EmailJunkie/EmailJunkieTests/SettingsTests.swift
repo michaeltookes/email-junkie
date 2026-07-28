@@ -31,6 +31,81 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.pollIntervalSeconds, 120)
     }
 
+    func testValidatedPreservesEmptyHostWhenEmailIsEntered() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@company.example",
+            mailHost: ""
+        ).validated()
+        XCTAssertEqual(settings.mailHost, "")
+    }
+
+    func testValidatedRestoresDefaultHostWhenNoEmailIsEntered() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHost: ""
+        ).validated()
+        XCTAssertEqual(settings.mailHost, "imap.gmail.com")
+    }
+
+    func testValidatedNormalizesHostGuidanceEmail() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHostGuidanceEmail: " Me@Company.Example "
+        ).validated()
+        XCTAssertEqual(settings.mailHostGuidanceEmail, "me@company.example")
+    }
+
+    func testHostGuidanceEmailRoundTripsThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@company.example",
+            mailHost: "imap.gmail.com",
+            mailHostGuidanceEmail: "me@company.example"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.mailHostGuidanceEmail, "me@company.example")
+    }
+
+    func testPendingHostGuidanceRoundTripsThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHost: "imap.gmail.com",
+            mailHostGuidancePendingEmail: true
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertTrue(decoded.mailHostGuidancePendingEmail)
+    }
+
+    func testValidatedClearsPendingHostGuidanceWithoutHost() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHost: "",
+            mailHostGuidancePendingEmail: true
+        ).validated()
+        XCTAssertFalse(settings.mailHostGuidancePendingEmail)
+    }
+
+    func testValidatedKeepsPendingHostGuidanceWithGuidanceEmail() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailHost: "imap.gmail.com",
+            mailHostGuidanceEmail: "me@company.example",
+            mailHostGuidancePendingEmail: true
+        ).validated()
+        XCTAssertEqual(settings.mailHostGuidanceEmail, "me@company.example")
+        XCTAssertTrue(settings.mailHostGuidancePendingEmail)
+    }
+
     func testSettingsRoundTripsThroughCodable() throws {
         let original = Settings(
             schemaVersion: 1,
@@ -53,12 +128,20 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsSix() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 6)
+    func testCurrentSchemaVersionIsEight() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 8)
     }
 
     func testOnboardingCompletionSchemaVersionIsSix() {
         XCTAssertEqual(Settings.onboardingCompletionSchemaVersion, 6)
+    }
+
+    func testMailHostGuidanceSchemaVersionIsSeven() {
+        XCTAssertEqual(Settings.mailHostGuidanceSchemaVersion, 7)
+    }
+
+    func testPendingMailHostGuidanceSchemaVersionIsEight() {
+        XCTAssertEqual(Settings.pendingMailHostGuidanceSchemaVersion, 8)
     }
 
     func testLegacyFileWithoutOnboardingFlagDecodesToNotCompleted() throws {

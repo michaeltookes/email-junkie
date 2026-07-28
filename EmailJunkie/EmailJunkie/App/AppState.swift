@@ -44,6 +44,8 @@ final class AppState: ObservableObject {
     @Published var mailAppPassword: String
     @Published var mailHost: String
     @Published var mailPort: Int
+    var mailHostExplicitlyEditedEmail: String?
+    var mailHostExplicitlyEditedBeforeEmail = false
 
     // MARK: - Recent Messages (preview)
 
@@ -241,6 +243,8 @@ final class AppState: ObservableObject {
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
+        self.mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
+        self.mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
         self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
@@ -254,6 +258,7 @@ final class AppState: ObservableObject {
 
         cleanupLegacyOAuthCredentials()
         self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
+        restoreMailHostGuidanceFromSettings(settings)
         refreshLLMConnectionStatus()
 
         setupAutoSave()
@@ -283,6 +288,7 @@ final class AppState: ObservableObject {
     /// Tests the mailbox connection and, on success, saves the credentials.
     func testConnection() async {
         connectionError = nil
+        commitMailEmailEditFromUser()
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
@@ -350,6 +356,7 @@ final class AppState: ObservableObject {
             return
         }
         mailAppPassword = ""
+        markMailHostVerifiedForGuidance()
         isAccountConnected = false
         stopWatching()
         resetMessagePreviewForAccountChange()
@@ -398,6 +405,7 @@ final class AppState: ObservableObject {
         mailHost = credentials.host
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
+        markMailHostVerifiedForGuidance()
 
         try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
@@ -424,8 +432,11 @@ final class AppState: ObservableObject {
         mailEmail = settings.mailEmail
         mailHost = settings.mailHost
         mailPort = settings.mailPort
+        mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
+        mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
         mailAppPassword = appPassword ?? ""
         isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
+        restoreMailHostGuidanceFromSettings(settings)
     }
 
     /// Builds a `Settings` snapshot from the current published values.
@@ -442,6 +453,8 @@ final class AppState: ObservableObject {
             pollIntervalSeconds: pollIntervalSeconds,
             mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
             mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
+            mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
+            mailHostGuidancePendingEmail: mailHostExplicitlyEditedBeforeEmail,
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),

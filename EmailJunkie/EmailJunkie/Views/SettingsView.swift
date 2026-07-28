@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var openedBody: MailBodyPreview?
     @State private var generatedDraft: Draft?
+    @FocusState private var isMailEmailFocused: Bool
 
     var body: some View {
         Form {
@@ -48,9 +49,15 @@ struct SettingsView: View {
                         appState.disconnectMail()
                     }
                 } else {
-                    TextField("Email address", text: $appState.mailEmail)
+                    TextField("Email address", text: mailEmailBinding)
                         .textContentType(.username)
-                        .onChange(of: appState.mailEmail) { appState.applySuggestedHostIfDefault() }
+                        .focused($isMailEmailFocused)
+                        .onSubmit { appState.commitMailEmailEditFromUser() }
+                        .onChange(of: isMailEmailFocused) { _, isFocused in
+                            if !isFocused {
+                                appState.commitMailEmailEditFromUser()
+                            }
+                        }
                     SecureField("App password", text: $appState.mailAppPassword)
 
                     Button {
@@ -64,17 +71,13 @@ struct SettingsView: View {
                     }
                     .disabled(appState.isConnecting)
 
-                    DisclosureGroup("How do I get an app password?") {
-                        Text("In your Google Account, turn on 2-Step Verification, then go "
-                             + "to Security \u{2192} App passwords and generate one. Paste the "
-                             + "16-character password here \u{2014} no Google Cloud setup "
-                             + "needed.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    AppPasswordGuidanceView(
+                        email: appState.mailEmail,
+                        explicitHostFallback: appState.credentialGuidanceHostFallback
+                    )
 
                     DisclosureGroup("Advanced (IMAP server)") {
-                        TextField("IMAP host", text: $appState.mailHost)
+                        TextField("IMAP host", text: mailHostBinding)
                         TextField("Port", value: $appState.mailPort, format: .number)
                     }
                 }
@@ -292,6 +295,20 @@ struct SettingsView: View {
                 appState.llmModel = $0
                 appState.refreshLLMConnectionStatus()
             }
+        )
+    }
+
+    private var mailHostBinding: Binding<String> {
+        Binding(
+            get: { appState.mailHost },
+            set: { appState.updateMailHostFromUser($0) }
+        )
+    }
+
+    private var mailEmailBinding: Binding<String> {
+        Binding(
+            get: { appState.mailEmail },
+            set: { appState.updateMailEmailFromUser($0) }
         )
     }
 }

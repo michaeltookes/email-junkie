@@ -98,7 +98,11 @@ extension AppState {
             uid: message.id,
             expectedUIDValidity: message.uidValidity
         )
-        guard isCurrentDraftContext(credentials: credentials, llmConfiguration: llmConfiguration, requireWatching: requireWatching) else { return false }
+        guard isCurrentDraftContext(
+            credentials: credentials,
+            llmConfiguration: llmConfiguration,
+            requireWatching: requireWatching
+        ) else { return false }
         let incomingText = MailBodyText.plainText(from: data)
         let context = ReplyContext(
             senderName: message.from?.name,
@@ -107,7 +111,11 @@ extension AppState {
             body: incomingText
         )
         let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
-        guard isCurrentDraftContext(credentials: credentials, llmConfiguration: llmConfiguration, requireWatching: requireWatching) else { return false }
+        guard isCurrentDraftContext(
+            credentials: credentials,
+            llmConfiguration: llmConfiguration,
+            requireWatching: requireWatching
+        ) else { return false }
         let draft = Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
@@ -470,41 +478,6 @@ extension AppState {
         text.count > maxChars ? String(text.prefix(maxChars)) + "…" : text
     }
 
-    static func draftMessage(for error: Error) -> String {
-        switch error {
-        case DraftDispatchError.missingCredentials:
-            return "Connect an email account first."
-        case DraftDispatchError.accountMismatch:
-            return "This draft was generated for a different email account."
-        case DraftError.emptyDraft:
-            return "The model returned an empty reply. Try again."
-        case DraftError.unsupportedSourceMailbox:
-            return "Draft replies are only available for incoming mail."
-        case DraftError.needsUserInput:
-            return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
-        case DraftDispatchError.noRecipient:
-            return "This draft has no recipient address to send to."
-        case DraftDispatchError.staleThread(let reason):
-            return "\(reason.headline). \(reason.detail)"
-        case is LLMError:
-            return llmMessage(for: error)
-        default:
-            return message(for: error)
-        }
-    }
-}
-
-/// Errors dispatching an approved draft to send/save.
-enum DraftDispatchError: Error, Equatable {
-    /// No connected mail account is available for dispatch.
-    case missingCredentials
-    /// The draft was generated under a different mail account.
-    case accountMismatch
-    /// The draft has no resolvable recipient address.
-    case noRecipient
-    /// The source thread changed since the draft was generated (item 12); carries
-    /// why so the UI can warn precisely before a "send anyway" override.
-    case staleThread(StaleThreadReason)
 }
 
 private struct DraftLLMConfiguration: Equatable {

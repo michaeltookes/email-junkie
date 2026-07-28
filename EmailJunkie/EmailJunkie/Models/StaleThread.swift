@@ -28,7 +28,8 @@ enum StaleThreadReason: String, Equatable, Codable, CaseIterable {
     var detail: String {
         switch self {
         case .sourceMissing:
-            return "The message this reply answers was archived, deleted, or moved. Sending now could reply into a conversation that has already been handled."
+            return "The message this reply answers was archived, deleted, or moved. "
+                + "Sending now could reply into a conversation that has already been handled."
         case .newerReplyInThread:
             return "Someone added to this thread after the draft was written, so the reply may not account for what they said."
         case .alreadyReplied:

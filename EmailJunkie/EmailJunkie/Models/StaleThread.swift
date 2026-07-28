@@ -135,13 +135,18 @@ enum StaleThreadCheck {
 
     private static func relatedThreadMessages(draft: Draft, threadMessages: [MailMessage]) -> [MailMessage] {
         let subjectMatches = threadMessages.filter { hasSameThreadSubject($0, draft: draft) }
-        let linkedUIDs = linkedThreadUIDs(draft: draft, subjectMessages: subjectMatches)
+        let linkage = linkedThreadLinkage(draft: draft, subjectMessages: subjectMatches)
         return subjectMatches.filter {
-            linkedUIDs.contains($0.id) || sharesParticipant($0, draft: draft, includeRecipients: false)
+            linkage.relatedUIDs.contains($0.id)
+                || (canUseParticipantFallback($0, relatedThreadMessageIDs: linkage.relatedMessageIDs)
+                    && sharesParticipant($0, draft: draft, includeRecipients: false))
         }
     }
 
-    private static func linkedThreadUIDs(draft: Draft, subjectMessages: [MailMessage]) -> Set<UInt32> {
+    private static func linkedThreadLinkage(
+        draft: Draft,
+        subjectMessages: [MailMessage]
+    ) -> (relatedUIDs: Set<UInt32>, relatedMessageIDs: Set<String>) {
         var relatedUIDs = Set<UInt32>()
         var relatedMessageIDs = Set<String>()
         if let sourceMessageID = normalizedMessageID(draft.sourceMessageID) {
@@ -160,7 +165,7 @@ enum StaleThreadCheck {
                 }
             }
         }
-        return relatedUIDs
+        return (relatedUIDs, relatedMessageIDs)
     }
 
     private static func isRelatedSentReply(
@@ -177,6 +182,7 @@ enum StaleThreadCheck {
 
         let sourceAddresses = sourceParticipantAddresses(for: draft)
         guard !sourceAddresses.isEmpty else { return false }
+        guard canUseParticipantFallback(message, relatedThreadMessageIDs: relatedThreadMessageIDs) else { return false }
         let sentRecipients = Set(message.to.compactMap { normalizedEmail($0.email) })
         return !sentRecipients.isDisjoint(with: sourceAddresses)
     }
@@ -228,6 +234,13 @@ enum StaleThreadCheck {
 
     private static func messageThreadIDs(_ message: MailMessage) -> [String] {
         [message.messageID, message.inReplyTo].compactMap(normalizedMessageID)
+    }
+
+    private static func canUseParticipantFallback(
+        _ message: MailMessage,
+        relatedThreadMessageIDs: Set<String>
+    ) -> Bool {
+        relatedThreadMessageIDs.isEmpty || messageThreadIDs(message).isEmpty
     }
 
     private static func sharesParticipant(

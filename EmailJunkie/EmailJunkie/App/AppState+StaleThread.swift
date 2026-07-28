@@ -1,6 +1,11 @@
 import EmailJunkieMail
 import Foundation
 
+private enum ThreadInspectionPageDecision {
+    case continuePaging
+    case stop(hasMoreRelevantMessages: Bool)
+}
+
 /// Stale-thread / conflict detection before send (item 12). Just before a draft
 /// is sent or saved, the source thread is re-fetched and compared to when the
 /// draft was generated; if it changed, dispatch is blocked and the user is warned
@@ -11,6 +16,10 @@ extension AppState {
     /// almost never exceeds this; if it does, the search reports `hasMore` and the
     /// evaluator avoids over-claiming "source missing".
     var threadInspectionLimit: Int { 50 }
+
+    /// Blank/prefix-only subjects cannot use IMAP `SUBJECT` search, so the
+    /// fallback scans recent mailbox pages. Keep that broad scan bounded.
+    var blankSubjectInspectionPageLimit: Int { 4 }
 
     /// Re-checks a draft's target thread immediately before dispatch. Returns
     /// `.fresh` when the send is safe, or `.stale(reason)` when the source was
@@ -73,22 +82,29 @@ extension AppState {
         subject: String,
         draft: Draft
     ) async throws -> MailSearchResult {
+        let sourcePageDecision: ([MailMessage]) -> ThreadInspectionPageDecision = { page in
+            if page.contains(where: { Self.isSourceMessage($0, for: draft) }) {
+                return .stop(hasMoreRelevantMessages: false)
+            }
+            if page.contains(where: { Self.isAtOrBeforeSourceUID($0, for: draft) }) {
+                return .stop(hasMoreRelevantMessages: false)
+            }
+            return .continuePaging
+        }
+
         if subject.isEmpty {
             return try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: mailbox,
-                shouldStopAfterPage: { page in
-                    page.contains { Self.isSourceMessage($0, for: draft) }
-                }
+                maxPages: blankSubjectInspectionPageLimit,
+                pageDecision: sourcePageDecision
             )
         }
         return try await pagedSubjectInspectionResult(
             credentials,
             mailbox: mailbox,
             criteria: MailSearchCriteria(subject: subject),
-            shouldStopAfterPage: { page in
-                page.contains { Self.isSourceMessage($0, for: draft) }
-            }
+            pageDecision: sourcePageDecision
         )
     }
 
@@ -102,8 +118,11 @@ extension AppState {
             return try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: .sent,
-                shouldStopAfterPage: { page in
-                    !Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt)
+                pageDecision: { page in
+                    if Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt) {
+                        return .continuePaging
+                    }
+                    return .stop(hasMoreRelevantMessages: false)
                 }
             )
         }
@@ -111,8 +130,11 @@ extension AppState {
             credentials,
             mailbox: .sent,
             criteria: MailSearchCriteria(subject: subject, since: since),
-            shouldStopAfterPage: { page in
-                !Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt)
+            pageDecision: { page in
+                if Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt) {
+                    return .continuePaging
+                }
+                return .stop(hasMoreRelevantMessages: false)
             }
         )
     }
@@ -121,7 +143,8 @@ extension AppState {
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
         criteria baseCriteria: MailSearchCriteria,
-        shouldStopAfterPage: ([MailMessage]) -> Bool
+        maxPages: Int? = nil,
+        pageDecision: ([MailMessage]) -> ThreadInspectionPageDecision
     ) async throws -> MailSearchResult {
         let pageSize = max(1, threadInspectionLimit)
         var criteria = baseCriteria
@@ -130,6 +153,7 @@ extension AppState {
         var snapshotMaximumUID: UInt32?
         var messages: [MailMessage] = []
         var hasMore = false
+        var pagesFetched = 0
 
         while true {
             let page = try await mailProvider.searchMessages(
@@ -145,8 +169,22 @@ extension AppState {
             }
             messages.append(contentsOf: page.messages)
             hasMore = page.hasMore
+            pagesFetched += 1
 
-            if shouldStopAfterPage(page.messages) || !page.hasMore || page.messages.isEmpty {
+            switch pageDecision(page.messages) {
+            case .stop(let hasMoreRelevantMessages):
+                hasMore = hasMoreRelevantMessages
+                return MailSearchResult(
+                    messages: messages,
+                    totalMatches: snapshotTotalMatches ?? page.totalMatches,
+                    offset: 0,
+                    hasMore: hasMore
+                )
+            case .continuePaging:
+                break
+            }
+
+            if !page.hasMore || page.messages.isEmpty || Self.hasReachedPageLimit(maxPages, pagesFetched: pagesFetched) {
                 return MailSearchResult(
                     messages: messages,
                     totalMatches: snapshotTotalMatches ?? page.totalMatches,
@@ -164,13 +202,15 @@ extension AppState {
     private func pagedBlankSubjectInspectionResult(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        shouldStopAfterPage: ([MailMessage]) -> Bool
+        maxPages: Int? = nil,
+        pageDecision: ([MailMessage]) -> ThreadInspectionPageDecision
     ) async throws -> MailSearchResult {
         let pageSize = max(1, threadInspectionLimit)
         var offset = 0
         var snapshotMessageCount: Int?
         var messages: [MailMessage] = []
         var hasMore = false
+        var pagesFetched = 0
 
         while true {
             let page = try await mailProvider.fetchMessagePage(
@@ -185,8 +225,22 @@ extension AppState {
             }
             messages.append(contentsOf: page.messages)
             hasMore = page.hasMore
+            pagesFetched += 1
 
-            if shouldStopAfterPage(page.messages) || !page.hasMore || page.messages.isEmpty {
+            switch pageDecision(page.messages) {
+            case .stop(let hasMoreRelevantMessages):
+                hasMore = hasMoreRelevantMessages
+                return MailSearchResult(
+                    messages: messages,
+                    totalMatches: snapshotMessageCount ?? page.totalMatches,
+                    offset: 0,
+                    hasMore: hasMore
+                )
+            case .continuePaging:
+                break
+            }
+
+            if !page.hasMore || page.messages.isEmpty || Self.hasReachedPageLimit(maxPages, pagesFetched: pagesFetched) {
                 return MailSearchResult(
                     messages: messages,
                     totalMatches: snapshotMessageCount ?? page.totalMatches,
@@ -205,6 +259,24 @@ extension AppState {
             return true
         }
         return draftUIDValidity == messageUIDValidity
+    }
+
+    private static func isAtOrBeforeSourceUID(_ message: MailMessage, for draft: Draft) -> Bool {
+        guard isUIDComparable(message, for: draft) else { return false }
+        return message.id <= draft.id
+    }
+
+    private static func isUIDComparable(_ message: MailMessage, for draft: Draft) -> Bool {
+        guard let draftUIDValidity = draft.sourceUIDValidity,
+              let messageUIDValidity = message.uidValidity else {
+            return true
+        }
+        return draftUIDValidity == messageUIDValidity
+    }
+
+    private static func hasReachedPageLimit(_ maxPages: Int?, pagesFetched: Int) -> Bool {
+        guard let maxPages else { return false }
+        return pagesFetched >= max(1, maxPages)
     }
 
     private static func pageMayContainPostGenerationMessages(

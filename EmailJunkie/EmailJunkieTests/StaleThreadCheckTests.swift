@@ -167,6 +167,25 @@ final class StaleThreadCheckTests: XCTestCase {
         XCTAssertEqual(verdict, .fresh)
     }
 
+    func testSameSenderSameSubjectWithUnlinkedMessageIDsIsIgnored() {
+        let verdict = StaleThreadCheck.verdict(
+            draft: draft(id: 5),
+            threadMessages: [
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 20, subject: "Re: Lunch?", messageID: "<separate@x.com>")
+            ],
+            threadTruncated: false,
+            sentReplies: [message(
+                id: 30,
+                subject: "Re: Lunch?",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                messageID: "<sent-separate@x.com>"
+            )]
+        )
+        XCTAssertEqual(verdict, .fresh)
+    }
+
     func testDirectThreadLinkMatchesDifferentParticipant() {
         let verdict = StaleThreadCheck.verdict(
             draft: draft(id: 5),

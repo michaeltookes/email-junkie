@@ -1,0 +1,260 @@
+import EmailJunkieMail
+import Foundation
+import XCTest
+@testable import EmailJunkie
+
+/// A mail provider whose `searchMessages` returns configurable results per
+/// mailbox, so the stale-thread re-check can be driven without a real server.
+final class SearchStubMailProvider: MailProvider, @unchecked Sendable {
+    var threadResult: MailSearchResult
+    var sentResult: MailSearchResult
+    var searchError: MailError?
+    var threadSearchError: MailError?
+    var sentSearchError: MailError?
+    var pageResults: [Mailbox: [Int: MailSearchResult]] = [:]
+    var bodyResult: Result<Data, MailError> = .success(Data("Please approve the budget.".utf8))
+    private(set) var sendCount = 0
+    private(set) var appendCount = 0
+    private(set) var lastBodyUID: UInt32?
+    private(set) var lastExpectedUIDValidity: UInt32?
+    private(set) var searchRequests: [(mailbox: Mailbox, criteria: MailSearchCriteria)] = []
+    private(set) var pageRequests: [(mailbox: Mailbox, offset: Int, limit: Int, snapshotMessageCount: Int?)] = []
+
+    init(
+        threadResult: MailSearchResult = .empty(offset: 0),
+        sentResult: MailSearchResult = .empty(offset: 0)
+    ) {
+        self.threadResult = threadResult
+        self.sentResult = sentResult
+    }
+
+    func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
+
+    func fetchRecentMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        limit: Int
+    ) async throws -> [MailMessage] { [] }
+
+    func fetchBodyText(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> Data {
+        lastBodyUID = uid
+        lastExpectedUIDValidity = expectedUIDValidity
+        return try bodyResult.get()
+    }
+
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult {
+        if let searchError { throw searchError }
+        searchRequests.append((mailbox, criteria))
+        if mailbox == .sent {
+            if let sentSearchError { throw sentSearchError }
+            return sentResult
+        }
+        if let threadSearchError { throw threadSearchError }
+        return threadResult
+    }
+
+    func fetchMessagePage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        offset: Int,
+        limit: Int,
+        snapshotMessageCount: Int?
+    ) async throws -> MailSearchResult {
+        if let searchError { throw searchError }
+        pageRequests.append((mailbox, offset, limit, snapshotMessageCount))
+        searchRequests.append((mailbox, MailSearchCriteria()))
+        if mailbox == .sent {
+            if let sentSearchError { throw sentSearchError }
+            return pageResults[mailbox]?[offset] ?? sentResult
+        }
+        if let threadSearchError { throw threadSearchError }
+        return pageResults[mailbox]?[offset] ?? threadResult
+    }
+
+    func appendMessage(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        rfc822: Data,
+        flags: [MailFlag]
+    ) async throws { appendCount += 1 }
+
+    func sendMessage(
+        _ credentials: MailAccountCredentials,
+        rfc822: Data,
+        envelope: SMTPEnvelope
+    ) async throws { sendCount += 1 }
+}
+
+@MainActor
+final class AppStateStaleThreadReviewFeedbackTests: XCTestCase {
+    private let replacementApprovedMessage = "That replacement draft was already approved. "
+        + "The original draft is still queued for review."
+
+    private func draft(id: UInt32 = 5, subject: String = "Lunch?") -> Draft {
+        Draft(
+            id: id,
+            sourceUIDValidity: 1,
+            sourceAccountEmail: "me@gmail.com",
+            sourceMailbox: Mailbox.inbox.imapName,
+            sourceSubject: subject,
+            sourceFrom: MailAddress(name: "Alice", email: "alice@x.com"),
+            sourceReplyTo: nil,
+            sourceMessageID: "<orig@x.com>",
+            replySubject: "Re: \(subject)",
+            body: "Sounds good!",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
+    private func message(
+        id: UInt32,
+        subject: String,
+        from: MailAddress? = MailAddress(email: "alice@x.com"),
+        to: [MailAddress] = [],
+        date: String = "",
+        inReplyTo: String? = nil,
+        messageID: String? = nil
+    ) -> MailMessage {
+        MailMessage(
+            id: id,
+            uidValidity: 1,
+            from: from,
+            to: to,
+            subject: subject,
+            date: date,
+            inReplyTo: inReplyTo,
+            messageID: messageID
+        )
+    }
+
+    private func result(_ messages: [MailMessage], hasMore: Bool = false) -> MailSearchResult {
+        MailSearchResult(messages: messages, totalMatches: messages.count, offset: 0, hasMore: hasMore)
+    }
+
+    private func makeAppState(
+        provider: SearchStubMailProvider,
+        llmText: String = "Fresh reply."
+    ) -> AppState {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-live"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: SendBehavior.autoSend.rawValue
+        ))
+        let llm = FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: llmText)))
+        let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+        appState.mailAppPassword = "app-pw"
+        return appState
+    }
+
+    func testVerdictPaginatesBlankSubjectThreadUntilSourcePage() async {
+        let firstPage = (0..<50).map {
+            message(
+                id: UInt32(200 - $0),
+                subject: "Other \($0)",
+                from: MailAddress(email: "nobody\($0)@x.com")
+            )
+        }
+        let provider = SearchStubMailProvider()
+        provider.pageResults[.inbox] = [
+            0: MailSearchResult(messages: firstPage, totalMatches: 52, offset: 0, hasMore: true),
+            50: MailSearchResult(messages: [
+                message(id: 9, subject: "Re:", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>"),
+                message(id: 5, subject: "", messageID: "<orig@x.com>")
+            ], totalMatches: 52, offset: 50, hasMore: false)
+        ]
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(subject: "Re:"),
+            credentials: appState.mailCredentials
+        )
+
+        XCTAssertEqual(verdict, .stale(.newerReplyInThread))
+        let inboxRequests = provider.pageRequests.filter { $0.mailbox == .inbox }
+        XCTAssertEqual(inboxRequests.map { $0.offset }, [0, 50])
+        XCTAssertNil(inboxRequests.first?.snapshotMessageCount)
+        XCTAssertEqual(inboxRequests.last?.snapshotMessageCount, 52)
+    }
+
+    func testVerdictPaginatesBlankSubjectSentUntilReplyFound() async {
+        let firstSentPage = (0..<50).map {
+            message(
+                id: UInt32(300 - $0),
+                subject: "Other \($0)",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "nobody\($0)@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )
+        }
+        let provider = SearchStubMailProvider()
+        provider.pageResults[.inbox] = [
+            0: MailSearchResult(
+                messages: [message(id: 5, subject: "", messageID: "<orig@x.com>")],
+                totalMatches: 1,
+                offset: 0,
+                hasMore: false
+            )
+        ]
+        provider.pageResults[.sent] = [
+            0: MailSearchResult(messages: firstSentPage, totalMatches: 51, offset: 0, hasMore: true),
+            50: MailSearchResult(messages: [message(
+                id: 2,
+                subject: "Re:",
+                from: MailAddress(email: "me@gmail.com"),
+                to: [MailAddress(email: "alice@x.com")],
+                date: "Tue, 14 Nov 2023 23:00:00 +0000"
+            )], totalMatches: 51, offset: 50, hasMore: false)
+        ]
+        let appState = makeAppState(provider: provider)
+
+        let verdict = await appState.threadStalenessVerdict(
+            for: draft(subject: "Re:"),
+            credentials: appState.mailCredentials
+        )
+
+        XCTAssertEqual(verdict, .stale(.alreadyReplied))
+        let sentRequests = provider.pageRequests.filter { $0.mailbox == .sent }
+        XCTAssertEqual(sentRequests.map { $0.offset }, [0, 50])
+        XCTAssertNil(sentRequests.first?.snapshotMessageCount)
+        XCTAssertEqual(sentRequests.last?.snapshotMessageCount, 51)
+    }
+
+    func testRegeneratePendingDraftDoesNotReinsertApprovedReplacement() async throws {
+        let staleDraft = draft()
+        var approvedReplacement = draft(id: 9)
+        approvedReplacement.sourceMessageID = "<new@x.com>"
+        let provider = SearchStubMailProvider(
+            threadResult: result([
+                message(id: 5, subject: "Lunch?", messageID: "<orig@x.com>"),
+                message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@x.com>", messageID: "<new@x.com>")
+            ])
+        )
+        let appState = makeAppState(provider: provider, llmText: "Regenerated reply.")
+        appState.pendingDrafts = [staleDraft]
+        let persistence = try XCTUnwrap(appState.persistence as? AppStateMemoryPersistence)
+        try persistence.saveApprovedDraftIdentitiesSync([approvedReplacement.identity])
+
+        await appState.approveDraft(staleDraft)
+        await appState.regeneratePendingDraft(staleDraft)
+
+        XCTAssertEqual(appState.pendingDrafts, [staleDraft])
+        XCTAssertEqual(appState.pendingStaleWarnings[staleDraft.identity], .newerReplyInThread)
+        XCTAssertEqual(appState.approvalError, replacementApprovedMessage)
+    }
+}

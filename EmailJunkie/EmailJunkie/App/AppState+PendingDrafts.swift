@@ -4,6 +4,14 @@ import os
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "PendingDrafts")
 
+private enum RegenerationReplacementError: LocalizedError {
+    case alreadyApproved
+
+    var errorDescription: String? {
+        "That replacement draft was already approved. The original draft is still queued for review."
+    }
+}
+
 /// Approval-queue actions on `AppState`: approve (send/save per the send-behavior
 /// setting) or deny (discard) a watcher-produced draft, plus routing of the
 /// native-notification actions. Kept separate so `AppState` stays within limits.
@@ -212,7 +220,8 @@ extension AppState {
         let thread = try await sourceThreadInspectionResult(
             credentials,
             mailbox: mailbox,
-            subject: subject
+            subject: subject,
+            draft: draft
         )
         guard let source = StaleThreadCheck.regenerationSource(
             draft: draft,
@@ -230,6 +239,9 @@ extension AppState {
     ) throws {
         let previousDrafts = pendingDrafts
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
+        if replacement.identity != draft.identity, isReplacementDraftUnavailable(replacement) {
+            throw RegenerationReplacementError.alreadyApproved
+        }
         pendingDrafts.removeAll {
             $0.identity == draft.identity || $0.identity == replacement.identity
         }
@@ -255,6 +267,11 @@ extension AppState {
             notifier.removeNotification(identity: replacement.identity)
         }
         notifier.notify(for: replacement, sendBehavior: sendBehavior)
+    }
+
+    private func isReplacementDraftUnavailable(_ replacement: Draft) -> Bool {
+        approvingDraftIDs.contains(replacement.identity)
+            || persistence.loadApprovedDraftIdentities().contains(replacement.identity)
     }
 
     func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {

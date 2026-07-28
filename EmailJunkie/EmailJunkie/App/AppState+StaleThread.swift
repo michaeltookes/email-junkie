@@ -33,7 +33,8 @@ extension AppState {
             thread = try await sourceThreadInspectionResult(
                 credentials,
                 mailbox: mailbox,
-                subject: subject
+                subject: subject,
+                draft: draft
             )
         } catch {
             return .fresh
@@ -44,7 +45,8 @@ extension AppState {
             let sent = try await sentThreadInspectionResult(
                 credentials,
                 subject: subject,
-                since: sentSearchStart
+                since: sentSearchStart,
+                draft: draft
             )
             let postGenerationSent = sent.messages.filter {
                 Self.isMessage($0, onOrAfterGenerationDate: draft.generatedAt)
@@ -68,15 +70,16 @@ extension AppState {
     func sourceThreadInspectionResult(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
-        subject: String
+        subject: String,
+        draft: Draft
     ) async throws -> MailSearchResult {
         if subject.isEmpty {
-            return try await mailProvider.fetchMessagePage(
+            return try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: mailbox,
-                offset: 0,
-                limit: threadInspectionLimit,
-                snapshotMessageCount: nil
+                shouldStopAfterPage: { page in
+                    page.contains { Self.isSourceMessage($0, for: draft) }
+                }
             )
         }
         return try await mailProvider.searchMessages(
@@ -91,15 +94,16 @@ extension AppState {
     private func sentThreadInspectionResult(
         _ credentials: MailAccountCredentials,
         subject: String,
-        since: Date
+        since: Date,
+        draft: Draft
     ) async throws -> MailSearchResult {
         if subject.isEmpty {
-            return try await mailProvider.fetchMessagePage(
+            return try await pagedBlankSubjectInspectionResult(
                 credentials,
                 mailbox: .sent,
-                offset: 0,
-                limit: threadInspectionLimit,
-                snapshotMessageCount: nil
+                shouldStopAfterPage: { page in
+                    !Self.pageMayContainPostGenerationMessages(page, generationDate: draft.generatedAt)
+                }
             )
         }
         return try await mailProvider.searchMessages(
@@ -109,6 +113,62 @@ extension AppState {
             offset: 0,
             limit: threadInspectionLimit
         )
+    }
+
+    private func pagedBlankSubjectInspectionResult(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        shouldStopAfterPage: ([MailMessage]) -> Bool
+    ) async throws -> MailSearchResult {
+        let pageSize = max(1, threadInspectionLimit)
+        var offset = 0
+        var snapshotMessageCount: Int?
+        var messages: [MailMessage] = []
+        var hasMore = false
+
+        while true {
+            let page = try await mailProvider.fetchMessagePage(
+                credentials,
+                mailbox: mailbox,
+                offset: offset,
+                limit: pageSize,
+                snapshotMessageCount: snapshotMessageCount
+            )
+            if snapshotMessageCount == nil {
+                snapshotMessageCount = page.totalMatches
+            }
+            messages.append(contentsOf: page.messages)
+            hasMore = page.hasMore
+
+            if shouldStopAfterPage(page.messages) || !page.hasMore || page.messages.isEmpty {
+                return MailSearchResult(
+                    messages: messages,
+                    totalMatches: snapshotMessageCount ?? page.totalMatches,
+                    offset: 0,
+                    hasMore: hasMore
+                )
+            }
+            offset += pageSize
+        }
+    }
+
+    private static func isSourceMessage(_ message: MailMessage, for draft: Draft) -> Bool {
+        guard message.id == draft.id else { return false }
+        guard let draftUIDValidity = draft.sourceUIDValidity,
+              let messageUIDValidity = message.uidValidity else {
+            return true
+        }
+        return draftUIDValidity == messageUIDValidity
+    }
+
+    private static func pageMayContainPostGenerationMessages(
+        _ messages: [MailMessage],
+        generationDate: Date
+    ) -> Bool {
+        messages.contains { message in
+            guard let messageDate = parsedMessageDate(message.date) else { return true }
+            return messageDate >= generationDate
+        }
     }
 
     /// Reverse-maps a draft's persisted source-mailbox tag to a `Mailbox`.

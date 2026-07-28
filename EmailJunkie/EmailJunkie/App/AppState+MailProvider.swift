@@ -41,8 +41,10 @@ extension AppState {
 
             if let trackedDomain {
                 if trackedDomain == currentDomain {
-                    mailHostExplicitlyEditedBeforeEmail = false
-                    mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                    setMailHostGuidanceTracking(
+                        email: Self.normalizedEmailForHostTracking(email),
+                        pending: false
+                    )
                     return
                 }
 
@@ -56,12 +58,15 @@ extension AppState {
             }
         } else if hasHostAssociatedWithTrackedEmail {
             guard let currentDomain = Self.normalizedEmailDomainForHostTracking(email) else {
-                mailHostExplicitlyEditedBeforeEmail = true
+                setMailHostGuidanceTracking(email: mailHostExplicitlyEditedEmail, pending: true)
                 return
             }
 
             if trackedDomain == currentDomain {
-                mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(email)
+                setMailHostGuidanceTracking(
+                    email: Self.normalizedEmailForHostTracking(email),
+                    pending: false
+                )
                 return
             }
 
@@ -87,8 +92,10 @@ extension AppState {
         let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedEmail = Self.normalizedEmailForHostTracking(mailEmail)
         let hasCompletedEmailDomain = Self.normalizedEmailDomainForHostTracking(mailEmail) != nil
-        mailHostExplicitlyEditedEmail = normalizedHost.isEmpty || !hasCompletedEmailDomain ? nil : normalizedEmail
-        mailHostExplicitlyEditedBeforeEmail = !normalizedHost.isEmpty && !hasCompletedEmailDomain
+        setMailHostGuidanceTracking(
+            email: normalizedHost.isEmpty || !hasCompletedEmailDomain ? nil : normalizedEmail,
+            pending: !normalizedHost.isEmpty && !hasCompletedEmailDomain
+        )
     }
 
     private func isMailHostReplaceableBySuggestion(
@@ -102,20 +109,30 @@ extension AppState {
     }
 
     private func markMailHostManagedByApp() {
-        mailHostExplicitlyEditedEmail = nil
-        mailHostExplicitlyEditedBeforeEmail = false
+        setMailHostGuidanceTracking(email: nil, pending: false)
+    }
+
+    private func setMailHostGuidanceTracking(email: String?, pending: Bool) {
+        guard mailHostExplicitlyEditedEmail != email
+            || mailHostExplicitlyEditedBeforeEmail != pending else {
+            return
+        }
+
+        objectWillChange.send()
+        mailHostExplicitlyEditedEmail = email
+        mailHostExplicitlyEditedBeforeEmail = pending
     }
 
     func restoreMailHostGuidanceFromSettings(_ settings: Settings) {
         if !mailHostWasExplicitlyEditedForCurrentAddress,
            !mailHostExplicitlyEditedBeforeEmail {
-            mailHostExplicitlyEditedEmail = nil
+            setMailHostGuidanceTracking(email: nil, pending: false)
         }
 
         restorePendingMailHostGuidanceIfPossible()
 
         if shouldMigrateLegacyMailHostGuidance(from: settings) {
-            mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+            setMailHostGuidanceTracking(email: Self.normalizedEmailForHostTracking(mailEmail), pending: false)
         }
 
         if isAccountConnected {
@@ -130,20 +147,17 @@ extension AppState {
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard let guidanceEmail = Self.normalizedEmailForHostTracking(mailEmail),
               !host.isEmpty else {
-            mailHostExplicitlyEditedEmail = nil
-            mailHostExplicitlyEditedBeforeEmail = false
+            setMailHostGuidanceTracking(email: nil, pending: false)
             return
         }
 
         if let suggestedHost = Self.suggestedIMAPHost(forEmail: mailEmail),
            host == suggestedHost {
-            mailHostExplicitlyEditedEmail = nil
-            mailHostExplicitlyEditedBeforeEmail = false
+            setMailHostGuidanceTracking(email: nil, pending: false)
             return
         }
 
-        mailHostExplicitlyEditedEmail = guidanceEmail
-        mailHostExplicitlyEditedBeforeEmail = false
+        setMailHostGuidanceTracking(email: guidanceEmail, pending: false)
     }
 
     private func restorePendingMailHostGuidanceIfPossible(clearMismatchedDomain: Bool = false) {
@@ -151,8 +165,7 @@ extension AppState {
 
         let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else {
-            mailHostExplicitlyEditedBeforeEmail = false
-            mailHostExplicitlyEditedEmail = nil
+            setMailHostGuidanceTracking(email: nil, pending: false)
             return
         }
 
@@ -166,8 +179,10 @@ extension AppState {
             mailHost = ""
             markMailHostManagedByApp()
         } else {
-            mailHostExplicitlyEditedBeforeEmail = false
-            mailHostExplicitlyEditedEmail = Self.normalizedEmailForHostTracking(mailEmail)
+            setMailHostGuidanceTracking(
+                email: Self.normalizedEmailForHostTracking(mailEmail),
+                pending: false
+            )
         }
     }
 

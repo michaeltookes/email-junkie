@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import EmailJunkie
 
@@ -72,6 +73,27 @@ final class AppStateMailProviderPendingHostTests: XCTestCase {
         XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
         XCTAssertEqual(app.buildSettings().mailHostGuidanceEmail, "me@company.example")
         XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
+    }
+
+    func testCommittingPendingHostPublishesGuidanceRefresh() {
+        let app = AppState(
+            persistence: AppStateMemoryPersistence(),
+            secrets: InMemorySecretStore()
+        )
+        app.updateMailHostFromUser("imap.gmail.com")
+        app.updateMailEmailFromUser("me@company.example")
+        XCTAssertNil(app.credentialGuidanceHostFallback)
+
+        var observedChanges = 0
+        let cancellable = app.objectWillChange.sink {
+            observedChanges += 1
+        }
+        defer { cancellable.cancel() }
+
+        app.commitMailEmailEditFromUser()
+
+        XCTAssertGreaterThan(observedChanges, 0)
+        XCTAssertEqual(app.credentialGuidanceHostFallback, "imap.gmail.com")
     }
 
     func testIncompleteEditClearsTrackedHostForDifferentDomainAfterRelaunch() {

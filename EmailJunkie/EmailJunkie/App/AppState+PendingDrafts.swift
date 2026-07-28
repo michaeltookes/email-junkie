@@ -56,7 +56,7 @@ extension AppState {
         defer { approvingDraftIDs.remove(draft.identity) }
 
         if !force, case .stale(let reason) = await threadStalenessVerdict(for: draft, credentials: credentials) {
-            pendingStaleWarnings[draft.identity] = reason
+            recordPendingStaleWarning(reason, for: draft)
             return
         }
         pendingStaleWarnings.removeValue(forKey: draft.identity)
@@ -72,6 +72,10 @@ extension AppState {
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
+    }
+
+    private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
+        pendingStaleWarnings[draft.identity] = reason
     }
 
     /// Denies (discards) a pending draft without sending or saving it.

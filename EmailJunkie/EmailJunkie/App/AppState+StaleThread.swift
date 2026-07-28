@@ -43,11 +43,12 @@ extension AppState {
         }
 
         let sentSearchStart = Self.dayFloor(draft.generatedAt)
+        let sentCriteria = MailSearchCriteria(subject: subject, since: sentSearchStart)
         do {
             let sent = try await mailProvider.searchMessages(
                 credentials,
                 mailbox: .sent,
-                criteria: MailSearchCriteria(subject: subject, since: sentSearchStart),
+                criteria: sentCriteria,
                 offset: 0,
                 limit: threadInspectionLimit
             )

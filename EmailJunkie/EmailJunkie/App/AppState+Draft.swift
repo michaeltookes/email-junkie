@@ -184,7 +184,8 @@ extension AppState {
         return DraftLLMConfiguration(
             provider: llmProviderKind,
             model: resolvedLLMModel,
-            apiKey: key
+            apiKey: key,
+            baseURL: currentLLMBaseURL
         )
     }
 
@@ -283,7 +284,8 @@ extension AppState {
             try await llm.complete(
                 request,
                 provider: llmConfiguration.provider,
-                apiKey: llmConfiguration.apiKey
+                apiKey: llmConfiguration.apiKey,
+                baseURL: llmConfiguration.baseURL
             )
         }
     }
@@ -451,4 +453,5 @@ private struct DraftLLMConfiguration: Equatable {
     let provider: LLMProviderKind
     let model: String
     let apiKey: String
+    let baseURL: String?
 }

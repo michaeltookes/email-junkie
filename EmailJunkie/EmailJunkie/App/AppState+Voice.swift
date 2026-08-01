@@ -86,12 +86,13 @@ extension AppState {
     private func makeProfile(fromSentBodies bodies: [String], apiKey: String) async throws -> VoiceProfile {
         let provider = llmProviderKind
         let model = resolvedLLMModel
+        let baseURL = currentLLMBaseURL
         return try await VoiceProfiler().makeProfile(
             fromSentBodies: bodies,
             model: model,
             now: Date()
         ) { [llm] request in
-            try await llm.complete(request, provider: provider, apiKey: apiKey)
+            try await llm.complete(request, provider: provider, apiKey: apiKey, baseURL: baseURL)
         }
     }
 

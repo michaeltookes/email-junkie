@@ -73,6 +73,10 @@ final class AppState: ObservableObject {
     @Published var llmProviderKind: LLMProviderKind
     /// The chosen model id (empty = provider default).
     @Published var llmModel: String
+    /// An optional custom base URL for the selected provider (BYO gateway/proxy;
+    /// empty = provider default). Only meaningful for providers whose
+    /// `supportsCustomBaseURL` is true.
+    @Published var llmBaseURL: String
     /// The API key input (persisted to Keychain on a successful test).
     @Published var llmAPIKey: String
     /// Whether an LLM provider is connected (a verified key is stored).
@@ -257,6 +261,7 @@ final class AppState: ObservableObject {
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
         self.llmProviderKind = provider
         self.llmModel = settings.llmModel
+        self.llmBaseURL = settings.llmBaseURL
         self.verifiedLLMModel = settings.llmVerifiedModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
 
@@ -464,6 +469,7 @@ final class AppState: ObservableObject {
             mailPort: mailPort ?? self.mailPort,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
+            llmBaseURL: llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
             llmVerifiedModel: verifiedLLMModel,
             sendBehavior: sendBehavior.rawValue,
             onboardingCompleted: onboardingCompleted

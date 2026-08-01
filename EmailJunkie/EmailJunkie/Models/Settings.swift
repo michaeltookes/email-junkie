@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 8
+    static let currentSchemaVersion = 9
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -29,6 +29,9 @@ struct Settings: Codable, Equatable {
 
     /// Schema version that introduced host ownership before an email is entered.
     static let pendingMailHostGuidanceSchemaVersion = 8
+
+    /// Schema version that introduced the per-provider custom LLM base URL.
+    static let llmBaseURLSchemaVersion = 9
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -58,6 +61,11 @@ struct Settings: Codable, Equatable {
     /// The chosen model id, or empty to use the provider's default model.
     var llmModel: String
 
+    /// An optional custom base URL for the selected provider (BYO gateway/proxy).
+    /// Empty means the provider's default endpoint. Only honored by providers
+    /// whose `supportsCustomBaseURL` is true (the OpenAI-compatible adapter).
+    var llmBaseURL: String
+
     /// The resolved model id that last passed a connection test.
     var llmVerifiedModel: String
 
@@ -80,6 +88,7 @@ struct Settings: Codable, Equatable {
         mailPort: Int = 993,
         llmProvider: String = "anthropic",
         llmModel: String = "",
+        llmBaseURL: String = "",
         llmVerifiedModel: String = "",
         sendBehavior: String = SendBehavior.default.rawValue,
         onboardingCompleted: Bool = false
@@ -93,6 +102,7 @@ struct Settings: Codable, Equatable {
         self.mailPort = mailPort
         self.llmProvider = llmProvider
         self.llmModel = llmModel
+        self.llmBaseURL = llmBaseURL
         self.llmVerifiedModel = llmVerifiedModel
         self.sendBehavior = sendBehavior
         self.onboardingCompleted = onboardingCompleted
@@ -107,7 +117,7 @@ struct Settings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
         case mailHostGuidancePendingEmail, mailPort
-        case llmProvider, llmModel, llmVerifiedModel, sendBehavior, onboardingCompleted
+        case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, onboardingCompleted
     }
 
     init(from decoder: Decoder) throws {
@@ -122,6 +132,7 @@ struct Settings: Codable, Equatable {
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
+        llmBaseURL = try container.decodeIfPresent(String.self, forKey: .llmBaseURL) ?? ""
         llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
         sendBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior) ?? SendBehavior.default.rawValue
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
@@ -132,6 +143,7 @@ struct Settings: Codable, Equatable {
         var copy = self
         copy.pollIntervalSeconds = min(max(pollIntervalSeconds, 30), 3600)
         copy.mailPort = min(max(mailPort, 1), 65535)
+        copy.llmBaseURL = llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasStoredGuidanceHost = !copy.mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if copy.mailHost.isEmpty && copy.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             copy.mailHost = "imap.gmail.com"

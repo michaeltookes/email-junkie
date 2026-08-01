@@ -14,6 +14,30 @@ extension AppState {
         return trimmed.isEmpty ? llmProviderKind.defaultModel : trimmed
     }
 
+    /// The base URL to pass to the LLM layer for the current provider: the
+    /// user's override when the provider is endpoint-configurable and a value is
+    /// set, otherwise `nil` (provider default). Providers that don't support a
+    /// custom endpoint always resolve to `nil`, so a stale value left over from
+    /// another provider is ignored.
+    var currentLLMBaseURL: String? {
+        guard llmProviderKind.supportsCustomBaseURL else { return nil }
+        let trimmed = llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Applies a user edit to the custom base URL. Because the endpoint is part
+    /// of what a connection test verifies, editing it clears the verified state
+    /// so the user must re-test before the provider counts as connected.
+    func updateLLMBaseURLFromUser(_ newValue: String) {
+        guard newValue != llmBaseURL else { return }
+        llmBaseURL = newValue
+        verifiedLLMModel = ""
+        refreshLLMConnectionStatus()
+        resetDraftPreviewForLLMChange()
+        llmError = nil
+        saveSettings()
+    }
+
     /// Recomputes whether the current key is verified for the currently
     /// selected provider/model pair.
     func refreshLLMConnectionStatus(llmModel model: String? = nil) {
@@ -50,9 +74,15 @@ extension AppState {
 
         let testedProvider = llmProviderKind
         let testedModel = resolvedLLMModel
+        let testedBaseURL = currentLLMBaseURL
 
         do {
-            try await llm.testConnection(provider: testedProvider, apiKey: key, model: testedModel)
+            try await llm.testConnection(
+                provider: testedProvider,
+                apiKey: key,
+                model: testedModel,
+                baseURL: testedBaseURL
+            )
         } catch {
             llmError = Self.llmMessage(for: error)
             return
@@ -60,6 +90,7 @@ extension AppState {
 
         guard llmProviderKind == testedProvider,
               resolvedLLMModel == testedModel,
+              currentLLMBaseURL == testedBaseURL,
               llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) == key else {
             llmError = "Connection settings changed. Test again."
             refreshLLMConnectionStatus()

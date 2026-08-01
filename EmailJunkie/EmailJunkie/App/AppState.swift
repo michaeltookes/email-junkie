@@ -9,8 +9,7 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "AppS
 ///
 /// Views observe this object and update reactively. It holds the watch status,
 /// launch-at-login preference, inbox poll interval, and the IMAP mail account
-/// connection. (The parked OAuth engine remains in the codebase but is no longer
-/// wired here — IMAP + app password is the primary connection path.)
+/// connection. (The parked OAuth engine remains but is no longer wired here.)
 @MainActor
 final class AppState: ObservableObject {
 
@@ -73,9 +72,7 @@ final class AppState: ObservableObject {
     @Published var llmProviderKind: LLMProviderKind
     /// The chosen model id (empty = provider default).
     @Published var llmModel: String
-    /// An optional custom base URL for the selected provider (BYO gateway/proxy;
-    /// empty = provider default). Only meaningful for providers whose
-    /// `supportsCustomBaseURL` is true.
+    /// Optional custom base URL (BYO gateway/proxy; used only where the provider's `supportsCustomBaseURL` is true).
     @Published var llmBaseURL: String
     /// The API key input (persisted to Keychain on a successful test).
     @Published var llmAPIKey: String
@@ -210,10 +207,9 @@ final class AppState: ObservableObject {
     var browserGeneration = 0
     var bulkGeneration = 0
 
-    /// Pause between bulk-cleanup sweep passes, so a rapid loop of full mailbox
-    /// scans does not trip a provider's rate limit — att.net/Yahoo answers a
-    /// too-fast burst with "SEARCH Server error - Please try again later"
-    /// (item 49). Overridable so tests run without real delays.
+    /// Pause between bulk-cleanup sweep passes so a rapid loop of full mailbox
+    /// scans does not trip a provider's rate limit (item 49; att.net/Yahoo answer
+    /// a too-fast burst with a SEARCH server error). Overridable for fast tests.
     var bulkSweepPacingNanoseconds: UInt64 = 1_200_000_000
 
     // MARK: - Initialization

@@ -5,6 +5,11 @@ import Foundation
 /// changes, which is what makes the layer pluggable.
 enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case anthropic
+    /// Any provider speaking the OpenAI `/v1/chat/completions` wire format. A
+    /// single adapter covers OpenAI itself plus every compatible gateway
+    /// (OpenRouter, Groq, Mistral, DeepSeek, Together, LM Studio, Ollama's
+    /// OpenAI-compat endpoint, …) by pointing the base URL at each host.
+    case openAICompatible
 
     var id: String { rawValue }
 
@@ -12,6 +17,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     var displayName: String {
         switch self {
         case .anthropic: return "Anthropic (Claude)"
+        case .openAICompatible: return "OpenAI-compatible"
         }
     }
 
@@ -19,6 +25,26 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     var defaultModel: String {
         switch self {
         case .anthropic: return "claude-sonnet-4-6"
+        case .openAICompatible: return "gpt-4o-mini"
+        }
+    }
+
+    /// Whether the user may override the provider's HTTP endpoint. Only the
+    /// OpenAI-compatible adapter is endpoint-configurable; that override is what
+    /// lets one adapter target OpenAI or any BYO gateway/proxy.
+    var supportsCustomBaseURL: Bool {
+        switch self {
+        case .anthropic: return false
+        case .openAICompatible: return true
+        }
+    }
+
+    /// A placeholder base URL shown in the Settings field, or `nil` for
+    /// providers whose endpoint isn't user-configurable.
+    var baseURLPlaceholder: String? {
+        switch self {
+        case .anthropic: return nil
+        case .openAICompatible: return "https://api.openai.com/v1"
         }
     }
 
@@ -99,13 +125,39 @@ protocol LLMClient: Sendable {
 /// injectable in tests without hitting the network.
 protocol LLMProviding: Sendable {
     /// Sends a minimal request to confirm the key/model/endpoint work. Throws
-    /// `LLMError` on any failure.
-    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws
+    /// `LLMError` on any failure. `baseURL` overrides the provider's default
+    /// endpoint (only honored by adapters where `supportsCustomBaseURL` is true);
+    /// pass `nil` for the provider default.
+    func testConnection(
+        provider: LLMProviderKind,
+        apiKey: String,
+        model: String,
+        baseURL: String?
+    ) async throws
 
     /// Runs a completion against the given provider with the supplied key.
+    /// `baseURL` overrides the provider's default endpoint (see `testConnection`).
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String,
+        baseURL: String?
+    ) async throws -> LLMResponse
+}
+
+extension LLMProviding {
+    /// Convenience for callers that don't override the endpoint (e.g. the
+    /// Anthropic path and existing tests): forwards with the provider default.
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {
+        try await testConnection(provider: provider, apiKey: apiKey, model: model, baseURL: nil)
+    }
+
+    /// Convenience for callers that don't override the endpoint.
     func complete(
         _ request: LLMRequest,
         provider: LLMProviderKind,
         apiKey: String
-    ) async throws -> LLMResponse
+    ) async throws -> LLMResponse {
+        try await complete(request, provider: provider, apiKey: apiKey, baseURL: nil)
+    }
 }

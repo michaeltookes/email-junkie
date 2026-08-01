@@ -340,6 +340,7 @@ final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
     private(set) var lastProvider: LLMProviderKind?
     private(set) var lastAPIKey: String?
     private(set) var lastModel: String?
+    private(set) var lastBaseURL: String?
     private(set) var lastRequest: LLMRequest?
 
     init(
@@ -350,20 +351,23 @@ final class FakeLLMProvider: LLMProviding, @unchecked Sendable {
         self.completion = completion
     }
 
-    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {
         lastProvider = provider
         lastAPIKey = apiKey
         lastModel = model
+        lastBaseURL = baseURL
         try result.get()
     }
 
     func complete(
         _ request: LLMRequest,
         provider: LLMProviderKind,
-        apiKey: String
+        apiKey: String,
+        baseURL: String?
     ) async throws -> LLMResponse {
         lastProvider = provider
         lastAPIKey = apiKey
+        lastBaseURL = baseURL
         lastRequest = request
         return try completion.get()
     }
@@ -375,18 +379,21 @@ final class SuspendedLLMProvider: LLMProviding, @unchecked Sendable {
     private var completionContinuation: CheckedContinuation<LLMResponse, Error>?
     private(set) var lastProvider: LLMProviderKind?
     private(set) var lastAPIKey: String?
+    private(set) var lastBaseURL: String?
     private(set) var lastRequest: LLMRequest?
 
-    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {}
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {}
 
     func complete(
         _ request: LLMRequest,
         provider: LLMProviderKind,
-        apiKey: String
+        apiKey: String,
+        baseURL: String?
     ) async throws -> LLMResponse {
         lock.lock()
         lastProvider = provider
         lastAPIKey = apiKey
+        lastBaseURL = baseURL
         lastRequest = request
         lock.unlock()
 
@@ -414,9 +421,10 @@ final class SuspendedLLMConnectionTester: LLMProviding, @unchecked Sendable {
     private(set) var lastProvider: LLMProviderKind?
     private(set) var lastAPIKey: String?
     private(set) var lastModel: String?
+    private(set) var lastBaseURL: String?
 
-    func testConnection(provider: LLMProviderKind, apiKey: String, model: String) async throws {
-        record(provider: provider, apiKey: apiKey, model: model)
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {
+        record(provider: provider, apiKey: apiKey, model: model, baseURL: baseURL)
         try await withCheckedThrowingContinuation { continuation in
             store(continuation)
             didStartConnectionTest.fulfill()
@@ -426,7 +434,8 @@ final class SuspendedLLMConnectionTester: LLMProviding, @unchecked Sendable {
     func complete(
         _ request: LLMRequest,
         provider: LLMProviderKind,
-        apiKey: String
+        apiKey: String,
+        baseURL: String?
     ) async throws -> LLMResponse {
         LLMResponse(text: "")
     }
@@ -435,11 +444,12 @@ final class SuspendedLLMConnectionTester: LLMProviding, @unchecked Sendable {
         takeContinuation()?.resume(with: result)
     }
 
-    private func record(provider: LLMProviderKind, apiKey: String, model: String) {
+    private func record(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) {
         lock.lock()
         lastProvider = provider
         lastAPIKey = apiKey
         lastModel = model
+        lastBaseURL = baseURL
         lock.unlock()
     }
 

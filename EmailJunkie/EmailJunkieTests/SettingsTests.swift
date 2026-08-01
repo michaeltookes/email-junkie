@@ -128,8 +128,41 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsEight() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 8)
+    func testCurrentSchemaVersionIsNine() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 9)
+    }
+
+    func testLLMBaseURLSchemaVersionIsNine() {
+        XCTAssertEqual(Settings.llmBaseURLSchemaVersion, 9)
+    }
+
+    func testLegacyFileWithoutLLMBaseURLDecodesToEmpty() throws {
+        // A pre-v9 settings file has no llmBaseURL key; it must decode to empty.
+        let legacy = #"{"schemaVersion":8,"pollIntervalSeconds":300,"llmProvider":"openAICompatible"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.llmBaseURL, "")
+    }
+
+    func testLLMBaseURLRoundTripsThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "openAICompatible",
+            llmModel: "gpt-4o-mini",
+            llmBaseURL: "https://openrouter.ai/api/v1"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.llmBaseURL, "https://openrouter.ai/api/v1")
+    }
+
+    func testValidatedTrimsLLMBaseURL() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmBaseURL: "  https://openrouter.ai/api/v1  "
+        ).validated()
+        XCTAssertEqual(settings.llmBaseURL, "https://openrouter.ai/api/v1")
     }
 
     func testOnboardingCompletionSchemaVersionIsSix() {

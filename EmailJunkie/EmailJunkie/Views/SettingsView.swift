@@ -200,7 +200,11 @@ struct SettingsView: View {
                         text: llmBaseURLBinding,
                         prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
                     )
-                    Text("Leave blank for OpenAI. Point this at any OpenAI-compatible endpoint (OpenRouter, Groq, a local server, …).")
+                    Text("""
+                    Leave blank for OpenAI. Point this at any OpenAI-compatible endpoint \
+                    (OpenRouter, Groq, a local server, …). Remote endpoints must use HTTPS; \
+                    plain HTTP works only on your local network.
+                    """)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

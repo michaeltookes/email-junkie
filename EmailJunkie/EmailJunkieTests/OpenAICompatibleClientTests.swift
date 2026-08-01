@@ -111,10 +111,36 @@ final class OpenAICompatibleClientTests: XCTestCase {
         XCTAssertEqual(transport.lastURL?.absoluteString, "https://gateway.example.com/v1/chat/completions")
     }
 
-    func testBlankBaseURLFallsBackToDefaultEndpoint() {
-        XCTAssertEqual(OpenAICompatibleClient.resolveEndpoint(baseURL: nil), OpenAICompatibleClient.defaultEndpoint)
-        XCTAssertEqual(OpenAICompatibleClient.resolveEndpoint(baseURL: ""), OpenAICompatibleClient.defaultEndpoint)
-        XCTAssertEqual(OpenAICompatibleClient.resolveEndpoint(baseURL: "   "), OpenAICompatibleClient.defaultEndpoint)
+    func testBlankBaseURLFallsBackToDefaultEndpoint() throws {
+        XCTAssertEqual(try OpenAICompatibleClient.resolveEndpoint(baseURL: nil), OpenAICompatibleClient.defaultEndpoint)
+        XCTAssertEqual(try OpenAICompatibleClient.resolveEndpoint(baseURL: ""), OpenAICompatibleClient.defaultEndpoint)
+        XCTAssertEqual(try OpenAICompatibleClient.resolveEndpoint(baseURL: "   "), OpenAICompatibleClient.defaultEndpoint)
+    }
+
+    func testResolveEndpointRejectsUnparseableAndSchemelessInput() {
+        // An embedded space doesn't parse; a scheme-less host parses but has no
+        // scheme; a non-http scheme is rejected. None may fall back to OpenAI.
+        for bad in ["https://my host/v1", "openrouter.ai/api/v1", "ftp://example.com/v1", "://nohost/v1"] {
+            XCTAssertThrowsError(try OpenAICompatibleClient.resolveEndpoint(baseURL: bad), "expected \(bad) to throw") { error in
+                guard case .invalidBaseURL(let value) = error as? LLMError else {
+                    return XCTFail("expected .invalidBaseURL for \(bad), got \(error)")
+                }
+                XCTAssertEqual(value, bad)
+            }
+        }
+    }
+
+    func testInvalidBaseURLThrowsBeforeCallingTransport() async {
+        let transport = FakeLLMTransport(response: okResponse())
+        let client = OpenAICompatibleClient(apiKey: "sk-test", transport: transport, baseURL: "openrouter.ai/api/v1")
+
+        do {
+            _ = try await client.complete(sampleRequest())
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? LLMError, .invalidBaseURL("openrouter.ai/api/v1"))
+        }
+        XCTAssertNil(transport.lastURL, "transport must not be called for an invalid base URL")
     }
 
     // MARK: - Model quirks

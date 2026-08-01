@@ -138,6 +138,8 @@ extension AppState {
             return "The provider rejected the request (HTTP \(status)). \(message)"
         case LLMError.invalidResponse(let detail):
             return "Unexpected response from the provider. (\(detail))"
+        case LLMError.invalidBaseURL(let value):
+            return "Invalid base URL: \(value). Enter a full http(s) URL, e.g. https://api.openai.com/v1."
         case KeychainError.unexpectedStatus(let status):
             return "Keychain returned status \(status)."
         case KeychainError.dataEncodingFailed:

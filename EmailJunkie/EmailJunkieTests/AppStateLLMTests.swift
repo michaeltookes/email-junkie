@@ -207,6 +207,29 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertNil(tester.lastBaseURL)
     }
 
+    func testInvalidBaseURLMapsToFriendlyMessage() {
+        let message = AppState.llmMessage(for: LLMError.invalidBaseURL("openrouter.ai/api/v1"))
+
+        XCTAssertTrue(message.contains("Invalid base URL"), "message should name the problem: \(message)")
+        XCTAssertTrue(message.contains("openrouter.ai/api/v1"), "message should echo the value: \(message)")
+    }
+
+    func testTestConnectionWithInvalidBaseURLSurfacesErrorAndStaysDisconnected() async {
+        let secrets = InMemorySecretStore()
+        let appState = makeAppState(secrets: secrets, llm: LLMService(transport: FakeLLMTransport(
+            response: HTTPResponse(statusCode: 200, body: Data(#"{"choices":[{"message":{"content":"OK"}}]}"#.utf8))
+        )))
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://my host/v1"
+        appState.llmAPIKey = "sk-gateway"
+
+        await appState.testLLMConnection()
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.llmError, "Invalid base URL: https://my host/v1. Enter a full http(s) URL, e.g. https://api.openai.com/v1.")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "openAICompatible"))) ?? nil)
+    }
+
     func testEditingBaseURLRequiresRetest() async {
         let secrets = InMemorySecretStore()
         let appState = makeAppState(secrets: secrets)

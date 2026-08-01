@@ -56,6 +56,27 @@ final class LLMServiceTests: XCTestCase {
         XCTAssertEqual(transport.lastURL?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
     }
 
+    func testTestConnectionSurfacesInvalidBaseURLWithoutHittingTransport() async {
+        let transport = FakeLLMTransport(response: HTTPResponse(
+            statusCode: 200,
+            body: Data(#"{"choices":[{"message":{"content":"OK"}}]}"#.utf8)
+        ))
+        let service = LLMService(transport: transport)
+
+        do {
+            try await service.testConnection(
+                provider: .openAICompatible,
+                apiKey: "sk-openai",
+                model: "gpt-4o-mini",
+                baseURL: "https://my host/v1"
+            )
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? LLMError, .invalidBaseURL("https://my host/v1"))
+        }
+        XCTAssertNil(transport.lastURL, "transport must not be called for an invalid base URL")
+    }
+
     func testTestConnectionSurfacesProviderError() async {
         let transport = FakeLLMTransport(response: HTTPResponse(
             statusCode: 401,

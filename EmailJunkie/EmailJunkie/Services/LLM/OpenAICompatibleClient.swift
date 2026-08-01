@@ -11,7 +11,7 @@ import Foundation
 struct OpenAICompatibleClient: LLMClient {
     let apiKey: String
     let transport: LLMHTTPTransport
-    let endpoint: URL
+    let baseURL: String?
 
     /// OpenAI's official chat-completions endpoint, used when the user hasn't
     /// supplied a custom base URL.
@@ -27,11 +27,16 @@ struct OpenAICompatibleClient: LLMClient {
     ) {
         self.apiKey = apiKey
         self.transport = transport
-        self.endpoint = Self.resolveEndpoint(baseURL: baseURL)
+        self.baseURL = baseURL
     }
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
+
+        // Resolve (and validate) the endpoint before touching the network so a
+        // bad base URL fails fast — never silently routing the user's key to a
+        // different host.
+        let endpoint = try Self.resolveEndpoint(baseURL: baseURL)
 
         let body = try Self.encodeBody(request)
         let headers = [
@@ -61,7 +66,12 @@ struct OpenAICompatibleClient: LLMClient {
     /// - Otherwise `/chat/completions` is appended (trailing slashes trimmed),
     ///   so `https://openrouter.ai/api/v1` and `http://localhost:11434/v1`
     ///   both resolve correctly.
-    static func resolveEndpoint(baseURL: String?) -> URL {
+    ///
+    /// Throws `LLMError.invalidBaseURL` for input that doesn't parse or whose
+    /// scheme isn't `http`/`https` (e.g. an embedded space, or a scheme-less
+    /// `openrouter.ai/api/v1`) rather than silently falling back to OpenAI —
+    /// which would leak the user's key to the wrong host.
+    static func resolveEndpoint(baseURL: String?) throws -> URL {
         let trimmed = (baseURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return defaultEndpoint }
 
@@ -70,7 +80,14 @@ struct OpenAICompatibleClient: LLMClient {
 
         let suffix = "/chat/completions"
         let full = normalized.hasSuffix(suffix) ? normalized : normalized + suffix
-        return URL(string: full) ?? defaultEndpoint
+
+        guard let url = URL(string: full),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
+            throw LLMError.invalidBaseURL(trimmed)
+        }
+        return url
     }
 
     // MARK: - Wire format

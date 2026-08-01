@@ -112,6 +112,9 @@ enum LLMError: Error, Equatable, Sendable {
     case http(status: Int, message: String)
     /// The response was 2xx but couldn't be parsed into a completion.
     case invalidResponse(String)
+    /// The configured custom base URL isn't a valid http(s) endpoint, so the
+    /// request was not sent (the trimmed value is carried for the message).
+    case invalidBaseURL(String)
 }
 
 /// A single-provider adapter: turns an `LLMRequest` into a completion by calling

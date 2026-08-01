@@ -17,8 +17,7 @@ extension AppState {
     func learnVoiceProfile() async {
         voiceError = nil
 
-        guard let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil), !key.isEmpty,
-              isLLMConnected else {
+        guard let llmConfiguration = currentVoiceLLMConfiguration else {
             voiceError = "Connect an AI provider first (Test Connection above)."
             return
         }
@@ -37,15 +36,27 @@ extension AppState {
 
         do {
             let bodies = try await fetchSentSampleBodies(credentials: credentials)
+            guard isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
+                voiceError = Self.staleVoiceLLMConfigurationMessage
+                return
+            }
             guard !bodies.isEmpty else {
                 voiceError = "No sent messages found to learn from."
                 return
             }
             voiceProgress = "Learning your voice from \(bodies.count) message\(bodies.count == 1 ? "" : "s")…"
-            let profile = try await makeProfile(fromSentBodies: bodies, apiKey: key)
+            let profile = try await makeProfile(fromSentBodies: bodies, llmConfiguration: llmConfiguration)
+            guard isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
+                voiceError = Self.staleVoiceLLMConfigurationMessage
+                return
+            }
             persistence.saveVoiceProfile(profile)
             voiceProfile = profile
         } catch {
+            guard isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
+                voiceError = Self.staleVoiceLLMConfigurationMessage
+                return
+            }
             voiceError = Self.voiceMessage(for: error)
         }
     }
@@ -83,16 +94,42 @@ extension AppState {
         return bodies
     }
 
-    private func makeProfile(fromSentBodies bodies: [String], apiKey: String) async throws -> VoiceProfile {
-        let provider = llmProviderKind
-        let model = resolvedLLMModel
-        let baseURL = currentLLMBaseURL
+    private var currentVoiceLLMConfiguration: VoiceLLMConfiguration? {
+        guard isLLMConnected,
+              let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil),
+              !key.isEmpty else {
+            return nil
+        }
+        return VoiceLLMConfiguration(
+            provider: llmProviderKind,
+            model: resolvedLLMModel,
+            apiKey: key,
+            baseURL: currentLLMBaseURL
+        )
+    }
+
+    private func isCurrentVoiceContext(
+        credentials: MailAccountCredentials,
+        llmConfiguration: VoiceLLMConfiguration
+    ) -> Bool {
+        mailCredentials == credentials && currentVoiceLLMConfiguration == llmConfiguration
+    }
+
+    private func makeProfile(
+        fromSentBodies bodies: [String],
+        llmConfiguration: VoiceLLMConfiguration
+    ) async throws -> VoiceProfile {
         return try await VoiceProfiler().makeProfile(
             fromSentBodies: bodies,
-            model: model,
+            model: llmConfiguration.model,
             now: Date()
         ) { [llm] request in
-            try await llm.complete(request, provider: provider, apiKey: apiKey, baseURL: baseURL)
+            try await llm.complete(
+                request,
+                provider: llmConfiguration.provider,
+                apiKey: llmConfiguration.apiKey,
+                baseURL: llmConfiguration.baseURL
+            )
         }
     }
 
@@ -108,4 +145,13 @@ extension AppState {
             return message(for: error)
         }
     }
+
+    private static let staleVoiceLLMConfigurationMessage = "Connection settings changed. Learn your voice again."
+}
+
+private struct VoiceLLMConfiguration: Equatable, Sendable {
+    let provider: LLMProviderKind
+    let model: String
+    let apiKey: String
+    let baseURL: String?
 }

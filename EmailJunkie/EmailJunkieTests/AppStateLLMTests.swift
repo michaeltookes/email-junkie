@@ -260,6 +260,25 @@ final class AppStateLLMTests: XCTestCase {
 
         XCTAssertFalse(appState.isLLMConnected)
         XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.llmAPIKey, "")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "openAICompatible"))) ?? nil)
+    }
+
+    func testEditingBaseURLOnSameEndpointOriginKeepsKeyButRequiresRetest() async {
+        let secrets = InMemorySecretStore()
+        let appState = makeAppState(secrets: secrets)
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+        appState.llmAPIKey = "sk-gateway"
+        await appState.testLLMConnection()
+        XCTAssertTrue(appState.isLLMConnected)
+
+        appState.updateLLMBaseURLFromUser("https://openrouter.ai/api/v1/")
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.llmAPIKey, "sk-gateway")
+        XCTAssertEqual(try? secrets.value(for: .llmAPIKey(provider: "openAICompatible")), "sk-gateway")
     }
 
     func testOpenAICompatibleBaseURLRestoredOnInit() {

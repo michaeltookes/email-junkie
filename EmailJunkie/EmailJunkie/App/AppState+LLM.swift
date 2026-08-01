@@ -30,11 +30,17 @@ extension AppState {
     /// so the user must re-test before the provider counts as connected.
     func updateLLMBaseURLFromUser(_ newValue: String) {
         guard newValue != llmBaseURL else { return }
+        let previousOrigin = currentLLMEndpointOrigin
         llmBaseURL = newValue
+        let shouldClearKey = llmProviderKind.supportsCustomBaseURL
+            && shouldClearLLMAPIKeyForEndpointChange(from: previousOrigin, to: currentLLMEndpointOrigin)
+        llmError = nil
+        if shouldClearKey {
+            clearLLMAPIKeyForEndpointChange()
+        }
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
         resetDraftPreviewForLLMChange()
-        llmError = nil
         saveSettings()
     }
 
@@ -152,5 +158,28 @@ extension AppState {
 
     static func keychainLLMMessage(action: String, error: Error) -> String {
         "Couldn't \(action) the API key in Keychain. \(llmMessage(for: error))"
+    }
+
+    private var currentLLMEndpointOrigin: String? {
+        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(baseURL: currentLLMBaseURL),
+              let scheme = endpoint.scheme?.lowercased(),
+              let host = endpoint.host?.lowercased() else {
+            return nil
+        }
+        let port = endpoint.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
+    }
+
+    private func shouldClearLLMAPIKeyForEndpointChange(from oldOrigin: String?, to newOrigin: String?) -> Bool {
+        oldOrigin != newOrigin || oldOrigin == nil || newOrigin == nil
+    }
+
+    private func clearLLMAPIKeyForEndpointChange() {
+        llmAPIKey = ""
+        do {
+            try secrets.remove(llmProviderKind.apiKeySecret)
+        } catch {
+            llmError = Self.keychainLLMMessage(action: "remove", error: error)
+        }
     }
 }

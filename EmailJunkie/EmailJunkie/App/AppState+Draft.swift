@@ -75,26 +75,48 @@ extension AppState {
         }
     }
 
-    /// Builds a reply draft for a watcher-selected message and appends it to the
-    /// pending queue. Unlike `generateDraft`, this does not touch the Settings
-    /// preview state, so an active preview and the watcher don't clobber each
-    /// other. Throws on missing configuration or provider/LLM errors.
+    /// Builds a watcher-selected reply and appends it to the pending queue. Unlike
+    /// `generateDraft`, this avoids Settings preview state.
     @discardableResult
-    func draftAndEnqueue(_ message: MailMessage, mailbox: Mailbox = .inbox) async throws -> Bool {
+    func draftAndEnqueue(
+        _ message: MailMessage,
+        mailbox: Mailbox = .inbox,
+        requireWatching: Bool = true
+    ) async throws -> Bool {
+        guard let draft = try await makePendingDraft(
+            for: message,
+            mailbox: mailbox,
+            requireWatching: requireWatching
+        ) else { return false }
+        try enqueuePendingDraft(draft)
+        return true
+    }
+
+    /// Builds a watcher-style queued draft without persisting it.
+    func makePendingDraft(
+        for message: MailMessage,
+        mailbox: Mailbox = .inbox,
+        requireWatching: Bool = true,
+        credentials capturedCredentials: MailAccountCredentials? = nil
+    ) async throws -> Draft? {
         guard mailbox.supportsReplyDrafting else {
             throw DraftError.unsupportedSourceMailbox
         }
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             throw DraftError.emptyDraft
         }
-        let credentials = mailCredentials
+        let credentials = capturedCredentials ?? mailCredentials
         let data = try await mailProvider.fetchBodyText(
             credentials,
             mailbox: mailbox,
             uid: message.id,
             expectedUIDValidity: message.uidValidity
         )
-        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        guard isCurrentDraftContext(
+            credentials: credentials,
+            llmConfiguration: llmConfiguration,
+            requireWatching: requireWatching
+        ) else { return nil }
         let incomingText = MailBodyText.plainText(from: data)
         let context = ReplyContext(
             senderName: message.from?.name,
@@ -103,7 +125,11 @@ extension AppState {
             body: incomingText
         )
         let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
-        guard isCurrentWatcherDraftRequest(credentials: credentials, llmConfiguration: llmConfiguration) else { return false }
+        guard isCurrentDraftContext(
+            credentials: credentials,
+            llmConfiguration: llmConfiguration,
+            requireWatching: requireWatching
+        ) else { return nil }
         let draft = Draft(
             id: message.id,
             sourceUIDValidity: message.uidValidity,
@@ -120,8 +146,7 @@ extension AppState {
             generatedAt: Date(),
             needsInfo: Self.needsInfo(from: outcome)
         )
-        try enqueuePendingDraft(draft)
-        return true
+        return draft
     }
 
     // MARK: - Helpers
@@ -214,11 +239,16 @@ extension AppState {
             && currentDraftLLMConfiguration == llmConfiguration
     }
 
-    private func isCurrentWatcherDraftRequest(
+    /// Whether the account/LLM context is still the one an in-flight draft began
+    /// with. `requireWatching` additionally demands the watcher still be running
+    /// (the watcher path); manual regeneration (item 12) passes `false` so it
+    /// works from the review window regardless of watch state.
+    private func isCurrentDraftContext(
         credentials: MailAccountCredentials,
-        llmConfiguration: DraftLLMConfiguration
+        llmConfiguration: DraftLLMConfiguration,
+        requireWatching: Bool
     ) -> Bool {
-        watchStatus == .watching
+        (!requireWatching || watchStatus == .watching)
             && mailCredentials == credentials
             && currentDraftLLMConfiguration == llmConfiguration
     }
@@ -266,44 +296,6 @@ extension AppState {
             await sendGeneratedDraft()
         case .saveAsDraft:
             await saveGeneratedDraftToDrafts()
-        }
-    }
-
-    /// Dispatches a preview sheet's displayed draft without reading mutable
-    /// global preview state. The sheet owns its own progress/error UI.
-    func approveDraftPreview(_ draft: Draft) async throws -> String {
-        // A flagged draft has no fabricated reply — it must never be sent or
-        // saved until the user resolves it (item 13).
-        guard !draft.isFlagged else {
-            throw DraftError.needsUserInput
-        }
-        let credentials = mailCredentials
-        guard credentials.isComplete else {
-            throw DraftDispatchError.missingCredentials
-        }
-        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            throw DraftDispatchError.accountMismatch
-        }
-        guard draftSourceAllowsReplyDispatch(draft) else {
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            throw DraftError.unsupportedSourceMailbox
-        }
-
-        switch sendBehavior {
-        case .autoSend:
-            try await performSend(draft, credentials: credentials)
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
-            return "Sent."
-        case .saveAsDraft:
-            try await performSave(draft, credentials: credentials)
-            return "Saved to your Drafts."
         }
     }
 
@@ -453,36 +445,6 @@ extension AppState {
         text.count > maxChars ? String(text.prefix(maxChars)) + "…" : text
     }
 
-    static func draftMessage(for error: Error) -> String {
-        switch error {
-        case DraftDispatchError.missingCredentials:
-            return "Connect an email account first."
-        case DraftDispatchError.accountMismatch:
-            return "This draft was generated for a different email account."
-        case DraftError.emptyDraft:
-            return "The model returned an empty reply. Try again."
-        case DraftError.unsupportedSourceMailbox:
-            return "Draft replies are only available for incoming mail."
-        case DraftError.needsUserInput:
-            return "This draft needs your input before it can be sent — add the missing details or write the reply yourself."
-        case DraftDispatchError.noRecipient:
-            return "This draft has no recipient address to send to."
-        case is LLMError:
-            return llmMessage(for: error)
-        default:
-            return message(for: error)
-        }
-    }
-}
-
-/// Errors dispatching an approved draft to send/save.
-enum DraftDispatchError: Error, Equatable {
-    /// No connected mail account is available for dispatch.
-    case missingCredentials
-    /// The draft was generated under a different mail account.
-    case accountMismatch
-    /// The draft has no resolvable recipient address.
-    case noRecipient
 }
 
 private struct DraftLLMConfiguration: Equatable {

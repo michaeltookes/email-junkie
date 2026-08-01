@@ -108,6 +108,9 @@ final class IMAPSearchTests: XCTestCase {
         XCTAssertFalse(MailSearchCriteria(readState: .unreadOnly).isEmpty)
         XCTAssertFalse(MailSearchCriteria(flaggedOnly: true).isEmpty)
         XCTAssertFalse(MailSearchCriteria(maximumUID: 123).isEmpty)
+        XCTAssertFalse(MailSearchCriteria(headers: [
+            MailHeaderSearch(field: "In-Reply-To", value: "orig@example.com")
+        ]).isEmpty)
     }
 
     // MARK: - State machine
@@ -130,6 +133,21 @@ final class IMAPSearchTests: XCTestCase {
         XCTAssertEqual(result.totalMatches, 3)
         XCTAssertEqual(result.offset, 0)
         XCTAssertTrue(result.hasMore)
+        _ = try? channel.finish()
+    }
+
+    func testHeaderCriteriaEncodedIntoUidSearchCommand() throws {
+        let criteria = MailSearchCriteria(headers: [
+            MailHeaderSearch(field: "In-Reply-To", value: "orig@example.com")
+        ])
+        let (channel, _) = try makeChannel(criteria: criteria)
+
+        let searchCommand = try advanceThroughSelect(channel)
+
+        XCTAssertTrue(searchCommand.contains("UID SEARCH"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("HEADER"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("In-Reply-To"), "got: \(searchCommand)")
+        XCTAssertTrue(searchCommand.contains("orig@example.com"), "got: \(searchCommand)")
         _ = try? channel.finish()
     }
 

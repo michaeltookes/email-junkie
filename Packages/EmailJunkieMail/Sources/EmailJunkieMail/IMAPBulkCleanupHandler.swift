@@ -23,9 +23,11 @@ final class IMAPBulkCleanupHandler: ChannelInboundHandler {
         var uid: UInt32?
         var from: MailAddress?
         var replyTo: MailAddress?
+        var to: [MailAddress] = []
         var hasEnvelope = false
         var subject = ""
         var date = ""
+        var inReplyTo: String?
         var messageID: String?
     }
 

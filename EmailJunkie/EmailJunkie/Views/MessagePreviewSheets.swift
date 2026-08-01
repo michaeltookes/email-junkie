@@ -32,21 +32,26 @@ struct MessageBodyView: View {
 /// A sheet showing a generated reply draft, with a send/save action reflecting
 /// the current `SendBehavior`. Shared by Settings and the mailbox browser.
 struct DraftView: View {
-    let draft: Draft
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var displayedDraft: Draft
     @State private var isDispatching = false
     @State private var dispatchConfirmation: String?
     @State private var dispatchError: String?
+    @State private var staleReason: StaleThreadReason?
+
+    init(draft: Draft) {
+        _displayedDraft = State(initialValue: draft)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(draft.replySubject)
+                    Text(displayedDraft.replySubject)
                         .font(.headline)
                         .lineLimit(2)
-                    if let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
+                    if let recipient = displayedDraft.sourceReplyTo?.email ?? displayedDraft.sourceFrom?.email {
                         Text("To: \(recipient)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -58,11 +63,11 @@ struct DraftView: View {
             .padding()
             Divider()
             ScrollView {
-                if let needsInfo = draft.needsInfo {
+                if let needsInfo = displayedDraft.needsInfo {
                     DraftNeedsInfoView(needsInfo: needsInfo)
                         .padding()
                 } else {
-                    Text(draft.body)
+                    Text(displayedDraft.body)
                         .font(.body)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -82,7 +87,7 @@ struct DraftView: View {
                 }
                 Spacer()
                 // A flagged draft has no reply to send — offer no dispatch action.
-                if !draft.isFlagged {
+                if !displayedDraft.isFlagged {
                     Button {
                         Task { await approveDisplayedDraft() }
                     } label: {
@@ -98,9 +103,33 @@ struct DraftView: View {
             .padding()
         }
         .frame(width: 480, height: 460)
+        .confirmationDialog(
+            staleReason?.headline ?? "",
+            isPresented: staleWarningBinding,
+            titleVisibility: .visible
+        ) {
+            Button(appState.sendBehavior == .autoSend ? "Send anyway" : "Save anyway", role: .destructive) {
+                Task { await approveDisplayedDraft(force: true) }
+            }
+            Button("Regenerate") {
+                Task { await regenerateDisplayedDraft() }
+            }
+            Button("Cancel", role: .cancel) { staleReason = nil }
+        } message: {
+            if let staleReason {
+                Text(staleReason.detail)
+            }
+        }
     }
 
-    private func approveDisplayedDraft() async {
+    private var staleWarningBinding: Binding<Bool> {
+        Binding(
+            get: { staleReason != nil },
+            set: { if !$0 { staleReason = nil } }
+        )
+    }
+
+    private func approveDisplayedDraft(force: Bool = false) async {
         guard !isDispatching else { return }
         dispatchConfirmation = nil
         dispatchError = nil
@@ -108,7 +137,29 @@ struct DraftView: View {
         defer { isDispatching = false }
 
         do {
-            dispatchConfirmation = try await appState.approveDraftPreview(draft)
+            dispatchConfirmation = try await appState.approveDraftPreview(displayedDraft, force: force)
+            staleReason = nil
+        } catch let error as DraftDispatchError {
+            if case .staleThread(let reason) = error {
+                staleReason = reason
+            } else {
+                dispatchError = AppState.draftMessage(for: error)
+            }
+        } catch {
+            dispatchError = AppState.draftMessage(for: error)
+        }
+    }
+
+    private func regenerateDisplayedDraft() async {
+        guard !isDispatching else { return }
+        dispatchConfirmation = nil
+        dispatchError = nil
+        staleReason = nil
+        isDispatching = true
+        defer { isDispatching = false }
+
+        do {
+            displayedDraft = try await appState.regenerateDraftPreview(displayedDraft)
         } catch {
             dispatchError = AppState.draftMessage(for: error)
         }

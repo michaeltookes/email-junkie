@@ -130,9 +130,11 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         var uid: UInt32?
         var from: MailAddress?
         var replyTo: MailAddress?
+        var to: [MailAddress] = []
         var hasEnvelope = false
         var subject = ""
         var date = ""
+        var inReplyTo: String?
         var messageID: String?
     }
 
@@ -270,8 +272,10 @@ final class IMAPSearchHandler: ChannelInboundHandler {
                         uidValidity: selectedUIDValidity,
                         from: message.from,
                         replyTo: message.replyTo,
+                        to: message.to,
                         subject: message.subject,
                         date: message.date,
+                        inReplyTo: message.inReplyTo,
                         messageID: message.messageID
                     )
                 )
@@ -307,6 +311,10 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         }
         if let replyTo = envelope.reply.first, let address = Self.address(from: replyTo) {
             current?.replyTo = address
+        }
+        current?.to = envelope.to.compactMap(Self.address(from:))
+        if let inReplyTo = envelope.inReplyTo {
+            current?.inReplyTo = String(inReplyTo)
         }
         if let messageID = envelope.messageID {
             current?.messageID = String(messageID)
@@ -384,6 +392,10 @@ final class IMAPSearchHandler: ChannelInboundHandler {
         if let text = trimmed(criteria.text) { keys.append(.text(ByteBuffer(string: text))) }
         if let from = trimmed(criteria.from) { keys.append(.from(ByteBuffer(string: from))) }
         if let subject = trimmed(criteria.subject) { keys.append(.subject(ByteBuffer(string: subject))) }
+        for header in criteria.headers {
+            guard let field = trimmed(header.field), let value = trimmed(header.value) else { continue }
+            keys.append(.header(field, ByteBuffer(string: value)))
+        }
         return keys
     }
 

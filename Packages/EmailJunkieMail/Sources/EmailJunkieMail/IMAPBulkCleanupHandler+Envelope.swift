@@ -25,8 +25,10 @@ extension IMAPBulkCleanupHandler {
                         uidValidity: selectedUIDValidity,
                         from: message.from,
                         replyTo: message.replyTo,
+                        to: message.to,
                         subject: message.subject,
                         date: message.date,
+                        inReplyTo: message.inReplyTo,
                         messageID: message.messageID
                     )
                 )
@@ -62,6 +64,10 @@ extension IMAPBulkCleanupHandler {
         }
         if let replyTo = envelope.reply.first, let address = Self.address(from: replyTo) {
             current?.replyTo = address
+        }
+        current?.to = envelope.to.compactMap(Self.address(from:))
+        if let inReplyTo = envelope.inReplyTo {
+            current?.inReplyTo = String(inReplyTo)
         }
         if let messageID = envelope.messageID {
             current?.messageID = String(messageID)

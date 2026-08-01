@@ -4,6 +4,19 @@ import os
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "PendingDrafts")
 
+private enum RegenerationReplacementError: LocalizedError {
+    case alreadyApproved
+
+    var errorDescription: String? {
+        "That replacement draft was already approved. The original draft is still queued for review."
+    }
+}
+
+private struct RegenerationSourceMessage {
+    var message: MailMessage
+    var mailbox: Mailbox
+}
+
 /// Approval-queue actions on `AppState`: approve (send/save per the send-behavior
 /// setting) or deny (discard) a watcher-produced draft, plus routing of the
 /// native-notification actions. Kept separate so `AppState` stays within limits.
@@ -18,15 +31,116 @@ extension AppState {
     /// Approves a pending draft: sends it or saves it as a Gmail draft per the
     /// supplied send behavior (defaulting to the current setting), then removes
     /// it from the queue on success.
-    func approveDraft(_ draft: Draft, sendBehavior approvalSendBehavior: SendBehavior? = nil) async {
-        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
-        guard !approvingDraftIDs.contains(draft.identity) else { return }
+    ///
+    /// Unless `force` is set, the draft's thread is re-checked first (item 12);
+    /// if it changed, the send is blocked and a `pendingStaleWarnings` entry is
+    /// raised so the review card can warn with send-anyway / regenerate / discard.
+    /// Passing `force: true` is the user's "send anyway" override.
+    func approveDraft(
+        _ draft: Draft,
+        sendBehavior approvalSendBehavior: SendBehavior? = nil,
+        force: Bool = false
+    ) async {
+        do {
+            guard let credentials = try queuedApprovalCredentials(for: draft) else { return }
+            approvingDraftIDs.insert(draft.identity)
+            defer { approvingDraftIDs.remove(draft.identity) }
+
+            try await approveQueuedDraft(
+                draft,
+                sendBehavior: approvalSendBehavior,
+                force: force,
+                credentials: credentials
+            )
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+        }
+    }
+
+    private func queuedApprovalCredentials(for draft: Draft) throws -> MailAccountCredentials? {
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return nil }
+        guard !approvingDraftIDs.contains(draft.identity) else { return nil }
 
         approvalError = nil
         // A flagged draft needs the user's input first — never send or save it,
         // even via a notification "Approve" action in auto-send mode (item 13).
         guard !draft.isFlagged else {
-            approvalError = Self.draftMessage(for: DraftError.needsUserInput)
+            throw DraftError.needsUserInput
+        }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            throw DraftDispatchError.accountMismatch
+        }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            throw DraftError.unsupportedSourceMailbox
+        }
+        return credentials
+    }
+
+    private func approveQueuedDraft(
+        _ draft: Draft,
+        sendBehavior approvalSendBehavior: SendBehavior?,
+        force: Bool,
+        credentials: MailAccountCredentials
+    ) async throws {
+        let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
+        var dispatchCredentials = credentials
+        if !force {
+            let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
+            dispatchCredentials = freshness.credentials
+            if let reason = freshness.reason {
+                recordPendingStaleWarning(reason, for: draft)
+                return
+            }
+        }
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+
+        switch effectiveSendBehavior {
+        case .autoSend:
+            try await performSend(draft, credentials: dispatchCredentials)
+        case .saveAsDraft:
+            try await performSave(draft, credentials: dispatchCredentials)
+        }
+        try finalizeApprovedDraft(draft)
+    }
+
+    private func currentFreshnessCheck(
+        for draft: Draft,
+        credentials: MailAccountCredentials
+    ) async throws -> (reason: StaleThreadReason?, credentials: MailAccountCredentials) {
+        let verdict = await threadStalenessVerdict(for: draft, credentials: credentials)
+        let currentCredentials = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+        return (verdict.reason, currentCredentials)
+    }
+
+    private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
+        pendingStaleWarnings[draft.identity] = reason
+        approvalError = Self.draftMessage(for: DraftDispatchError.staleThread(reason))
+    }
+
+    /// Denies (discards) a pending draft without sending or saving it.
+    func denyDraft(_ draft: Draft) {
+        guard !approvingDraftIDs.contains(draft.identity) else { return }
+        approvalError = nil
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+        do {
+            try removePendingDraft(draft)
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+        }
+    }
+
+    /// Re-drafts a stale queued reply against the newest related source-thread
+    /// message (item 12's "regenerate" option). The old draft remains queued until
+    /// the replacement is successfully generated and persisted.
+    func regeneratePendingDraft(_ draft: Draft) async {
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
+        guard !approvingDraftIDs.contains(draft.identity) else { return }
+        guard let mailbox = Self.sourceMailbox(for: draft), mailbox.supportsReplyDrafting else {
+            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
             return
         }
         let credentials = mailCredentials
@@ -38,36 +152,66 @@ extension AppState {
             approvalError = "This draft was generated for a different email account."
             return
         }
-        guard draftSourceAllowsReplyDispatch(draft) else {
-            approvalError = Self.draftMessage(for: DraftError.unsupportedSourceMailbox)
-            return
-        }
 
+        approvalError = nil
         approvingDraftIDs.insert(draft.identity)
         defer { approvingDraftIDs.remove(draft.identity) }
 
         do {
-            switch approvalSendBehavior ?? sendBehavior {
-            case .autoSend:
-                try await performSend(draft, credentials: credentials)
-            case .saveAsDraft:
-                try await performSave(draft, credentials: credentials)
+            let source = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+            _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+            guard var replacement = try await makePendingDraft(
+                for: source.message,
+                mailbox: source.mailbox,
+                requireWatching: false,
+                credentials: credentials
+            ) else {
+                approvalError = "The draft could not be regenerated because account settings changed."
+                return
             }
-            try finalizeApprovedDraft(draft)
+            replacement.generatedAt = draft.generatedAt
+            let replacementWarning = await threadStalenessVerdict(
+                for: replacement,
+                credentials: credentials
+            ).reason
+            _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+            try replacePendingDraft(draft, with: replacement, staleReason: replacementWarning)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }
     }
 
-    /// Denies (discards) a pending draft without sending or saving it.
-    func denyDraft(_ draft: Draft) {
-        guard !approvingDraftIDs.contains(draft.identity) else { return }
-        approvalError = nil
-        do {
-            try removePendingDraft(draft)
-        } catch {
-            approvalError = Self.draftMessage(for: error)
+    /// Rebuilds a preview-sheet draft against the newest related source message.
+    /// The preview is not queued; the caller owns the sheet's replacement state.
+    func regenerateDraftPreview(_ draft: Draft) async throws -> Draft {
+        guard let mailbox = Self.sourceMailbox(for: draft), mailbox.supportsReplyDrafting else {
+            throw DraftError.unsupportedSourceMailbox
         }
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            if generatedDraft == draft {
+                generatedDraft = nil
+            }
+            throw DraftDispatchError.accountMismatch
+        }
+
+        let source = try await regenerationSource(for: draft, mailbox: mailbox, credentials: credentials)
+        _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+        guard var replacement = try await makePendingDraft(
+            for: source.message,
+            mailbox: source.mailbox,
+            requireWatching: false,
+            credentials: credentials
+        ) else {
+            throw DraftDispatchError.accountChanged
+        }
+        _ = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
+        replacement.generatedAt = draft.generatedAt
+        generatedDraft = replacement
+        return replacement
     }
 
     /// Routes a native-notification action back into the queue.
@@ -78,6 +222,9 @@ extension AppState {
         case .approve(let sendBehavior):
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             await approveDraft(draft, sendBehavior: sendBehavior)
+            if pendingStaleWarnings[identity] != nil {
+                openReviewHandler?()
+            }
         case .deny:
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
             denyDraft(draft)
@@ -135,6 +282,155 @@ extension AppState {
         return removalIndex
     }
 
+    private func regenerationSource(
+        for draft: Draft,
+        mailbox: Mailbox,
+        credentials: MailAccountCredentials
+    ) async throws -> RegenerationSourceMessage {
+        let subject = StaleThreadCheck.searchSubject(for: draft.sourceSubject)
+        let thread = try await sourceThreadInspectionResult(
+            credentials,
+            mailbox: mailbox,
+            subject: subject,
+            draft: draft
+        )
+        guard let source = StaleThreadCheck.regenerationSource(
+            draft: draft,
+            threadMessages: thread.messages
+        ) else {
+            return try await movedRegenerationSource(for: draft, credentials: credentials)
+        }
+        return RegenerationSourceMessage(message: source, mailbox: mailbox)
+    }
+
+    private func movedRegenerationSource(
+        for draft: Draft,
+        credentials: MailAccountCredentials
+    ) async throws -> RegenerationSourceMessage {
+        guard let sourceMessageID = StaleThreadCheck.messageIDSearchValue(draft.sourceMessageID) else {
+            throw DraftError.sourceMessageUnavailable
+        }
+
+        var lastError: Error?
+        var searchedMailboxSuccessfully = false
+        for mailbox in movedRegenerationSearchMailboxes(for: credentials) {
+            do {
+                let source = try await movedRegenerationSource(
+                    for: draft,
+                    credentials: credentials,
+                    mailbox: mailbox,
+                    sourceMessageID: sourceMessageID
+                )
+                searchedMailboxSuccessfully = true
+                if let source {
+                    return source
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        if !searchedMailboxSuccessfully, let lastError {
+            throw lastError
+        }
+        throw DraftError.sourceMessageUnavailable
+    }
+
+    private func movedRegenerationSource(
+        for draft: Draft,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        sourceMessageID: String
+    ) async throws -> RegenerationSourceMessage? {
+        let source = try await exactHeaderInspectionResult(
+            credentials,
+            mailbox: mailbox,
+            field: "Message-ID",
+            value: sourceMessageID
+        )
+        let replies = await supplementalHeaderInspectionResult(
+            credentials,
+            mailbox: mailbox,
+            seedMessageIDs: [sourceMessageID],
+            includeSourceMessages: false
+        )
+        let thread = Self.mergedInspectionResult(source, replies)
+        guard let message = StaleThreadCheck.regenerationSource(
+            draft: draft,
+            threadMessages: thread.messages,
+            requireUIDComparable: false
+        ) else {
+            return nil
+        }
+        return RegenerationSourceMessage(message: message, mailbox: mailbox)
+    }
+
+    private func movedRegenerationSearchMailboxes(for credentials: MailAccountCredentials) -> [Mailbox] {
+        var mailboxes: [Mailbox] = []
+        var seen = Set<String>()
+        for mailbox in [Mailbox.allMail, .archive] {
+            let liveMailbox = Self.liveSearchMailbox(mailbox, credentials: credentials)
+            let liveName = liveMailbox.imapName(using: credentials.mailboxNaming).lowercased()
+            guard seen.insert(liveName).inserted else { continue }
+            mailboxes.append(liveMailbox)
+        }
+        return mailboxes
+    }
+
+    private static func liveSearchMailbox(
+        _ mailbox: Mailbox,
+        credentials: MailAccountCredentials
+    ) -> Mailbox {
+        let liveName = mailbox.imapName(using: credentials.mailboxNaming)
+        return liveName == mailbox.imapName ? mailbox : .named(liveName)
+    }
+
+    private func replacePendingDraft(
+        _ draft: Draft,
+        with replacement: Draft,
+        staleReason: StaleThreadReason?
+    ) throws {
+        let previousDrafts = pendingDrafts
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
+        try ensureReplacementDraftIsAvailable(replacement, replacing: draft)
+        pendingDrafts.removeAll {
+            $0.identity == draft.identity || $0.identity == replacement.identity
+        }
+        pendingDrafts.insert(replacement, at: min(index, pendingDrafts.count))
+        pendingDraftCount = pendingDrafts.count
+
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            pendingDrafts = previousDrafts
+            pendingDraftCount = previousDrafts.count
+            logger.error("Failed to persist regenerated draft: \(error.localizedDescription)")
+            throw error
+        }
+
+        pendingStaleWarnings.removeValue(forKey: draft.identity)
+        pendingStaleWarnings.removeValue(forKey: replacement.identity)
+        if let staleReason {
+            pendingStaleWarnings[replacement.identity] = staleReason
+        }
+        notifier.removeNotification(identity: draft.identity)
+        if replacement.identity != draft.identity {
+            notifier.removeNotification(identity: replacement.identity)
+        }
+        notifier.notify(for: replacement, sendBehavior: sendBehavior)
+    }
+
+    private func ensureReplacementDraftIsAvailable(_ replacement: Draft, replacing draft: Draft) throws {
+        guard replacement.identity != draft.identity else { return }
+        guard !isReplacementDraftUnavailable(replacement) else {
+            throw RegenerationReplacementError.alreadyApproved
+        }
+    }
+
+    private func isReplacementDraftUnavailable(_ replacement: Draft) -> Bool {
+        approvingDraftIDs.contains(replacement.identity)
+            || persistence.loadApprovedDraftIdentities().contains(replacement.identity)
+    }
+
     func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
         guard let sourceAccount = draft.sourceAccountEmail else { return false }
         return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
@@ -142,5 +438,25 @@ extension AppState {
 
     private func normalizedEmail(_ email: String) -> String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    func draftDispatchCredentialsStillCurrent(
+        _ expectedCredentials: MailAccountCredentials,
+        for draft: Draft
+    ) throws -> MailAccountCredentials {
+        let credentials = mailCredentials
+        guard credentials.isComplete else {
+            throw DraftDispatchError.missingCredentials
+        }
+        guard credentials == expectedCredentials else {
+            throw DraftDispatchError.accountChanged
+        }
+        guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
+            throw DraftDispatchError.accountMismatch
+        }
+        guard draftSourceAllowsReplyDispatch(draft) else {
+            throw DraftError.unsupportedSourceMailbox
+        }
+        return credentials
     }
 }

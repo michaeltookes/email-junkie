@@ -100,6 +100,14 @@ final class OpenAICompatibleClientTests: XCTestCase {
         XCTAssertEqual(transport.lastURL?.absoluteString, "http://localhost:11434/v1/chat/completions")
     }
 
+    func testResolvesBaseURLWithQueryByAppendingPathBeforeQuery() async throws {
+        let (client, transport) = client(okResponse(), baseURL: "https://gateway.example.com/v1?tenant=x")
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(transport.lastURL?.absoluteString, "https://gateway.example.com/v1/chat/completions?tenant=x")
+    }
+
     func testUsesBaseURLVerbatimWhenItAlreadyTargetsChatCompletions() async throws {
         let (client, transport) = client(
             okResponse(),
@@ -109,6 +117,20 @@ final class OpenAICompatibleClientTests: XCTestCase {
         _ = try await client.complete(sampleRequest())
 
         XCTAssertEqual(transport.lastURL?.absoluteString, "https://gateway.example.com/v1/chat/completions")
+    }
+
+    func testUsesFullEndpointWithQueryAndFragmentVerbatim() async throws {
+        let (client, transport) = client(
+            okResponse(),
+            baseURL: "https://gateway.example.com/v1/chat/completions?tenant=x#primary"
+        )
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(
+            transport.lastURL?.absoluteString,
+            "https://gateway.example.com/v1/chat/completions?tenant=x#primary"
+        )
     }
 
     func testBlankBaseURLFallsBackToDefaultEndpoint() throws {

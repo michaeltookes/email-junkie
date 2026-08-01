@@ -46,11 +46,12 @@ extension AppState {
     }
 
     /// Switches the selected provider, reloading its stored key and status.
-    /// (With a single provider today this is a no-op path; it's the seam for
-    /// when a second adapter lands.)
+    /// The model field is cleared so the new provider starts from its default
+    /// instead of reusing another provider's model id.
     func selectLLMProvider(_ provider: LLMProviderKind) {
         guard provider != llmProviderKind else { return }
         llmProviderKind = provider
+        llmModel = ""
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()

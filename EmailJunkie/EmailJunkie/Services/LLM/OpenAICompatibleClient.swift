@@ -66,6 +66,8 @@ struct OpenAICompatibleClient: LLMClient {
     /// - Otherwise `/chat/completions` is appended (trailing slashes trimmed),
     ///   so `https://openrouter.ai/api/v1` and `http://localhost:11434/v1`
     ///   both resolve correctly.
+    /// - Query parameters and fragments are preserved, with the suffix appended
+    ///   to the URL path before them.
     ///
     /// Throws `LLMError.invalidBaseURL` for input that doesn't parse or whose
     /// scheme isn't `http`/`https` (e.g. an embedded space, or a scheme-less
@@ -75,19 +77,27 @@ struct OpenAICompatibleClient: LLMClient {
         let trimmed = (baseURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return defaultEndpoint }
 
-        var normalized = trimmed
-        while normalized.hasSuffix("/") { normalized.removeLast() }
+        guard var components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host, !host.isEmpty else {
+            throw LLMError.invalidBaseURL(trimmed)
+        }
 
         let suffix = "/chat/completions"
-        let full = normalized.hasSuffix(suffix) ? normalized : normalized + suffix
+        components.path = endpointPath(appending: suffix, to: components.path)
 
-        guard let url = URL(string: full),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = url.host, !host.isEmpty else {
+        guard let url = components.url else {
             throw LLMError.invalidBaseURL(trimmed)
         }
         return url
+    }
+
+    private static func endpointPath(appending suffix: String, to path: String) -> String {
+        var trimmedPath = path
+        while trimmedPath.hasSuffix("/") { trimmedPath.removeLast() }
+        guard !trimmedPath.hasSuffix(suffix) else { return trimmedPath }
+        return trimmedPath.isEmpty ? suffix : trimmedPath + suffix
     }
 
     // MARK: - Wire format

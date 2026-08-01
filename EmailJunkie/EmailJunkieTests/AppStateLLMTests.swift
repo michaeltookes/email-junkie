@@ -170,9 +170,26 @@ final class AppStateLLMTests: XCTestCase {
         appState.selectLLMProvider(.openAICompatible)
 
         XCTAssertEqual(appState.llmProviderKind, .openAICompatible)
+        XCTAssertEqual(appState.llmModel, "")
         XCTAssertEqual(appState.resolvedLLMModel, "gpt-4o-mini")
         XCTAssertTrue(appState.llmProviderKind.supportsCustomBaseURL)
         XCTAssertFalse(appState.isLLMConnected)
+    }
+
+    func testSelectingProviderClearsCustomModelForNewProviderDefault() {
+        let appState = makeAppState()
+        appState.llmModel = "claude-opus-4-8"
+
+        appState.selectLLMProvider(.openAICompatible)
+
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "gpt-4o-mini")
+
+        appState.llmModel = "openrouter/custom-model"
+        appState.selectLLMProvider(.anthropic)
+
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "claude-sonnet-4-6")
     }
 
     func testTestConnectionPassesCustomBaseURLForOpenAICompatible() async {

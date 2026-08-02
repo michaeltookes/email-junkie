@@ -158,7 +158,7 @@ enum ReplyWorthiness {
     // MARK: - Automated notifications
 
     static func isAutomatedNotification(_ headers: MailHeaderFields) -> Bool {
-        if isPresent(headers.autoResponseSuppress) { return true }
+        if hasSuppressingAutoResponseValue(headers.autoResponseSuppress) { return true }
         if let autoSubmitted = normalizedValue(headers.autoSubmitted) {
             // RFC 3834: `no` means "not automated"; any other value (auto-
             // generated, auto-replied, …) marks machine-submitted mail.
@@ -166,6 +166,12 @@ enum ReplyWorthiness {
             return value.trimmingCharacters(in: .whitespaces) != "no"
         }
         return false
+    }
+
+    private static func hasSuppressingAutoResponseValue(_ value: String?) -> Bool {
+        guard let value = normalizedValue(value) else { return false }
+        let tokens = value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        return tokens.contains { !$0.isEmpty && $0 != "none" }
     }
 
     // MARK: - Calendar invites

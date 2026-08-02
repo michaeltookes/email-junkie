@@ -115,6 +115,22 @@ final class ReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(evaluate(sender: "alerts@example.com", headers: headers), .skip(.automatedNotification))
     }
 
+    func testAutoResponseSuppressNoneIsWorthy() {
+        for value in ["None", " none ", "NONE"] {
+            let headers = MailHeaderFields(autoResponseSuppress: value)
+            XCTAssertEqual(
+                evaluate(sender: "alice@example.com", headers: headers),
+                .worthy,
+                "expected \(value) to be non-automated"
+            )
+        }
+    }
+
+    func testAutoResponseSuppressMixedValueIsSkipped() {
+        let headers = MailHeaderFields(autoResponseSuppress: "None, All")
+        XCTAssertEqual(evaluate(sender: "alerts@example.com", headers: headers), .skip(.automatedNotification))
+    }
+
     // MARK: - Calendar invites
 
     func testCalendarContentTypeIsSkipped() {

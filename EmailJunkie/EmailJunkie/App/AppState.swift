@@ -307,6 +307,8 @@ final class AppState: ObservableObject {
         }
 
         let previousSettings = persistence.loadSettings()
+        let accountChanged = !isAccountConnected
+            || previousSettings.mailEmail.caseInsensitiveCompare(credentials.email) != .orderedSame
         let previousAppPassword: String?
         do {
             previousAppPassword = try secrets.value(for: .mailAppPassword)
@@ -335,7 +337,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
-        resetMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
         logger.info("Mailbox connected")
     }
 

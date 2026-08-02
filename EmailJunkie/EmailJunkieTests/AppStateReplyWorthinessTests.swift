@@ -89,6 +89,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         // Skipped-but-handled: no draft body fetched, marked processed so it is
         // not re-evaluated next poll.
         XCTAssertEqual(provider.bodyFetchCallCount, 0)
+        XCTAssertEqual(provider.headerFetchCallCount, 0)
         XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
     }
 
@@ -133,7 +134,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
     }
 
     func testHeaderFetchFailureStillCatchesNoReplySender() async {
-        let (appState, _, _) = makeAppState(
+        let (appState, provider, _) = makeAppState(
             fetch: .success([message(id: 1, from: "noreply@x.com")]),
             header: .failure(.connectionFailed("no route"))
         )
@@ -143,6 +144,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
 
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertEqual(appState.skippedMessages.map(\.reason), [.noReplySender])
+        XCTAssertEqual(provider.headerFetchCallCount, 0)
     }
 
     func testSkippedMessageIsNotReloggedAcrossPolls() async {
@@ -234,8 +236,8 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
         XCTAssertTrue(appState.skippedMessages.isEmpty)
         XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
-        // The override does not re-run the worthiness gate: no extra header fetch.
-        XCTAssertEqual(provider.headerFetchCallCount, 1)
+        // The original no-reply skip and override both bypass header fetch.
+        XCTAssertEqual(provider.headerFetchCallCount, 0)
     }
 
     func testForceDraftWorksRegardlessOfWatchState() async throws {
@@ -295,6 +297,36 @@ final class AppStateReplyWorthinessTests: XCTestCase {
     }
 
     // MARK: - Account isolation
+
+    func testRetestingSameAccountPreservesSkippedMessages() async {
+        let (appState, _, _) = makeAppState()
+        appState.recordSkip(
+            message(id: 8, from: "no-reply@x.com"),
+            reason: .noReplySender,
+            account: "me@gmail.com",
+            mailbox: .inbox
+        )
+
+        await appState.testConnection()
+
+        XCTAssertEqual(appState.skippedMessages.count, 1)
+        XCTAssertEqual(appState.skippedMessages.first?.message.id, 8)
+    }
+
+    func testTestingDifferentAccountClearsSkippedMessages() async {
+        let (appState, _, _) = makeAppState()
+        appState.recordSkip(
+            message(id: 8, from: "no-reply@x.com"),
+            reason: .noReplySender,
+            account: "me@gmail.com",
+            mailbox: .inbox
+        )
+        appState.mailEmail = "other@gmail.com"
+
+        await appState.testConnection()
+
+        XCTAssertTrue(appState.skippedMessages.isEmpty)
+    }
 
     func testSkipLogClearedOnDisconnect() async {
         let (appState, _, _) = makeAppState(

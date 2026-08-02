@@ -12,15 +12,17 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Repl
 extension AppState {
 
     /// Judges `message` and returns the skip reason, or `nil` when it is worth a
-    /// draft. Fetches the bounded header fields the ENVELOPE lacks; if that fetch
-    /// fails, evaluation falls back to sender-only signals — conservative, since a
-    /// no-reply sender is still caught and a missing header only errs toward
-    /// drafting.
+    /// draft. Checks decisive sender-only signals before fetching the bounded
+    /// header fields the ENVELOPE lacks; if that fetch fails, evaluation falls
+    /// back to sender-only signals.
     func replyWorthinessSkipReason(
         _ message: MailMessage,
         credentials: MailAccountCredentials,
         mailbox: Mailbox
     ) async -> ReplyWorthinessReason? {
+        let senderOnly = ReplyWorthinessSignals(senderEmail: message.from?.email)
+        if let skipReason = ReplyWorthiness.evaluate(senderOnly).skipReason { return skipReason }
+
         let headers = await fetchReplyWorthinessHeaders(message, credentials: credentials, mailbox: mailbox)
         let signals = ReplyWorthinessSignals(senderEmail: message.from?.email, headers: headers)
         return ReplyWorthiness.evaluate(signals).skipReason

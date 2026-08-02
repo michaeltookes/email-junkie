@@ -100,7 +100,7 @@ extension AppState {
         return bodyPreviewGeneration
     }
 
-    func resetMessagePreviewForAccountChange() {
+    func resetMessagePreviewForAccountChange(clearSkippedMessages shouldClearSkippedMessages: Bool = true) {
         _ = nextPreviewGeneration()
         _ = nextBodyPreviewGeneration()
         _ = nextDraftGeneration()
@@ -108,7 +108,9 @@ extension AppState {
         clearDraftPreview()
         resetMailboxBrowserForAccountChange()
         resetBulkCleanupForAccountChange()
-        clearSkippedMessages()
+        if shouldClearSkippedMessages {
+            clearSkippedMessages()
+        }
         isFetching = false
         isFetchingBody = false
         isGeneratingDraft = false

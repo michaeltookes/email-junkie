@@ -63,13 +63,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 ## Medium Priority
 
-17. **Reply-worthiness filtering**
-    Decide which incoming emails get a draft.
-    *As Priya, I want newsletters, no-reply, and bulk mail filtered out, so that I'm not flooded with pointless drafts and don't burn LLM cost.*
-    - Heuristics skip obvious non-replyable mail (no-reply senders, bulk/list headers, automated notifications, calendar invites).
-    - Skipped reasons visible in the activity log (item 21).
-    - User can override and force a draft for a skipped message.
-
 18. **Sender allowlist / blocklist & rules**
     Control which senders are drafted.
     *As Priya, I want to choose which senders are always or never drafted, so that I control the watcher's scope.*

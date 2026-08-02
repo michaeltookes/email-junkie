@@ -44,6 +44,17 @@ public protocol MailProvider: Sendable {
         expectedUIDValidity: UInt32?
     ) async throws -> Data
 
+    /// Fetches a bounded set of header fields for the message identified by
+    /// `uid` in `mailbox`, using `BODY.PEEK[HEADER.FIELDS (...)]` so reading
+    /// them does not set `\Seen`. Carries the list/automation/content-type
+    /// signals the ENVELOPE fetch omits, for the reply-worthiness gate (item 17).
+    func fetchHeaderFields(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> MailHeaderFields
+
     /// Searches `mailbox` server-side (IMAP `UID SEARCH`) for messages matching
     /// `criteria`, returning one page of envelope-level results (newest first)
     /// plus the total match count. `offset`/`limit` page through the full match
@@ -150,6 +161,19 @@ public extension MailProvider {
             uid: uid,
             expectedUIDValidity: nil
         )
+    }
+
+    /// Default: no header fields available. `IMAPMailProvider` overrides this
+    /// with the real `HEADER.FIELDS` fetch; other conformers (test doubles,
+    /// non-IMAP backends) inherit empty fields, which the reply-worthiness gate
+    /// treats conservatively (when in doubt, draft).
+    func fetchHeaderFields(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> MailHeaderFields {
+        MailHeaderFields()
     }
 
     /// Default: sending is unsupported. Providers that can submit mail (e.g.

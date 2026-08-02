@@ -34,8 +34,40 @@ struct PendingDraftsView: View {
                     .padding(12)
                 }
             }
+
+            if !appState.skippedMessages.isEmpty {
+                Divider()
+                skippedSection
+            }
         }
         .frame(width: 720, height: 520)
+    }
+
+    /// A bare-bones list of messages the reply-worthiness gate skipped (item 17),
+    /// each with a "Draft anyway" override. The full activity history (item 21)
+    /// will replace this; kept minimal deliberately.
+    private var skippedSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Skipped (\(appState.skippedMessages.count))", systemImage: "nosign")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") { appState.dismissAllSkippedMessages() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(appState.skippedMessages) { entry in
+                        SkippedMessageRow(entry: entry)
+                            .environmentObject(appState)
+                    }
+                }
+            }
+            .frame(maxHeight: 132)
+        }
+        .padding(12)
     }
 
     private var header: some View {
@@ -69,6 +101,60 @@ struct PendingDraftsView: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// One skipped-message row: sender, subject, skip reason, and the override
+/// ("Draft anyway") plus a dismiss. Deliberately compact — this is the minimal
+/// skip-log surface pending the full activity history (item 21).
+private struct SkippedMessageRow: View {
+    let entry: SkippedMessage
+    @EnvironmentObject var appState: AppState
+    @State private var isDrafting = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.senderDisplay)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Text(entry.reason.headline)
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.18)))
+                        .foregroundStyle(.secondary)
+                }
+                Text(entry.subject.isEmpty ? "(no subject)" : entry.subject)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if isDrafting {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Draft anyway") {
+                    isDrafting = true
+                    Task {
+                        await appState.forceDraftSkippedMessage(entry)
+                        isDrafting = false
+                    }
+                }
+                .font(.caption)
+                Button {
+                    appState.dismissSkippedMessage(entry)
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }
 

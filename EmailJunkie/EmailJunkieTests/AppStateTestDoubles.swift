@@ -3,9 +3,6 @@ import Security
 import XCTest
 @testable import EmailJunkie
 
-/// Shared test doubles for `AppState` tests: in-memory persistence, fake and
-/// suspendable mail providers, and a failable secret store.
-
 final class AppStateMemoryPersistence: PersistenceProvider {
     private var settings: Settings
     private(set) var voiceProfile: VoiceProfile?
@@ -90,12 +87,15 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let result: Result<Void, MailError>
     private let fetchResult: Result<[MailMessage], MailError>
     private let bodyResult: Result<Data, MailError>
+    private let headerResult: Result<MailHeaderFields, MailError>
     private let appendResult: Result<Void, MailError>
     private let sendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var fetchCallCount = 0
     private(set) var bodyFetchCallCount = 0
+    private(set) var headerFetchCallCount = 0
     private(set) var lastBodyUID: UInt32?
+    private(set) var lastHeaderUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var appendedMailbox: Mailbox?
     private(set) var appendedRFC822: Data?
@@ -107,12 +107,14 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
         bodyResult: Result<Data, MailError> = .success(Data()),
+        headerResult: Result<MailHeaderFields, MailError> = .success(MailHeaderFields()),
         appendResult: Result<Void, MailError> = .success(()),
         sendResult: Result<Void, MailError> = .success(())
     ) {
         self.result = result
         self.fetchResult = fetchResult
         self.bodyResult = bodyResult
+        self.headerResult = headerResult
         self.appendResult = appendResult
         self.sendResult = sendResult
     }
@@ -141,6 +143,17 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         lastBodyUID = uid
         lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()
+    }
+
+    func fetchHeaderFields(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> MailHeaderFields {
+        headerFetchCallCount += 1
+        lastHeaderUID = uid
+        return try headerResult.get()
     }
 
     func appendMessage(
@@ -191,27 +204,15 @@ final class SuspendedAppMailProvider: MailProvider, @unchecked Sendable {
     }
 
     func fetchRecentMessages(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
-        []
-    }
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, limit: Int
+    ) async throws -> [MailMessage] { [] }
 
     func fetchBodyText(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        uid: UInt32,
-        expectedUIDValidity: UInt32?
-    ) async throws -> Data {
-        Data()
-    }
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, uid: UInt32, expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
 
     func appendMessage(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        rfc822: Data,
-        flags: [MailFlag]
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, rfc822: Data, flags: [MailFlag]
     ) async throws {}
 }
 
@@ -237,27 +238,15 @@ final class SuspendedSendMailProvider: MailProvider, @unchecked Sendable {
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
 
     func fetchRecentMessages(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
-        []
-    }
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, limit: Int
+    ) async throws -> [MailMessage] { [] }
 
     func fetchBodyText(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        uid: UInt32,
-        expectedUIDValidity: UInt32?
-    ) async throws -> Data {
-        Data()
-    }
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, uid: UInt32, expectedUIDValidity: UInt32?
+    ) async throws -> Data { Data() }
 
     func appendMessage(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        rfc822: Data,
-        flags: [MailFlag]
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, rfc822: Data, flags: [MailFlag]
     ) async throws {}
 
     func sendMessage(
@@ -293,18 +282,11 @@ final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
     func verifyConnection(_ credentials: MailAccountCredentials) async throws {}
 
     func fetchRecentMessages(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        limit: Int
-    ) async throws -> [MailMessage] {
-        []
-    }
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, limit: Int
+    ) async throws -> [MailMessage] { [] }
 
     func fetchBodyText(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        uid: UInt32,
-        expectedUIDValidity: UInt32?
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, uid: UInt32, expectedUIDValidity: UInt32?
     ) async throws -> Data {
         lock.lock()
         lastCredentials = credentials
@@ -327,10 +309,7 @@ final class SuspendedBodyMailProvider: MailProvider, @unchecked Sendable {
     }
 
     func appendMessage(
-        _ credentials: MailAccountCredentials,
-        mailbox: Mailbox,
-        rfc822: Data,
-        flags: [MailFlag]
+        _ credentials: MailAccountCredentials, mailbox: Mailbox, rfc822: Data, flags: [MailFlag]
     ) async throws {}
 }
 

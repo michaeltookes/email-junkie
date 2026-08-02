@@ -5,11 +5,7 @@ import SwiftUI
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "AppState")
 
-/// Central application state container — the single source of truth.
-///
-/// Views observe this object and update reactively. It holds the watch status,
-/// launch-at-login preference, inbox poll interval, and the IMAP mail account
-/// connection. (The parked OAuth engine remains but is no longer wired here.)
+/// Central application state container and single source of truth for observed app state.
 @MainActor
 final class AppState: ObservableObject {
 
@@ -125,9 +121,7 @@ final class AppState: ObservableObject {
     /// What approving a draft does: save a Gmail draft or send immediately.
     @Published var sendBehavior: SendBehavior
 
-    /// Whether first-run onboarding has been completed (or dismissed). Mirrors
-    /// the persisted `Settings.onboardingCompleted`; mutated only through the
-    /// transitions in `AppState+Onboarding`.
+    /// Whether first-run onboarding has been completed or dismissed.
     @Published var onboardingCompleted: Bool
 
     /// Whether the loaded settings file predates the onboarding completion flag.
@@ -136,14 +130,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Mailbox Browser (item 40)
 
-    /// Search inputs + results for the mailbox browser window. Grouped into one
-    /// value so `AppState` stays compact; SwiftUI binds into individual fields.
+    /// Search inputs and results for the mailbox browser window.
     @Published var browser = MailboxBrowserState()
 
     // MARK: - Bulk Cleanup (item 42)
 
-    /// Chosen bulk action, preview of what it would affect, and run progress.
-    /// Grouped into one value so `AppState` stays compact.
+    /// Chosen bulk action, preview, and run progress.
     @Published var bulk = BulkCleanupState()
 
     // MARK: - Inbox Watcher
@@ -157,14 +149,20 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 
-    /// Stale-thread warnings raised at approval time, keyed by draft identity
-    /// (item 12). A non-nil entry means the queued draft's thread changed since it
-    /// was generated; the review UI surfaces the reason with send-anyway /
-    /// regenerate / discard options instead of dispatching.
+    /// Stale-thread warnings raised at approval time, keyed by draft identity.
     @Published var pendingStaleWarnings: [String: StaleThreadReason] = [:]
 
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
+
+    /// Messages the watcher passed over instead of drafting, newest first.
+    /// This rolling operational log is in-memory only.
+    @Published var skippedMessages: [SkippedMessage] = []
+
+    var skippedMessageIDs: Set<String> = []
+
+    /// Maximum number of skip-log entries kept in memory.
+    let skippedMessageLogLimit = 100
 
     /// Messages the watcher has already handled, so none is drafted twice.
     var processedMessages: ProcessedMessages
@@ -178,8 +176,7 @@ final class AppState: ObservableObject {
     /// How many recent inbox messages each poll inspects before catch-up expansion.
     let watchFetchLimit = 20
 
-    /// Maximum number of messages to inspect when catch-up needs to page back to
-    /// the watcher baseline boundary.
+    /// Maximum messages to inspect when catch-up pages back to the watcher baseline.
     let watchCatchUpFetchLimit = ProcessedMessages.limit
 
     // MARK: - Private
@@ -207,9 +204,7 @@ final class AppState: ObservableObject {
     var browserGeneration = 0
     var bulkGeneration = 0
 
-    /// Pause between bulk-cleanup sweep passes so a rapid loop of full mailbox
-    /// scans does not trip a provider's rate limit (item 49; att.net/Yahoo answer
-    /// a too-fast burst with a SEARCH server error). Overridable for fast tests.
+    /// Pause between bulk-cleanup sweeps so rapid scans do not trip provider rate limits.
     var bulkSweepPacingNanoseconds: UInt64 = 1_200_000_000
 
     // MARK: - Initialization
@@ -314,6 +309,8 @@ final class AppState: ObservableObject {
         }
 
         let previousSettings = persistence.loadSettings()
+        let accountChanged = !isAccountConnected
+            || previousSettings.mailEmail.caseInsensitiveCompare(credentials.email) != .orderedSame
         let previousAppPassword: String?
         do {
             previousAppPassword = try secrets.value(for: .mailAppPassword)
@@ -342,7 +339,7 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
-        resetMessagePreviewForAccountChange()
+        resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
         logger.info("Mailbox connected")
     }
 

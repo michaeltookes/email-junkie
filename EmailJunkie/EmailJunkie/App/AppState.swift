@@ -159,6 +159,8 @@ final class AppState: ObservableObject {
     /// This rolling operational log is in-memory only.
     @Published var skippedMessages: [SkippedMessage] = []
 
+    var skippedMessageIDs: Set<String> = []
+
     /// Maximum number of skip-log entries kept in memory.
     let skippedMessageLogLimit = 100
 

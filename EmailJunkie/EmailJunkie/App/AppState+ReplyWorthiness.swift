@@ -66,28 +66,52 @@ extension AppState {
             account: account,
             reason: reason
         )
+        skippedMessageIDs.insert(entry.id)
         skippedMessages.removeAll { $0.id == entry.id }
         skippedMessages.insert(entry, at: 0)
         if skippedMessages.count > skippedMessageLogLimit {
             skippedMessages.removeLast(skippedMessages.count - skippedMessageLogLimit)
         }
-        logger.info("Skipped message (\(reason.rawValue, privacy: .public)) from log; \(self.skippedMessages.count) entries")
+        logger.info("Recorded skipped message (\(reason.rawValue, privacy: .public)); \(self.skippedMessages.count) visible entries")
     }
 
     /// Removes a single entry from the skip log.
     func removeSkippedMessage(_ entry: SkippedMessage) {
         skippedMessages.removeAll { $0.id == entry.id }
+        skippedMessageIDs.remove(entry.id)
     }
 
     /// Clears the whole skip log.
     func clearSkippedMessages() {
         skippedMessages.removeAll()
+        skippedMessageIDs.removeAll()
+    }
+
+    /// Dismisses a skipped entry and durably suppresses future watcher handling.
+    func dismissSkippedMessage(_ entry: SkippedMessage) {
+        dismissSkippedMessages([entry])
+    }
+
+    /// Dismisses all visible skipped entries and persists the acknowledgements.
+    func dismissAllSkippedMessages() {
+        dismissSkippedMessages(skippedMessages)
     }
 
     /// Whether a skipped entry already exists for the same account/mailbox UID.
     func hasSkippedMessage(_ message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
         let entry = SkippedMessage(message: message, mailbox: mailbox, account: account, reason: .noReplySender)
-        return skippedMessages.contains { $0.id == entry.id }
+        return skippedMessageIDs.contains(entry.id)
+    }
+
+    private func dismissSkippedMessages(_ entries: [SkippedMessage]) {
+        guard !entries.isEmpty else { return }
+        let entryIDs = Set(entries.map(\.id))
+        for entry in entries {
+            processedMessages.insert(entry.message, account: entry.account, mailbox: entry.mailbox)
+        }
+        persistence.saveProcessedMessages(processedMessages)
+        skippedMessages.removeAll { entryIDs.contains($0.id) }
+        skippedMessageIDs.subtract(entryIDs)
     }
 
     // MARK: - Override

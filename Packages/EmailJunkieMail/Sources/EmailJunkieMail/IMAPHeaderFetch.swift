@@ -304,8 +304,8 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
 
         var contentTypes: [String] = []
         structure.enumerateParts { _, part in
-            guard !Self.isAttachment(part) else { return }
             let contentType = Self.contentTypeString(for: part)
+            guard !Self.isAttachment(part) || Self.isCalendarInviteContentType(contentType) else { return }
             guard !contentTypes.contains(contentType) else { return }
             contentTypes.append(contentType)
         }
@@ -327,6 +327,13 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
 
     private static func isCalendarMediaType(_ contentType: String) -> Bool {
         contentType == "text/calendar" || contentType == "application/ics"
+    }
+
+    private static func isCalendarInviteContentType(_ contentType: String) -> Bool {
+        guard let separator = contentType.firstIndex(of: ";") else { return false }
+        let mediaType = String(contentType[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isCalendarMediaType(mediaType) else { return false }
+        return contentType.lowercased().hasSuffix("; method=request")
     }
 
     private static func isAttachment(_ part: BodyStructure) -> Bool {

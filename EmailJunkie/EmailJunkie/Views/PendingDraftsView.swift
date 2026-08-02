@@ -53,7 +53,7 @@ struct PendingDraftsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Clear") { appState.clearSkippedMessages() }
+                Button("Clear") { appState.dismissAllSkippedMessages() }
                     .buttonStyle(.link)
                     .font(.caption)
             }
@@ -144,7 +144,7 @@ private struct SkippedMessageRow: View {
                 }
                 .font(.caption)
                 Button {
-                    appState.removeSkippedMessage(entry)
+                    appState.dismissSkippedMessage(entry)
                 } label: {
                     Image(systemName: "xmark")
                 }

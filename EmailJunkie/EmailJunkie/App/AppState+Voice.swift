@@ -95,11 +95,11 @@ extension AppState {
     }
 
     private var currentVoiceLLMConfiguration: VoiceLLMConfiguration? {
-        guard isLLMConnected,
-              let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil),
-              !key.isEmpty else {
-            return nil
-        }
+        guard isLLMConnected else { return nil }
+        let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil) ?? ""
+        // Key-optional providers (local runtimes) learn with an empty key; cloud
+        // providers still require a stored key.
+        guard !key.isEmpty || !llmProviderKind.requiresAPIKey else { return nil }
         return VoiceLLMConfiguration(
             provider: llmProviderKind,
             model: resolvedLLMModel,

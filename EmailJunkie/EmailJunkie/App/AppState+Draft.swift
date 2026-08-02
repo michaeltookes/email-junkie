@@ -176,11 +176,11 @@ extension AppState {
     }
 
     private var currentDraftLLMConfiguration: DraftLLMConfiguration? {
-        guard isLLMConnected,
-              let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil),
-              !key.isEmpty else {
-            return nil
-        }
+        guard isLLMConnected else { return nil }
+        let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil) ?? ""
+        // Key-optional providers (local runtimes) draft with an empty key; cloud
+        // providers still require a stored key.
+        guard !key.isEmpty || !llmProviderKind.requiresAPIKey else { return nil }
         return DraftLLMConfiguration(
             provider: llmProviderKind,
             model: resolvedLLMModel,

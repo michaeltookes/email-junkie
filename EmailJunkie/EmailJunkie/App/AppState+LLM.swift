@@ -44,10 +44,13 @@ extension AppState {
         saveSettings()
     }
 
-    /// Recomputes whether the current key is verified for the currently
-    /// selected provider/model pair.
+    /// Recomputes whether the current credential is verified for the currently
+    /// selected provider/model pair. Key-optional providers (local runtimes) need
+    /// no stored key — a matching verified model alone counts as connected.
     func refreshLLMConnectionStatus(llmModel model: String? = nil) {
-        isLLMConnected = secrets.hasValue(for: llmProviderKind.apiKeySecret)
+        let hasCredential = !llmProviderKind.requiresAPIKey
+            || secrets.hasValue(for: llmProviderKind.apiKeySecret)
+        isLLMConnected = hasCredential
             && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
     }
 
@@ -71,9 +74,11 @@ extension AppState {
         llmError = nil
 
         let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            llmError = "Enter an API key first."
-            return
+        if llmProviderKind.requiresAPIKey {
+            guard !key.isEmpty else {
+                llmError = "Enter an API key first."
+                return
+            }
         }
 
         isTestingLLM = true
@@ -104,11 +109,15 @@ extension AppState {
             return
         }
 
-        do {
-            try secrets.set(key, for: testedProvider.apiKeySecret)
-        } catch {
-            llmError = Self.keychainLLMMessage(action: "save", error: error)
-            return
+        // Persist the key only when there is one. Key-optional providers (local
+        // runtimes) verify with an empty key and store nothing in the Keychain.
+        if !key.isEmpty {
+            do {
+                try secrets.set(key, for: testedProvider.apiKeySecret)
+            } catch {
+                llmError = Self.keychainLLMMessage(action: "save", error: error)
+                return
+            }
         }
 
         verifiedLLMModel = testedModel
@@ -161,7 +170,12 @@ extension AppState {
     }
 
     private var currentLLMEndpointOrigin: String? {
-        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(baseURL: currentLLMBaseURL),
+        let defaultEndpoint = llmProviderKind.defaultOpenAICompatibleEndpoint
+            ?? OpenAICompatibleClient.defaultEndpoint
+        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(
+                baseURL: currentLLMBaseURL,
+                defaultEndpoint: defaultEndpoint
+              ),
               let scheme = endpoint.scheme?.lowercased(),
               let host = endpoint.host?.lowercased() else {
             return nil

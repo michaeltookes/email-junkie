@@ -122,6 +122,22 @@ final class ReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .skip(.calendarInvite))
     }
 
+    func testNestedCalendarBodyContentTypeIsSkipped() {
+        let headers = MailHeaderFields(
+            contentType: "multipart/alternative; boundary=abc",
+            bodyContentTypes: ["multipart/alternative", "text/plain", "text/calendar"]
+        )
+        XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .skip(.calendarInvite))
+    }
+
+    func testMultipartWithoutCalendarBodyContentTypeIsWorthy() {
+        let headers = MailHeaderFields(
+            contentType: "multipart/alternative; boundary=abc",
+            bodyContentTypes: ["multipart/alternative", "text/plain", "text/html"]
+        )
+        XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .worthy)
+    }
+
     func testCalendarInviteBeatsAutomationSignals() {
         // A calendar invite from a real person is a calendar invite first.
         let headers = MailHeaderFields(

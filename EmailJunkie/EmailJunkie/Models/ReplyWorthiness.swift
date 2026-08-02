@@ -171,8 +171,11 @@ enum ReplyWorthiness {
     // MARK: - Calendar invites
 
     static func isCalendarInvite(_ headers: MailHeaderFields) -> Bool {
-        guard let contentType = normalizedValue(headers.contentType) else { return false }
-        return contentType.contains("text/calendar") || contentType.contains("application/ics")
+        let contentTypes = [headers.contentType].compactMap { normalizedValue($0) }
+            + headers.bodyContentTypes.compactMap { normalizedValue($0) }
+        return contentTypes.contains { contentType in
+            contentType.contains("text/calendar") || contentType.contains("application/ics")
+        }
     }
 
     // MARK: - Helpers

@@ -92,10 +92,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func contextualActionItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
 
-        // Review Drafts (only when there are drafts awaiting approval).
-        if appState.pendingDraftCount > 0 {
+        // Review window (pending drafts or skipped messages with override).
+        if appState.hasReviewWindowContent {
             let review = NSMenuItem(
-                title: "Review Drafts (\(appState.pendingDraftCount))…",
+                title: appState.reviewWindowMenuTitle,
                 action: #selector(openReviewMenu),
                 keyEquivalent: "r"
             )

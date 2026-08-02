@@ -90,19 +90,19 @@ extension AppState {
     /// log regardless of watch state.
     @discardableResult
     func forceDraftSkippedMessage(_ entry: SkippedMessage) async -> Bool {
-        watchError = nil
+        approvalError = nil
 
         let credentials = mailCredentials
         guard credentials.isComplete else {
-            watchError = "Connect an email account first."
+            approvalError = "Connect an email account first."
             return false
         }
         guard credentials.email.caseInsensitiveCompare(entry.account) == .orderedSame else {
-            watchError = "That message belongs to a different account than the one connected."
+            approvalError = "That message belongs to a different account than the one connected."
             return false
         }
         guard canGenerateDraft else {
-            watchError = "Connect an AI provider first."
+            approvalError = "Connect an AI provider first."
             return false
         }
 
@@ -117,7 +117,7 @@ extension AppState {
             removeSkippedMessage(entry)
             return true
         } catch {
-            watchError = Self.draftMessage(for: error)
+            approvalError = Self.draftMessage(for: error)
             logger.error("Force-draft of skipped message failed: \(error.localizedDescription)")
             return false
         }

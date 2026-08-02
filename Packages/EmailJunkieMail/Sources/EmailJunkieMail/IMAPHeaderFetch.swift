@@ -6,9 +6,10 @@ import NIOSSL
 
 extension IMAPMailProvider {
     /// Fetches a bounded set of header fields for one message via
-    /// `BODY.PEEK[HEADER.FIELDS (...)]`. Peek avoids setting `\Seen`. Used by the
-    /// watcher's reply-worthiness gate (item 17) to see list/automation/content-
-    /// type signals that the ENVELOPE fetch does not carry.
+    /// `BODYSTRUCTURE` plus `BODY.PEEK[HEADER.FIELDS (...)]`. Peek avoids setting
+    /// `\Seen`. Used by the watcher's reply-worthiness gate (item 17) to see
+    /// list/automation/MIME content-type signals that the ENVELOPE fetch does not
+    /// carry.
     public func fetchHeaderFields(
         _ credentials: MailAccountCredentials,
         mailbox: Mailbox,
@@ -93,11 +94,11 @@ final class IMAPHeaderFetchAttempts: @unchecked Sendable {
     }
 }
 
-/// Drives LOGIN → SELECT → UID FETCH (BODY.PEEK[HEADER.FIELDS (...)]) → LOGOUT
-/// and completes `promise` with the parsed header fields. A FETCH that returns
-/// no header section (the message carries none of the requested fields) settles
-/// with empty fields, not an error — absence of these headers is a valid,
-/// reply-worthy signal.
+/// Drives LOGIN → SELECT → UID FETCH (BODYSTRUCTURE + BODY.PEEK[HEADER.FIELDS (...)])
+/// → LOGOUT and completes `promise` with the parsed header fields plus MIME part
+/// content types. A FETCH that returns no header section (the message carries none
+/// of the requested fields) settles with empty fields, not an error; absence of
+/// these headers is a valid, reply-worthy signal.
 final class IMAPHeaderFetchHandler: ChannelInboundHandler {
     typealias InboundIn = Response
 
@@ -121,6 +122,7 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
     private var settled = false
     private var headerBytes = ByteBuffer()
     private var receivingHeader = false
+    private var bodyContentTypes: [String] = []
     private var selectedUIDValidity: UInt32?
 
     init(
@@ -196,11 +198,21 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
             let range = MessageIdentifierRange<UID>(UID(rawValue: uid))
             let set = MessageIdentifierSetNonEmpty(range: range)
             let section = SectionSpecifier.headerFields(MailHeaderFields.requestedFieldNames)
-            send(.uidFetch(.set(set), [.bodySection(peek: true, section, nil)], []), tag: fetchTag, context: context)
+            send(
+                .uidFetch(
+                    .set(set),
+                    [.bodyStructure(extensions: true), .bodySection(peek: true, section, nil)],
+                    []
+                ),
+                tag: fetchTag,
+                context: context
+            )
             step = .fetch
         case fetchTag:
             guard isOK(tagged.state) else { return failTagged(tagged.state) }
-            settle(.success(MailHeaderFields.parse(headerData())))
+            var fields = MailHeaderFields.parse(headerData())
+            fields.bodyContentTypes = bodyContentTypes
+            settle(.success(fields))
             step = .done
             send(.logout, tag: logoutTag, context: context)
             context.close(promise: nil)
@@ -211,6 +223,8 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
 
     private func handleFetch(_ response: FetchResponse) {
         switch response {
+        case .simpleAttribute(.body(let body, hasExtensionData: _)):
+            bodyContentTypes = Self.bodyContentTypes(from: body)
         case .streamingBegin(let kind, _):
             // Only accumulate the BODY[HEADER.FIELDS] stream — ignore any other section.
             if case .body = kind {
@@ -283,6 +297,22 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
     private func headerData() -> Data {
         var buffer = headerBytes
         return Data(buffer.readBytes(length: buffer.readableBytes) ?? [])
+    }
+
+    private static func bodyContentTypes(from body: MessageAttribute.BodyStructure) -> [String] {
+        guard case .valid(let structure) = body else { return [] }
+
+        var contentTypes: [String] = []
+        structure.enumerateParts { _, part in
+            let contentType = Self.contentTypeString(for: part.mediaType)
+            guard !contentTypes.contains(contentType) else { return }
+            contentTypes.append(contentType)
+        }
+        return contentTypes
+    }
+
+    private static func contentTypeString(for mediaType: Media.MediaType) -> String {
+        "\(String(mediaType.topLevel))/\(String(mediaType.sub))"
     }
 
     private func settle(_ result: Result<MailHeaderFields, Error>) {

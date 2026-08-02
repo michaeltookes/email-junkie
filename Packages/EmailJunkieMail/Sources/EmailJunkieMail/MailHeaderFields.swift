@@ -3,7 +3,7 @@ import Foundation
 /// A bounded set of RFC 5322 header fields fetched with
 /// `BODY.PEEK[HEADER.FIELDS (...)]` — just the headers needed to judge whether a
 /// message is worth replying to (item 17). ENVELOPE (from `fetchRecentMessages`)
-/// gives the sender but not these list/automation/content-type signals, so the
+/// gives the sender but not these list/automation/MIME content-type signals, so the
 /// watcher fetches this small, targeted block before deciding to draft.
 ///
 /// Every field is optional: absent means the server did not return that header
@@ -23,6 +23,10 @@ public struct MailHeaderFields: Equatable, Sendable {
     public var autoResponseSuppress: String?
     /// `Content-Type` — used to spot calendar invites (`text/calendar`).
     public var contentType: String?
+    /// MIME content types discovered from the message body structure, including
+    /// nested parts. This catches invites inside multipart messages whose top-
+    /// level `Content-Type` is only `multipart/*`.
+    public var bodyContentTypes: [String]
 
     public init(
         listID: String? = nil,
@@ -30,7 +34,8 @@ public struct MailHeaderFields: Equatable, Sendable {
         precedence: String? = nil,
         autoSubmitted: String? = nil,
         autoResponseSuppress: String? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        bodyContentTypes: [String] = []
     ) {
         self.listID = listID
         self.listUnsubscribe = listUnsubscribe
@@ -38,6 +43,7 @@ public struct MailHeaderFields: Equatable, Sendable {
         self.autoSubmitted = autoSubmitted
         self.autoResponseSuppress = autoResponseSuppress
         self.contentType = contentType
+        self.bodyContentTypes = bodyContentTypes
     }
 
     /// The exact header-field names requested from the server, in the order the

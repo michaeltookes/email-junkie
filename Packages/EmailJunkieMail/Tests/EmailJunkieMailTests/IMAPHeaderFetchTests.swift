@@ -29,14 +29,33 @@ final class IMAPHeaderFetchTests: XCTestCase {
         return (channel, promise.futureResult)
     }
 
-    private func feed(_ channel: EmbeddedChannel, _ response: String) throws {
+    @discardableResult
+    private func feed(_ channel: EmbeddedChannel, _ response: String) throws -> String {
         try channel.writeInbound(ByteBuffer(string: response))
-        while (try? channel.readOutbound(as: ByteBuffer.self)) != nil {}
+        var out = ""
+        while let buffer = try? channel.readOutbound(as: ByteBuffer.self) {
+            out += String(buffer: buffer)
+        }
+        return out
     }
 
-    private func headerSection(_ block: String) -> String {
-        "* 1 FETCH (UID 101 BODY[HEADER.FIELDS (LIST-ID LIST-UNSUBSCRIBE PRECEDENCE "
-            + "AUTO-SUBMITTED X-AUTO-RESPONSE-SUPPRESS CONTENT-TYPE)] {\(block.utf8.count)}\r\n\(block))\r\n"
+    private func headerSection(_ block: String, bodyStructure: String? = nil) -> String {
+        let structureAttribute = bodyStructure.map { "BODYSTRUCTURE \($0) " } ?? ""
+        return "* 1 FETCH (UID 101 \(structureAttribute)BODY[HEADER.FIELDS "
+            + "(LIST-ID LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED "
+            + "X-AUTO-RESPONSE-SUPPRESS CONTENT-TYPE)] {\(block.utf8.count)}\r\n\(block))\r\n"
+    }
+
+    func testFetchRequestIncludesBodyStructureAndHeaderFields() throws {
+        let (channel, _) = try makeChannel()
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        let command = try feed(channel, "A2 OK SELECT completed\r\n")
+
+        XCTAssertTrue(command.contains("BODYSTRUCTURE"))
+        XCTAssertTrue(command.contains("BODY.PEEK[HEADER.FIELDS"))
+        _ = try? channel.finish()
     }
 
     func testParsesListAndPrecedenceHeaders() throws {
@@ -76,6 +95,26 @@ final class IMAPHeaderFetchTests: XCTestCase {
         XCTAssertEqual(fields.autoSubmitted, "auto-generated")
         XCTAssertEqual(fields.autoResponseSuppress, "All")
         XCTAssertEqual(fields.contentType, "text/calendar; method=REQUEST; charset=UTF-8")
+        _ = try? channel.finish()
+    }
+
+    func testParsesNestedCalendarContentTypeFromBodyStructure() throws {
+        let (channel, future) = try makeChannel()
+        let block = "Content-Type: multipart/alternative; boundary=abc\r\n\r\n"
+        let bodyStructure =
+            #"("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL NIL NIL)"#
+            + #"("TEXT" "CALENDAR" ("METHOD" "REQUEST") NIL NIL "7BIT" 88 5 NIL NIL NIL NIL)"#
+            + #" "ALTERNATIVE" ("BOUNDARY" "abc") NIL NIL NIL"#
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "A2 OK SELECT completed\r\n")
+        try feed(channel, headerSection(block, bodyStructure: "(\(bodyStructure))"))
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        let fields = try future.wait()
+        XCTAssertEqual(fields.contentType, "multipart/alternative; boundary=abc")
+        XCTAssertEqual(fields.bodyContentTypes, ["multipart/alternative", "text/plain", "text/calendar"])
         _ = try? channel.finish()
     }
 

@@ -189,15 +189,44 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(appState.skippedMessages.first?.reason, .bulkOrListMail)
     }
 
+    func testReviewWindowMenuStateIncludesSkippedOnlyMessages() {
+        let (appState, _, _) = makeAppState()
+
+        appState.recordSkip(
+            message(id: 6, from: "no-reply@x.com"),
+            reason: .noReplySender,
+            account: "me@gmail.com",
+            mailbox: .inbox
+        )
+
+        XCTAssertTrue(appState.hasReviewWindowContent)
+        XCTAssertEqual(appState.reviewWindowMenuTitle, "Review Skipped Messages (1)…")
+    }
+
+    func testReviewWindowMenuStatePrefersPendingDraftCount() {
+        let (appState, _, _) = makeAppState()
+
+        appState.pendingDraftCount = 2
+        appState.recordSkip(
+            message(id: 6, from: "no-reply@x.com"),
+            reason: .noReplySender,
+            account: "me@gmail.com",
+            mailbox: .inbox
+        )
+
+        XCTAssertTrue(appState.hasReviewWindowContent)
+        XCTAssertEqual(appState.reviewWindowMenuTitle, "Review Drafts (2)…")
+    }
+
     // MARK: - Override
 
-    func testForceDraftSkippedMessageDraftsAndClearsEntry() async {
+    func testForceDraftSkippedMessageDraftsAndClearsEntry() async throws {
         let (appState, provider, persistence) = makeAppState(
             fetch: .success([message(id: 1, from: "no-reply@x.com")])
         )
         appState.watchStatus = .watching
         await appState.pollInboxOnce()
-        let entry = try! XCTUnwrap(appState.skippedMessages.first)
+        let entry = try XCTUnwrap(appState.skippedMessages.first)
 
         let ok = await appState.forceDraftSkippedMessage(entry)
 
@@ -209,7 +238,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(provider.headerFetchCallCount, 1)
     }
 
-    func testForceDraftWorksRegardlessOfWatchState() async {
+    func testForceDraftWorksRegardlessOfWatchState() async throws {
         let (appState, _, _) = makeAppState()
         appState.recordSkip(
             message(id: 7, from: "no-reply@x.com"),
@@ -217,7 +246,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
             account: "me@gmail.com",
             mailbox: .inbox
         )
-        let entry = try! XCTUnwrap(appState.skippedMessages.first)
+        let entry = try XCTUnwrap(appState.skippedMessages.first)
         // watchStatus is .idle — override must still work.
         XCTAssertEqual(appState.watchStatus, .idle)
 
@@ -228,7 +257,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         XCTAssertTrue(appState.skippedMessages.isEmpty)
     }
 
-    func testForceDraftFailureKeepsEntry() async {
+    func testForceDraftFailureKeepsEntry() async throws {
         let (appState, _, _) = makeAppState(completion: .failure(.http(status: 500, message: "boom")))
         appState.recordSkip(
             message(id: 3, from: "no-reply@x.com"),
@@ -236,14 +265,33 @@ final class AppStateReplyWorthinessTests: XCTestCase {
             account: "me@gmail.com",
             mailbox: .inbox
         )
-        let entry = try! XCTUnwrap(appState.skippedMessages.first)
+        let entry = try XCTUnwrap(appState.skippedMessages.first)
 
         let ok = await appState.forceDraftSkippedMessage(entry)
 
         XCTAssertFalse(ok)
         XCTAssertEqual(appState.skippedMessages.count, 1)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
-        XCTAssertNotNil(appState.watchError)
+        XCTAssertNotNil(appState.approvalError)
+        XCTAssertNil(appState.watchError)
+    }
+
+    func testForceDraftMissingAccountSurfacesApprovalError() async throws {
+        let (appState, _, _) = makeAppState()
+        appState.mailEmail = ""
+        appState.recordSkip(
+            message(id: 4, from: "no-reply@x.com"),
+            reason: .noReplySender,
+            account: "me@gmail.com",
+            mailbox: .inbox
+        )
+        let entry = try XCTUnwrap(appState.skippedMessages.first)
+
+        let ok = await appState.forceDraftSkippedMessage(entry)
+
+        XCTAssertFalse(ok)
+        XCTAssertEqual(appState.approvalError, "Connect an email account first.")
+        XCTAssertNil(appState.watchError)
     }
 
     // MARK: - Account isolation

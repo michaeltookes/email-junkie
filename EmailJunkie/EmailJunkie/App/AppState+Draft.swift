@@ -65,6 +65,7 @@ extension AppState {
                 mailbox: mailbox
             )
             generatedDraft = draft
+            recordDraftActivity(.draftCreated, for: draft)
             return draft
         } catch {
             guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
@@ -265,6 +266,7 @@ extension AppState {
             throw error
         }
         notifier.notify(for: draft, sendBehavior: sendBehavior)
+        recordDraftActivity(.draftCreated, for: draft)
     }
 
     func isLatestDraftRequest(_ requestGeneration: Int) -> Bool {
@@ -372,18 +374,24 @@ extension AppState {
     /// Sends `draft` over SMTP. Shared by the Settings preview and the approval
     /// queue. Throws `DraftDispatchError.noRecipient` when there is no address.
     func performSend(_ draft: Draft, credentials: MailAccountCredentials) async throws {
-        let outgoing = Self.outgoingMessage(
-            for: draft,
-            from: credentials.email,
-            date: Date(),
-            messageID: Self.generateMessageID(forEmail: credentials.email)
-        )
-        guard !outgoing.to.isEmpty else { throw DraftDispatchError.noRecipient }
-        try await mailProvider.sendMessage(
-            credentials,
-            rfc822: outgoing.rfc822(),
-            envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
-        )
+        do {
+            let outgoing = Self.outgoingMessage(
+                for: draft,
+                from: credentials.email,
+                date: Date(),
+                messageID: Self.generateMessageID(forEmail: credentials.email)
+            )
+            guard !outgoing.to.isEmpty else { throw DraftDispatchError.noRecipient }
+            try await mailProvider.sendMessage(
+                credentials,
+                rfc822: outgoing.rfc822(),
+                envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
+            )
+        } catch {
+            recordDraftActivity(.sendFailed, for: draft, detail: Self.draftMessage(for: error))
+            throw error
+        }
+        recordDraftActivity(.approvedSent, for: draft)
     }
 
     /// Saves `draft` to the Drafts mailbox. Shared by the Settings preview and
@@ -401,6 +409,7 @@ extension AppState {
             rfc822: outgoing.rfc822(),
             flags: [.draft]
         )
+        recordDraftActivity(.approvedSaved, for: draft)
     }
 
     static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {

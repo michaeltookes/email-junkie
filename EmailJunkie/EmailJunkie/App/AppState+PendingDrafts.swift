@@ -119,6 +119,7 @@ extension AppState {
     private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
         pendingStaleWarnings[draft.identity] = reason
         approvalError = Self.draftMessage(for: DraftDispatchError.staleThread(reason))
+        recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
     }
 
     /// Denies (discards) a pending draft without sending or saving it.
@@ -128,6 +129,7 @@ extension AppState {
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         do {
             try removePendingDraft(draft)
+            recordDraftActivity(.denied, for: draft)
         } catch {
             approvalError = Self.draftMessage(for: error)
         }

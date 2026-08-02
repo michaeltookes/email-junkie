@@ -237,7 +237,8 @@ private struct OnboardingProviderStep: View {
         VStack(alignment: .leading, spacing: 12) {
             StepHeading(
                 title: "Choose your AI",
-                subtitle: "Drafts are written by the provider you pick, using your own API key."
+                subtitle: "Drafts are written by the provider you pick, using the model and "
+                    + "credentials you choose."
             )
 
             if LLMProviderKind.allCases.count > 1 {
@@ -271,8 +272,14 @@ private struct OnboardingProviderStep: View {
                 ConnectedBadge(text: "Connected")
                 Button("Disconnect", role: .destructive) { appState.disconnectLLM() }
             } else {
-                SecureField("API key", text: $appState.llmAPIKey)
+                SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
                     .textFieldStyle(.roundedBorder)
+
+                if !appState.llmProviderKind.requiresAPIKey {
+                    Text("Optional — leave blank for Ollama or unauthenticated local runtimes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Button {
                     Task { await appState.testLLMConnection() }
                 } label: {
@@ -306,6 +313,10 @@ private struct OnboardingProviderStep: View {
             get: { appState.llmBaseURL },
             set: { appState.updateLLMBaseURLFromUser($0) }
         )
+    }
+
+    private var apiKeyFieldTitle: String {
+        appState.llmProviderKind.requiresAPIKey ? "API key" : "API key (optional)"
     }
 }
 

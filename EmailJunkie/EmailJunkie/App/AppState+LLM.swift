@@ -44,20 +44,26 @@ extension AppState {
         saveSettings()
     }
 
-    /// Recomputes whether the current key is verified for the currently
-    /// selected provider/model pair.
+    /// Recomputes whether the current credential is verified for the currently
+    /// selected provider/model pair. Key-optional providers (local runtimes) need
+    /// no stored key — a matching verified model alone counts as connected.
     func refreshLLMConnectionStatus(llmModel model: String? = nil) {
-        isLLMConnected = secrets.hasValue(for: llmProviderKind.apiKeySecret)
+        let hasCredential = !llmProviderKind.requiresAPIKey
+            || secrets.hasValue(for: llmProviderKind.apiKeySecret)
+        isLLMConnected = hasCredential
             && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
     }
 
     /// Switches the selected provider, reloading its stored key and status.
     /// The model field is cleared so the new provider starts from its default
-    /// instead of reusing another provider's model id.
+    /// instead of reusing another provider's model id. The custom base URL is
+    /// shared in settings, so clear it on provider changes to avoid sending the
+    /// new provider's requests to the previous provider's endpoint.
     func selectLLMProvider(_ provider: LLMProviderKind) {
         guard provider != llmProviderKind else { return }
         llmProviderKind = provider
         llmModel = ""
+        llmBaseURL = ""
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
@@ -71,9 +77,11 @@ extension AppState {
         llmError = nil
 
         let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else {
-            llmError = "Enter an API key first."
-            return
+        if llmProviderKind.requiresAPIKey {
+            guard !key.isEmpty else {
+                llmError = "Enter an API key first."
+                return
+            }
         }
 
         isTestingLLM = true
@@ -104,11 +112,20 @@ extension AppState {
             return
         }
 
-        do {
-            try secrets.set(key, for: testedProvider.apiKeySecret)
-        } catch {
-            llmError = Self.keychainLLMMessage(action: "save", error: error)
-            return
+        if key.isEmpty {
+            do {
+                try secrets.remove(testedProvider.apiKeySecret)
+            } catch {
+                llmError = Self.keychainLLMMessage(action: "remove", error: error)
+                return
+            }
+        } else {
+            do {
+                try secrets.set(key, for: testedProvider.apiKeySecret)
+            } catch {
+                llmError = Self.keychainLLMMessage(action: "save", error: error)
+                return
+            }
         }
 
         verifiedLLMModel = testedModel
@@ -161,7 +178,12 @@ extension AppState {
     }
 
     private var currentLLMEndpointOrigin: String? {
-        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(baseURL: currentLLMBaseURL),
+        let defaultEndpoint = llmProviderKind.defaultOpenAICompatibleEndpoint
+            ?? OpenAICompatibleClient.defaultEndpoint
+        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(
+                baseURL: currentLLMBaseURL,
+                defaultEndpoint: defaultEndpoint
+              ),
               let scheme = endpoint.scheme?.lowercased(),
               let host = endpoint.host?.lowercased() else {
             return nil

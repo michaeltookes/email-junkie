@@ -56,6 +56,45 @@ final class LLMServiceTests: XCTestCase {
         XCTAssertEqual(transport.lastURL?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
     }
 
+    func testTestConnectionRoutesLocalProviderToOllamaEndpointWithoutKey() async throws {
+        let transport = FakeLLMTransport(response: HTTPResponse(
+            statusCode: 200,
+            body: Data(#"{"choices":[{"message":{"content":"OK"}}]}"#.utf8)
+        ))
+        let service = LLMService(transport: transport)
+
+        try await service.testConnection(
+            provider: .ollama,
+            apiKey: "",
+            model: "llama3.1",
+            baseURL: nil
+        )
+
+        XCTAssertEqual(transport.lastURL?.absoluteString, "http://localhost:11434/v1/chat/completions")
+        XCTAssertNil(transport.lastHeaders?["Authorization"], "local provider omits the Authorization header")
+        let body = try XCTUnwrap(transport.lastBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["model"] as? String, "llama3.1")
+    }
+
+    func testCompleteRoutesLocalProviderThroughCustomBaseURL() async throws {
+        let transport = FakeLLMTransport(response: HTTPResponse(
+            statusCode: 200,
+            body: Data(#"{"choices":[{"message":{"content":"Hi"}}]}"#.utf8)
+        ))
+        let service = LLMService(transport: transport)
+
+        _ = try await service.complete(
+            LLMRequest(messages: [LLMMessage(role: .user, content: "Hi")], model: "qwen2.5"),
+            provider: .ollama,
+            apiKey: "",
+            baseURL: "http://localhost:1234/v1"
+        )
+
+        XCTAssertEqual(transport.lastURL?.absoluteString, "http://localhost:1234/v1/chat/completions")
+        XCTAssertNil(transport.lastHeaders?["Authorization"])
+    }
+
     func testTestConnectionSurfacesInvalidBaseURLWithoutHittingTransport() async {
         let transport = FakeLLMTransport(response: HTTPResponse(
             statusCode: 200,

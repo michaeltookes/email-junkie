@@ -12,6 +12,24 @@ final class OpenAICompatibleClientTests: XCTestCase {
         return (OpenAICompatibleClient(apiKey: key, transport: transport, baseURL: baseURL), transport)
     }
 
+    /// A key-optional (local) client mirroring how `LLMService` builds the
+    /// Ollama provider: no key required, Ollama's loopback default endpoint.
+    private func localClient(
+        _ response: HTTPResponse,
+        key: String = "",
+        baseURL: String? = nil
+    ) -> (OpenAICompatibleClient, FakeLLMTransport) {
+        let transport = FakeLLMTransport(response: response)
+        let client = OpenAICompatibleClient(
+            apiKey: key,
+            transport: transport,
+            baseURL: baseURL,
+            defaultEndpoint: OpenAICompatibleClient.ollamaDefaultEndpoint,
+            requiresAPIKey: false
+        )
+        return (client, transport)
+    }
+
     private func json(_ string: String, status: Int = 200) -> HTTPResponse {
         HTTPResponse(statusCode: status, body: Data(string.utf8))
     }
@@ -163,6 +181,69 @@ final class OpenAICompatibleClientTests: XCTestCase {
             XCTAssertEqual(error as? LLMError, .invalidBaseURL("openrouter.ai/api/v1"))
         }
         XCTAssertNil(transport.lastURL, "transport must not be called for an invalid base URL")
+    }
+
+    // MARK: - Key-optional (local) behavior
+
+    func testKeyOptionalClientResolvesLocalDefaultEndpointWhenBaseURLBlank() async throws {
+        let (client, transport) = localClient(okResponse())
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(transport.lastURL?.absoluteString, "http://localhost:11434/v1/chat/completions")
+    }
+
+    func testKeyOptionalClientOmitsAuthorizationHeaderWhenKeyEmpty() async throws {
+        let (client, transport) = localClient(okResponse())
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertNil(transport.lastHeaders?["Authorization"], "no bare Bearer header when the key is empty")
+        XCTAssertEqual(transport.lastHeaders?["content-type"], "application/json")
+    }
+
+    func testKeyOptionalClientSucceedsWithEmptyKey() async throws {
+        // A cloud client with an empty key throws; the key-optional one does not.
+        let (client, transport) = localClient(okResponse())
+
+        let response = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(response.text, "Hello")
+        XCTAssertNotNil(transport.lastURL, "the request must be sent even without a key")
+    }
+
+    func testKeyOptionalClientStillSendsAuthorizationWhenKeyProvided() async throws {
+        // Pointing the local provider at a keyed LAN gateway still authenticates.
+        let (client, transport) = localClient(okResponse(), key: "lan-key")
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(transport.lastHeaders?["Authorization"], "Bearer lan-key")
+    }
+
+    func testKeyOptionalClientRoutesCustomBaseURLToLMStudio() async throws {
+        let (client, transport) = localClient(okResponse(), baseURL: "http://localhost:1234/v1")
+
+        _ = try await client.complete(sampleRequest())
+
+        XCTAssertEqual(transport.lastURL?.absoluteString, "http://localhost:1234/v1/chat/completions")
+    }
+
+    func testResolveEndpointHonorsCustomDefaultForBlankInput() throws {
+        XCTAssertEqual(
+            try OpenAICompatibleClient.resolveEndpoint(
+                baseURL: nil,
+                defaultEndpoint: OpenAICompatibleClient.ollamaDefaultEndpoint
+            ),
+            OpenAICompatibleClient.ollamaDefaultEndpoint
+        )
+        XCTAssertEqual(
+            try OpenAICompatibleClient.resolveEndpoint(
+                baseURL: "   ",
+                defaultEndpoint: OpenAICompatibleClient.ollamaDefaultEndpoint
+            ),
+            OpenAICompatibleClient.ollamaDefaultEndpoint
+        )
     }
 
     // MARK: - Model quirks

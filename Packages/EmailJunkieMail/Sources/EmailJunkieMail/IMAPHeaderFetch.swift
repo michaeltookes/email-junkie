@@ -304,15 +304,53 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
 
         var contentTypes: [String] = []
         structure.enumerateParts { _, part in
-            let contentType = Self.contentTypeString(for: part.mediaType)
+            guard !Self.isAttachment(part) else { return }
+            let contentType = Self.contentTypeString(for: part)
             guard !contentTypes.contains(contentType) else { return }
             contentTypes.append(contentType)
         }
         return contentTypes
     }
 
-    private static func contentTypeString(for mediaType: Media.MediaType) -> String {
+    private static func contentTypeString(for part: BodyStructure) -> String {
+        let contentType = mediaTypeString(for: part.mediaType)
+        guard Self.isCalendarMediaType(contentType),
+              let method = Self.parameter(named: "method", in: part) else {
+            return contentType
+        }
+        return "\(contentType); method=\(method)"
+    }
+
+    private static func mediaTypeString(for mediaType: Media.MediaType) -> String {
         "\(String(mediaType.topLevel))/\(String(mediaType.sub))"
+    }
+
+    private static func isCalendarMediaType(_ contentType: String) -> Bool {
+        contentType == "text/calendar" || contentType == "application/ics"
+    }
+
+    private static func isAttachment(_ part: BodyStructure) -> Bool {
+        disposition(for: part)?.kind == .attachment
+    }
+
+    private static func disposition(for part: BodyStructure) -> BodyStructure.Disposition? {
+        switch part {
+        case .singlepart(let singlepart):
+            return singlepart.extension?.dispositionAndLanguage?.disposition
+        case .multipart(let multipart):
+            return multipart.extension?.dispositionAndLanguage?.disposition
+        }
+    }
+
+    private static func parameter(named name: String, in part: BodyStructure) -> String? {
+        let parameters: [(String, String)]
+        switch part {
+        case .singlepart(let singlepart):
+            parameters = singlepart.fields.parameters.map { ($0.key, $0.value) }
+        case .multipart(let multipart):
+            parameters = multipart.extension?.parameters.map { ($0.key, $0.value) } ?? []
+        }
+        return parameters.first { $0.0.caseInsensitiveCompare(name) == .orderedSame }?.1
     }
 
     private func settle(_ result: Result<MailHeaderFields, Error>) {

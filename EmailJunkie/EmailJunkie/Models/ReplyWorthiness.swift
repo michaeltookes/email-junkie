@@ -11,8 +11,8 @@ enum ReplyWorthinessReason: String, Equatable, Codable, CaseIterable {
     /// Mailing-list or bulk mail (`List-Id`, `List-Unsubscribe`, `Precedence:
     /// bulk|list|junk`) — newsletters and blasts, not personal correspondence.
     case bulkOrListMail
-    /// Machine-generated notification (`Auto-Submitted` other than `no`,
-    /// `X-Auto-Response-Suppress`) — receipts, alerts, and system mail.
+    /// Machine-generated notification (`Auto-Submitted` other than `no`, or an
+    /// auto-reply suppress directive) — receipts, alerts, and system mail.
     case automatedNotification
     /// A calendar invite (`Content-Type: text/calendar`) — handled by the
     /// calendar client, not a written reply.
@@ -58,10 +58,10 @@ enum ReplyWorthinessVerdict: Equatable {
     var isWorthy: Bool { skipReason == nil }
 }
 
-/// The inputs the reply-worthiness check reasons over: the sender address (from
-/// the ENVELOPE) plus the bounded header fields (`MailHeaderFields`). Kept as a
-/// plain value so the evaluator stays pure and exhaustively unit-testable with
-/// no IO.
+/// The inputs the reply-worthiness check reasons over: the address a reply
+/// would target (`Reply-To` when present, otherwise `From`) plus the bounded
+/// header fields (`MailHeaderFields`). Kept as a plain value so the evaluator
+/// stays pure and exhaustively unit-testable with no IO.
 struct ReplyWorthinessSignals: Equatable {
     var senderEmail: String?
     var headers: MailHeaderFields
@@ -157,6 +157,13 @@ enum ReplyWorthiness {
 
     // MARK: - Automated notifications
 
+    /// `X-Auto-Response-Suppress` is a recipient-side suppression directive, not
+    /// a reliable automation declaration. Treat only broad auto-reply suppression
+    /// as an automation signal; receipt-only values (DR/RN/NRN) remain worthy.
+    private static let autoResponseSuppressAutomationValues: Set<String> = [
+        "all", "autoreply", "auto-reply", "oof"
+    ]
+
     static func isAutomatedNotification(_ headers: MailHeaderFields) -> Bool {
         if hasSuppressingAutoResponseValue(headers.autoResponseSuppress) { return true }
         if let autoSubmitted = normalizedValue(headers.autoSubmitted) {
@@ -171,7 +178,7 @@ enum ReplyWorthiness {
     private static func hasSuppressingAutoResponseValue(_ value: String?) -> Bool {
         guard let value = normalizedValue(value) else { return false }
         let tokens = value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-        return tokens.contains { !$0.isEmpty && $0 != "none" }
+        return tokens.contains { autoResponseSuppressAutomationValues.contains($0) }
     }
 
     // MARK: - Calendar invites
@@ -179,9 +186,27 @@ enum ReplyWorthiness {
     static func isCalendarInvite(_ headers: MailHeaderFields) -> Bool {
         let contentTypes = [headers.contentType].compactMap { normalizedValue($0) }
             + headers.bodyContentTypes.compactMap { normalizedValue($0) }
-        return contentTypes.contains { contentType in
-            contentType.contains("text/calendar") || contentType.contains("application/ics")
+        return contentTypes.contains(where: isCalendarInviteContentType)
+    }
+
+    private static func isCalendarInviteContentType(_ contentType: String) -> Bool {
+        let mediaType = contentType.split(separator: ";", maxSplits: 1).first
+            .map { String($0).trimmingCharacters(in: .whitespaces) } ?? contentType
+        guard mediaType == "text/calendar" || mediaType == "application/ics" else { return false }
+        return parameterValue(named: "method", in: contentType) == "request"
+    }
+
+    private static func parameterValue(named name: String, in contentType: String) -> String? {
+        for component in contentType.split(separator: ";").dropFirst() {
+            let pair = component.split(separator: "=", maxSplits: 1)
+            guard pair.count == 2 else { continue }
+            let key = pair[0].trimmingCharacters(in: .whitespaces)
+            guard key == name else { continue }
+            return pair[1]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
         }
+        return nil
     }
 
     // MARK: - Helpers

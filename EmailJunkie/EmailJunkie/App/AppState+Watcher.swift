@@ -190,18 +190,18 @@ extension AppState {
     ) async {
         guard isReplyable(message),
               !processedMessages.contains(message, account: credentials.email, mailbox: mailbox),
+              !hasSkippedMessage(message, account: credentials.email, mailbox: mailbox),
               !hasPendingDraft(for: message, account: credentials.email, mailbox: mailbox) else {
             return
         }
 
         // Reply-worthiness gate (item 17): skip obvious non-replyable mail before
-        // the costly LLM draft call. A skip is recorded and the message is marked
-        // handled so it is not re-evaluated (and re-logged) every poll; the user
-        // can still force a draft from the skip log.
+        // the costly LLM draft call. A skip is recorded in memory but not marked
+        // durably processed, so a false skip can be recovered after log loss or
+        // app restart. The in-memory skip guard above prevents noisy re-logging.
         if let reason = await replyWorthinessSkipReason(message, credentials: credentials, mailbox: mailbox) {
             guard watchStatus == .watching, mailCredentials == credentials else { return }
             recordSkip(message, reason: reason, account: credentials.email, mailbox: mailbox)
-            markProcessed(message, account: credentials.email, mailbox: mailbox)
             return
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }

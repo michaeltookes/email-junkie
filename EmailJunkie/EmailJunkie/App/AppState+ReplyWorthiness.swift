@@ -12,19 +12,20 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Repl
 extension AppState {
 
     /// Judges `message` and returns the skip reason, or `nil` when it is worth a
-    /// draft. Checks decisive sender-only signals before fetching the bounded
+    /// draft. Checks decisive reply-target signals before fetching the bounded
     /// header fields the ENVELOPE lacks; if that fetch fails, evaluation falls
-    /// back to sender-only signals.
+    /// back to reply-target-only signals.
     func replyWorthinessSkipReason(
         _ message: MailMessage,
         credentials: MailAccountCredentials,
         mailbox: Mailbox
     ) async -> ReplyWorthinessReason? {
-        let senderOnly = ReplyWorthinessSignals(senderEmail: message.from?.email)
-        if let skipReason = ReplyWorthiness.evaluate(senderOnly).skipReason { return skipReason }
+        let replyTargetEmail = message.replyTo?.email ?? message.from?.email
+        let replyTargetOnly = ReplyWorthinessSignals(senderEmail: replyTargetEmail)
+        if let skipReason = ReplyWorthiness.evaluate(replyTargetOnly).skipReason { return skipReason }
 
         let headers = await fetchReplyWorthinessHeaders(message, credentials: credentials, mailbox: mailbox)
-        let signals = ReplyWorthinessSignals(senderEmail: message.from?.email, headers: headers)
+        let signals = ReplyWorthinessSignals(senderEmail: replyTargetEmail, headers: headers)
         return ReplyWorthiness.evaluate(signals).skipReason
     }
 
@@ -81,6 +82,12 @@ extension AppState {
     /// Clears the whole skip log.
     func clearSkippedMessages() {
         skippedMessages.removeAll()
+    }
+
+    /// Whether a skipped entry already exists for the same account/mailbox UID.
+    func hasSkippedMessage(_ message: MailMessage, account: String, mailbox: Mailbox) -> Bool {
+        let entry = SkippedMessage(message: message, mailbox: mailbox, account: account, reason: .noReplySender)
+        return skippedMessages.contains { $0.id == entry.id }
     }
 
     // MARK: - Override

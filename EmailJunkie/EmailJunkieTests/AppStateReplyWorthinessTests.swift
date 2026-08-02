@@ -12,12 +12,14 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         id: UInt32,
         uidValidity: UInt32? = nil,
         from: String = "alice@x.com",
+        replyTo: String? = nil,
         messageID: String? = nil
     ) -> MailMessage {
         MailMessage(
             id: id,
             uidValidity: uidValidity,
             from: MailAddress(name: "Alice", email: from),
+            replyTo: replyTo.map { MailAddress(name: "Reply", email: $0) },
             subject: "Subject \(id)",
             date: "",
             messageID: messageID ?? "<\(id)@x.com>"
@@ -86,11 +88,41 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertEqual(appState.skippedMessages.map(\.reason), [.noReplySender])
         XCTAssertEqual(appState.skippedMessages.first?.message.id, 1)
-        // Skipped-but-handled: no draft body fetched, marked processed so it is
-        // not re-evaluated next poll.
+        // Skipped without spending on the draft body. Automatic skips are not
+        // durably processed so a false skip can be recovered after log loss.
         XCTAssertEqual(provider.bodyFetchCallCount, 0)
         XCTAssertEqual(provider.headerFetchCallCount, 0)
-        XCTAssertTrue(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertFalse(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testReplyToOverridesNoReplyFromAddress() async {
+        let (appState, provider, _) = makeAppState(
+            fetch: .success([
+                message(id: 1, from: "notifications@github.com", replyTo: "alice@example.com")
+            ])
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+        XCTAssertTrue(appState.skippedMessages.isEmpty)
+        XCTAssertEqual(provider.headerFetchCallCount, 1)
+    }
+
+    func testNoReplyReplyToIsSkippedEvenWhenFromIsPersonal() async {
+        let (appState, provider, _) = makeAppState(
+            fetch: .success([
+                message(id: 1, from: "alice@example.com", replyTo: "no-reply@example.com")
+            ])
+        )
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertEqual(appState.skippedMessages.map(\.reason), [.noReplySender])
+        XCTAssertEqual(provider.headerFetchCallCount, 0)
     }
 
     func testBulkMailIsSkippedViaHeaders() async {
@@ -148,7 +180,7 @@ final class AppStateReplyWorthinessTests: XCTestCase {
     }
 
     func testSkippedMessageIsNotReloggedAcrossPolls() async {
-        let (appState, _, _) = makeAppState(
+        let (appState, provider, _) = makeAppState(
             fetch: .success([message(id: 1, from: "no-reply@x.com")])
         )
         appState.watchStatus = .watching
@@ -157,6 +189,21 @@ final class AppStateReplyWorthinessTests: XCTestCase {
         await appState.pollInboxOnce()
 
         XCTAssertEqual(appState.skippedMessages.count, 1)
+        XCTAssertEqual(provider.bodyFetchCallCount, 0)
+    }
+
+    func testSkippedMessageCanReappearAfterLogClear() async {
+        let (appState, _, persistence) = makeAppState(
+            fetch: .success([message(id: 1, from: "no-reply@x.com")])
+        )
+        appState.watchStatus = .watching
+        await appState.pollInboxOnce()
+
+        appState.clearSkippedMessages()
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.skippedMessages.map(\.message.id), [1])
+        XCTAssertFalse(persistence.processedMessages.contains(message(id: 1), account: "me@gmail.com", mailbox: .inbox))
     }
 
     // MARK: - Skip log bounds

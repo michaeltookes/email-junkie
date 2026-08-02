@@ -116,7 +116,7 @@ final class ReplyWorthinessTests: XCTestCase {
     }
 
     func testAutoResponseSuppressNoneIsWorthy() {
-        for value in ["None", " none ", "NONE"] {
+        for value in ["None", " none ", "NONE", "DR", "RN", "NRN", "DR, RN, NRN"] {
             let headers = MailHeaderFields(autoResponseSuppress: value)
             XCTAssertEqual(
                 evaluate(sender: "alice@example.com", headers: headers),
@@ -138,12 +138,25 @@ final class ReplyWorthinessTests: XCTestCase {
         XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .skip(.calendarInvite))
     }
 
+    func testCalendarContentTypeWithoutRequestMethodIsWorthy() {
+        let headers = MailHeaderFields(contentType: "text/calendar; charset=UTF-8")
+        XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .worthy)
+    }
+
     func testNestedCalendarBodyContentTypeIsSkipped() {
         let headers = MailHeaderFields(
             contentType: "multipart/alternative; boundary=abc",
-            bodyContentTypes: ["multipart/alternative", "text/plain", "text/calendar"]
+            bodyContentTypes: ["multipart/alternative", "text/plain", "text/calendar; method=REQUEST"]
         )
         XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .skip(.calendarInvite))
+    }
+
+    func testCalendarAttachmentContentTypeIsWorthy() {
+        let headers = MailHeaderFields(
+            contentType: "multipart/mixed; boundary=abc",
+            bodyContentTypes: ["multipart/mixed", "text/plain", "application/ics"]
+        )
+        XCTAssertEqual(evaluate(sender: "alice@example.com", headers: headers), .worthy)
     }
 
     func testMultipartWithoutCalendarBodyContentTypeIsWorthy() {

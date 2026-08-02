@@ -19,13 +19,14 @@ public struct MailHeaderFields: Equatable, Sendable {
     /// `Auto-Submitted` — anything other than `no` marks automated mail
     /// (RFC 3834).
     public var autoSubmitted: String?
-    /// `X-Auto-Response-Suppress` — Microsoft/Exchange marker on automated mail.
+    /// `X-Auto-Response-Suppress` — Microsoft/Exchange auto-reply suppression
+    /// directive. Only broad auto-reply values are automation signals.
     public var autoResponseSuppress: String?
     /// `Content-Type` — used to spot calendar invites (`text/calendar`).
     public var contentType: String?
-    /// MIME content types discovered from the message body structure, including
-    /// nested parts. This catches invites inside multipart messages whose top-
-    /// level `Content-Type` is only `multipart/*`.
+    /// MIME content types discovered from non-attachment body-structure parts,
+    /// including nested parts. Calendar parts keep their `method` parameter so
+    /// callers can distinguish real invites from ordinary `.ics` attachments.
     public var bodyContentTypes: [String]
 
     public init(

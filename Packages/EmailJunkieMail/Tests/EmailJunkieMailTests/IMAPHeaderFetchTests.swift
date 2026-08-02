@@ -114,7 +114,31 @@ final class IMAPHeaderFetchTests: XCTestCase {
 
         let fields = try future.wait()
         XCTAssertEqual(fields.contentType, "multipart/alternative; boundary=abc")
-        XCTAssertEqual(fields.bodyContentTypes, ["multipart/alternative", "text/plain", "text/calendar"])
+        XCTAssertEqual(
+            fields.bodyContentTypes,
+            ["multipart/alternative", "text/plain", "text/calendar; method=REQUEST"]
+        )
+        _ = try? channel.finish()
+    }
+
+    func testOmitsCalendarAttachmentContentTypeFromBodyStructure() throws {
+        let (channel, future) = try makeChannel()
+        let block = "Content-Type: multipart/mixed; boundary=abc\r\n\r\n"
+        let textPart = #"("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL NIL NIL)"#
+        let attachmentPart =
+            #"("APPLICATION" "ICS" ("NAME" "invite.ics") NIL NIL "BASE64" 88 NIL "# +
+            #"("ATTACHMENT" ("FILENAME" "invite.ics")) NIL NIL)"#
+        let bodyStructure = "\(textPart)\(attachmentPart) \"MIXED\" (\"BOUNDARY\" \"abc\") NIL NIL NIL"
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "A2 OK SELECT completed\r\n")
+        try feed(channel, headerSection(block, bodyStructure: "(\(bodyStructure))"))
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        let fields = try future.wait()
+        XCTAssertEqual(fields.contentType, "multipart/mixed; boundary=abc")
+        XCTAssertEqual(fields.bodyContentTypes, ["multipart/mixed", "text/plain"])
         _ = try? channel.finish()
     }
 

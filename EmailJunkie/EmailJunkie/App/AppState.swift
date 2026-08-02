@@ -163,14 +163,8 @@ final class AppState: ObservableObject {
 
     /// Maximum number of skip-log entries kept in memory.
     let skippedMessageLogLimit = 100
-
-    /// The user-facing activity history (item 21), newest first. Persisted as
-    /// metadata only (never bodies/draft content) and bounded to
-    /// `activityEventLogLimit`.
+    /// User-facing activity history (item 21), newest first; see `AppState+Activity`.
     @Published var activityEvents: [ActivityEvent] = []
-
-    /// Maximum number of activity-history entries kept, oldest dropped.
-    let activityEventLogLimit = 500
 
     /// Messages the watcher has already handled, so none is drafted twice.
     var processedMessages: ProcessedMessages

@@ -57,9 +57,11 @@ struct ActivityHistoryView: View {
             }
         }
         .frame(width: 640, height: 520)
-        .sheet(item: $openedBody, onDismiss: { appState.openedBody = nil }) { preview in
-            MessageBodyView(preview: preview)
-        }
+        .sheet(
+            item: $openedBody,
+            onDismiss: { appState.openedBody = nil },
+            content: { preview in MessageBodyView(preview: preview) }
+        )
     }
 
     private var header: some View {

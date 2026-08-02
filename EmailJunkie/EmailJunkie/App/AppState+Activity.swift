@@ -12,6 +12,9 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Acti
 /// account/mailbox still match the connected account.
 extension AppState {
 
+    /// Maximum number of activity-history entries kept; oldest dropped past this.
+    var activityEventLogLimit: Int { 500 }
+
     // MARK: - Recording
 
     /// Records `event` at the front of the history (newest first), evicting the

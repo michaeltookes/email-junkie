@@ -9,9 +9,11 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     private(set) var processedMessages: ProcessedMessages
     private(set) var pendingDrafts: [Draft]
     private(set) var approvedDraftIdentities: Set<String>
+    private(set) var activityEvents: [ActivityEvent]
     private(set) var processedSaveCount = 0
     private(set) var pendingDraftSaveCount = 0
     private(set) var approvedDraftSaveCount = 0
+    private(set) var activityEventSaveCount = 0
     private(set) var saveEvents: [String] = []
     var syncSaveError: Error?
     var pendingDraftSaveError: Error?
@@ -22,13 +24,15 @@ final class AppStateMemoryPersistence: PersistenceProvider {
         voiceProfile: VoiceProfile? = nil,
         processedMessages: ProcessedMessages = ProcessedMessages(),
         pendingDrafts: [Draft] = [],
-        approvedDraftIdentities: Set<String> = []
+        approvedDraftIdentities: Set<String> = [],
+        activityEvents: [ActivityEvent] = []
     ) {
         self.settings = settings
         self.voiceProfile = voiceProfile
         self.processedMessages = processedMessages
         self.pendingDrafts = pendingDrafts
         self.approvedDraftIdentities = approvedDraftIdentities
+        self.activityEvents = activityEvents
     }
 
     func loadSettings() -> Settings { settings }
@@ -69,6 +73,15 @@ final class AppStateMemoryPersistence: PersistenceProvider {
         approvedDraftIdentities = identities
         approvedDraftSaveCount += 1
         saveEvents.append("approved")
+    }
+
+    func loadActivityEvents() -> [ActivityEvent] { activityEvents }
+    // Deliberately does not append to `saveEvents`: the activity log is an
+    // additive side effect, so ordering assertions on the core save sequence
+    // (pending/processed/approved) stay stable.
+    func saveActivityEvents(_ events: [ActivityEvent]) {
+        activityEvents = events
+        activityEventSaveCount += 1
     }
 }
 

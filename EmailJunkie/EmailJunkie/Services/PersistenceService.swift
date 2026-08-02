@@ -34,6 +34,11 @@ protocol PersistenceProvider {
     func loadApprovedDraftIdentities() -> Set<String>
     /// Persists completed approve identities before pending-draft cleanup is treated as complete.
     func saveApprovedDraftIdentitiesSync(_ identities: Set<String>) throws
+
+    /// The user-facing activity history (item 21), newest first.
+    func loadActivityEvents() -> [ActivityEvent]
+    /// Persists the activity history (replaces the previous one).
+    func saveActivityEvents(_ events: [ActivityEvent])
 }
 
 /// File-based persistence for non-secret application settings.
@@ -53,6 +58,7 @@ final class PersistenceService: PersistenceProvider {
     private let processedMessagesURL: URL
     private let pendingDraftsURL: URL
     private let approvedDraftsURL: URL
+    private let activityEventsURL: URL
     private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
@@ -81,6 +87,7 @@ final class PersistenceService: PersistenceProvider {
         processedMessagesURL = directory.appendingPathComponent("ProcessedMessages.json")
         pendingDraftsURL = directory.appendingPathComponent("PendingDrafts.json")
         approvedDraftsURL = directory.appendingPathComponent("ApprovedDrafts.json")
+        activityEventsURL = directory.appendingPathComponent("ActivityEvents.json")
     }
 
     // MARK: - Settings
@@ -232,6 +239,32 @@ final class PersistenceService: PersistenceProvider {
         } catch {
             logger.error("Failed to save approved drafts: \(error.localizedDescription)")
             throw error
+        }
+    }
+
+    // MARK: - Activity History
+
+    func loadActivityEvents() -> [ActivityEvent] {
+        guard FileManager.default.fileExists(atPath: activityEventsURL.path) else {
+            return []
+        }
+        do {
+            let data = try Data(contentsOf: activityEventsURL)
+            return try decoder.decode([ActivityEvent].self, from: data)
+        } catch {
+            logger.error("Failed to load activity events: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func saveActivityEvents(_ events: [ActivityEvent]) {
+        ioQueue.async { [encoder, activityEventsURL] in
+            do {
+                let data = try encoder.encode(events)
+                try data.write(to: activityEventsURL, options: .atomic)
+            } catch {
+                logger.error("Failed to save activity events: \(error.localizedDescription)")
+            }
         }
     }
 }

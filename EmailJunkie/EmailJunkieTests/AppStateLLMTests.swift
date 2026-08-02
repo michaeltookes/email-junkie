@@ -299,6 +299,105 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertTrue(appState.isLLMConnected)
     }
 
+    // MARK: - Local (Ollama) key-optional provider (item 16)
+
+    func testSelectingLocalProviderUpdatesDefaultsAndIsKeyOptional() {
+        let appState = makeAppState()
+
+        appState.selectLLMProvider(.ollama)
+
+        XCTAssertEqual(appState.llmProviderKind, .ollama)
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "llama3.1")
+        XCTAssertTrue(appState.llmProviderKind.supportsCustomBaseURL)
+        XCTAssertFalse(appState.llmProviderKind.requiresAPIKey)
+        XCTAssertFalse(appState.isLLMConnected)
+    }
+
+    func testTestConnectionForLocalProviderConnectsWithoutKeyAndStoresNothing() async {
+        let secrets = InMemorySecretStore()
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.ollama)
+        // No API key entered.
+
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertNil(appState.llmError)
+        XCTAssertEqual(tester.lastProvider, .ollama)
+        XCTAssertEqual(tester.lastAPIKey, "", "an empty key is passed through for local providers")
+        XCTAssertEqual(tester.lastModel, "llama3.1")
+        XCTAssertEqual(appState.verifiedLLMModel, "llama3.1")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "ollama"))) ?? nil,
+                     "no empty key should be written to the Keychain")
+    }
+
+    func testConnectedLocalProviderStaysConnectedAfterStatusRefresh() async {
+        let appState = makeAppState()
+        appState.selectLLMProvider(.ollama)
+        await appState.testLLMConnection()
+        XCTAssertTrue(appState.isLLMConnected)
+
+        // A later refresh (e.g. on a benign model-field re-set) must not flip a
+        // key-optional provider back to disconnected just because no key exists.
+        appState.refreshLLMConnectionStatus()
+
+        XCTAssertTrue(appState.isLLMConnected)
+    }
+
+    func testLocalProviderCanGenerateDraftWithoutKey() async {
+        let secrets = InMemorySecretStore()
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.ollama)
+        await appState.testLLMConnection()
+        appState.mailEmail = "sam@example.com"
+        appState.mailAppPassword = "app-password-here"
+
+        XCTAssertTrue(appState.canGenerateDraft, "a connected local provider should permit drafting without a key")
+    }
+
+    func testTestConnectionForLocalProviderPassesCustomBaseURL() async {
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(llm: tester)
+        appState.selectLLMProvider(.ollama)
+        appState.llmBaseURL = "http://localhost:1234/v1"
+
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(tester.lastProvider, .ollama)
+        XCTAssertEqual(tester.lastBaseURL, "http://localhost:1234/v1")
+    }
+
+    func testDisconnectLocalProviderReturnsToDisconnected() async {
+        let appState = makeAppState()
+        appState.selectLLMProvider(.ollama)
+        await appState.testLLMConnection()
+        XCTAssertTrue(appState.isLLMConnected)
+
+        appState.disconnectLLM()
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+    }
+
+    func testLocalProviderRestoresConnectedFromSettingsWithoutKey() {
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "ollama",
+            llmModel: "llama3.1",
+            llmVerifiedModel: "llama3.1"
+        ))
+        let appState = makeAppState(persistence: persistence)
+
+        XCTAssertEqual(appState.llmProviderKind, .ollama)
+        XCTAssertTrue(appState.isLLMConnected, "a previously-verified local provider reconnects with no key")
+        XCTAssertEqual(appState.llmAPIKey, "")
+    }
+
     func testChangingConnectedLLMModelRequiresRetest() {
         let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-stored"])
         let persistence = AppStateMemoryPersistence(settings: Settings(

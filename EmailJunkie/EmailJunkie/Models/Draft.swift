@@ -25,6 +25,10 @@ struct Draft: Codable, Identifiable, Equatable {
     var sourceUIDValidity: UInt32?
     /// The account that produced this draft.
     var sourceAccountEmail: String?
+    /// The IMAP host that issued the source UID/UIDVALIDITY.
+    var sourceMailHost: String?
+    /// The IMAP port that issued the source UID/UIDVALIDITY.
+    var sourceMailPort: Int?
     /// The mailbox that contained the source message.
     var sourceMailbox: String?
     /// The source message's subject.
@@ -60,6 +64,8 @@ struct Draft: Codable, Identifiable, Equatable {
         id: UInt32,
         sourceUIDValidity: UInt32?,
         sourceAccountEmail: String? = nil,
+        sourceMailHost: String? = nil,
+        sourceMailPort: Int? = nil,
         sourceMailbox: String? = nil,
         sourceSubject: String,
         sourceFrom: MailAddress?,
@@ -75,6 +81,8 @@ struct Draft: Codable, Identifiable, Equatable {
         self.id = id
         self.sourceUIDValidity = sourceUIDValidity
         self.sourceAccountEmail = sourceAccountEmail
+        self.sourceMailHost = sourceMailHost
+        self.sourceMailPort = sourceMailPort
         self.sourceMailbox = sourceMailbox
         self.sourceSubject = sourceSubject
         self.sourceFrom = sourceFrom

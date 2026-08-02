@@ -24,6 +24,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
             id: id,
             sourceUIDValidity: 10,
             sourceAccountEmail: "me@gmail.com",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993,
             sourceMailbox: "INBOX",
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
@@ -136,6 +138,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
         let event = appState.activityEvents.first
         XCTAssertEqual(event?.subject, "Subject 1")
         XCTAssertEqual(event?.messageUID, 1)
+        XCTAssertEqual(event?.sourceMailHost, "imap.gmail.com")
+        XCTAssertEqual(event?.sourceMailPort, 993)
         // Persisted durably.
         XCTAssertEqual(persistence.loadActivityEvents().map(\.kind), [.draftCreated])
     }
@@ -151,6 +155,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
 
         XCTAssertEqual(appState.activityEvents.map(\.kind), [.skipped])
         XCTAssertEqual(appState.activityEvents.first?.skipReason, .noReplySender)
+        XCTAssertEqual(appState.activityEvents.first?.sourceMailHost, "imap.gmail.com")
+        XCTAssertEqual(appState.activityEvents.first?.sourceMailPort, 993)
         XCTAssertEqual(appState.activityEvents.first?.reasonHeadline, ReplyWorthinessReason.noReplySender.headline)
         // Durable: survives even though the in-memory override entry does not.
         XCTAssertEqual(persistence.loadActivityEvents().first?.skipReason, .noReplySender)
@@ -236,6 +242,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
             kind: .draftCreated,
             account: "me@gmail.com",
             mailbox: "INBOX",
+            sourceMailHost: "IMAP.GMAIL.COM",
+            sourceMailPort: 993,
             messageUID: 5,
             messageUIDValidity: 7
         )
@@ -250,6 +258,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
             kind: .draftCreated,
             account: "someone-else@gmail.com",
             mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993,
             messageUID: 5,
             messageUIDValidity: 7
         )
@@ -260,7 +270,13 @@ final class AppStateActivityHistoryTests: XCTestCase {
     func testCannotOpenActivityEventWithoutUID() {
         let (appState, _, _) = makeAppState()
         appState.isAccountConnected = true
-        let event = ActivityEvent(kind: .skipped, account: "me@gmail.com", mailbox: "INBOX")
+        let event = ActivityEvent(
+            kind: .skipped,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993
+        )
 
         XCTAssertFalse(appState.canOpenActivityEvent(event))
     }
@@ -272,7 +288,55 @@ final class AppStateActivityHistoryTests: XCTestCase {
             kind: .draftCreated,
             account: "me@gmail.com",
             mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993,
             messageUID: 5
+        )
+
+        XCTAssertFalse(appState.canOpenActivityEvent(event))
+    }
+
+    func testCannotOpenActivityEventWithoutSourceServer() {
+        let (appState, _, _) = makeAppState()
+        appState.isAccountConnected = true
+        let event = ActivityEvent(
+            kind: .draftCreated,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            messageUID: 5,
+            messageUIDValidity: 7
+        )
+
+        XCTAssertFalse(appState.canOpenActivityEvent(event))
+    }
+
+    func testCannotOpenActivityEventForDifferentMailHost() {
+        let (appState, _, _) = makeAppState()
+        appState.isAccountConnected = true
+        let event = ActivityEvent(
+            kind: .draftCreated,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            sourceMailHost: "imap.other.example",
+            sourceMailPort: 993,
+            messageUID: 5,
+            messageUIDValidity: 7
+        )
+
+        XCTAssertFalse(appState.canOpenActivityEvent(event))
+    }
+
+    func testCannotOpenActivityEventForDifferentMailPort() {
+        let (appState, _, _) = makeAppState()
+        appState.isAccountConnected = true
+        let event = ActivityEvent(
+            kind: .draftCreated,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 143,
+            messageUID: 5,
+            messageUIDValidity: 7
         )
 
         XCTAssertFalse(appState.canOpenActivityEvent(event))
@@ -285,6 +349,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
             kind: .draftCreated,
             account: "me@gmail.com",
             mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993,
             subject: "Subject 5",
             messageUID: 5
         )
@@ -302,6 +368,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
             kind: .draftCreated,
             account: "me@gmail.com",
             mailbox: "INBOX",
+            sourceMailHost: "imap.gmail.com",
+            sourceMailPort: 993,
             subject: "Subject 5",
             messageUID: 5,
             messageUIDValidity: 7

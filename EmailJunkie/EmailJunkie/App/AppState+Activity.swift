@@ -40,6 +40,8 @@ extension AppState {
             kind: kind,
             account: draft.sourceAccountEmail,
             mailbox: draft.sourceMailbox,
+            sourceMailHost: Self.normalizedActivitySourceMailHost(draft.sourceMailHost),
+            sourceMailPort: Self.normalizedActivitySourceMailPort(draft.sourceMailPort),
             sender: draft.sourceFrom?.name ?? draft.sourceFrom?.email,
             subject: draft.sourceSubject,
             staleReason: staleReason,
@@ -57,6 +59,8 @@ extension AppState {
             kind: .skipped,
             account: entry.account,
             mailbox: entry.mailbox.imapName,
+            sourceMailHost: currentActivitySourceMailHost,
+            sourceMailPort: currentActivitySourceMailPort,
             sender: entry.senderDisplay,
             subject: entry.subject,
             skipReason: entry.reason,
@@ -74,19 +78,25 @@ extension AppState {
     // MARK: - Link back to the source message
 
     /// Whether the history entry can open its source message: it carries a UID
-    /// with UIDVALIDITY and the still-connected account matches the one the event
-    /// was recorded under.
+    /// with UIDVALIDITY, and the still-connected account/server matches the one
+    /// the event was recorded under.
     /// Mailbox naming is provider-specific, so linkage reuses the existing
     /// fetch/preview path rather than building new IMAP machinery.
     func canOpenActivityEvent(_ event: ActivityEvent) -> Bool {
         guard event.messageUID != nil,
               event.messageUIDValidity != nil,
               isAccountConnected,
-              let account = event.account else {
+              let account = event.account,
+              let eventMailHost = Self.normalizedActivitySourceMailHost(event.sourceMailHost),
+              let eventMailPort = Self.normalizedActivitySourceMailPort(event.sourceMailPort),
+              let connectedMailHost = currentActivitySourceMailHost,
+              let connectedMailPort = currentActivitySourceMailPort else {
             return false
         }
         let connected = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         return account.caseInsensitiveCompare(connected) == .orderedSame
+            && eventMailHost == connectedMailHost
+            && eventMailPort == connectedMailPort
     }
 
     /// Opens the source message's readable-body preview for a history entry, when
@@ -120,5 +130,23 @@ extension AppState {
         case Mailbox.trash.imapName: return .trash
         default: return .named(name)
         }
+    }
+
+    private var currentActivitySourceMailHost: String? {
+        Self.normalizedActivitySourceMailHost(mailHost)
+    }
+
+    private var currentActivitySourceMailPort: Int? {
+        Self.normalizedActivitySourceMailPort(mailPort)
+    }
+
+    private static func normalizedActivitySourceMailHost(_ host: String?) -> String? {
+        let normalized = (host ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func normalizedActivitySourceMailPort(_ port: Int?) -> Int? {
+        guard let port, port > 0 else { return nil }
+        return port
     }
 }

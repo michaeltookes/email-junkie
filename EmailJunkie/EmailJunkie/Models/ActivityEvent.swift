@@ -7,8 +7,9 @@ import Foundation
 ///
 /// **Privacy:** this stores metadata only — sender, subject, and a reason — never
 /// message bodies or draft content, consistent with the local-first ethos. The
-/// optional `messageUID` + `messageUIDValidity` let the history link back to the
-/// source message when the account/mailbox still match the connected account.
+/// optional `messageUID` + `messageUIDValidity` + source server let the history
+/// link back to the source message when the account/mailbox still match the
+/// connected account.
 struct ActivityEvent: Codable, Identifiable, Equatable {
     /// Stable identity for list rendering (not derived from message keys, so two
     /// events about the same message remain distinct history entries).
@@ -21,6 +22,10 @@ struct ActivityEvent: Codable, Identifiable, Equatable {
     var account: String?
     /// The source mailbox's stable `imapName`, when known.
     var mailbox: String?
+    /// The source IMAP host that issued the message UID/UIDVALIDITY, when known.
+    var sourceMailHost: String?
+    /// The source IMAP port that issued the message UID/UIDVALIDITY, when known.
+    var sourceMailPort: Int?
     /// The other party's display name or address, for the row headline.
     var sender: String?
     /// The message subject, for the row.
@@ -42,6 +47,8 @@ struct ActivityEvent: Codable, Identifiable, Equatable {
         kind: ActivityEventKind,
         account: String? = nil,
         mailbox: String? = nil,
+        sourceMailHost: String? = nil,
+        sourceMailPort: Int? = nil,
         sender: String? = nil,
         subject: String? = nil,
         skipReason: ReplyWorthinessReason? = nil,
@@ -55,6 +62,8 @@ struct ActivityEvent: Codable, Identifiable, Equatable {
         self.kind = kind
         self.account = account
         self.mailbox = mailbox
+        self.sourceMailHost = sourceMailHost
+        self.sourceMailPort = sourceMailPort
         self.sender = sender
         self.subject = subject
         self.skipReason = skipReason

@@ -271,8 +271,14 @@ private struct OnboardingProviderStep: View {
                 ConnectedBadge(text: "Connected")
                 Button("Disconnect", role: .destructive) { appState.disconnectLLM() }
             } else {
-                SecureField("API key", text: $appState.llmAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                if appState.llmProviderKind.requiresAPIKey {
+                    SecureField("API key", text: $appState.llmAPIKey)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    Text("No API key needed — the local runtime handles requests on your machine.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Button {
                     Task { await appState.testLLMConnection() }
                 } label: {

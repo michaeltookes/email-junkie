@@ -200,11 +200,7 @@ struct SettingsView: View {
                         text: llmBaseURLBinding,
                         prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
                     )
-                    Text("""
-                    Leave blank for OpenAI. Point this at any OpenAI-compatible endpoint \
-                    (OpenRouter, Groq, a local server, …). Remote endpoints must use HTTPS; \
-                    plain HTTP works only on your local network.
-                    """)
+                    Text(llmBaseURLHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -217,7 +213,13 @@ struct SettingsView: View {
                         appState.disconnectLLM()
                     }
                 } else {
-                    SecureField("API key", text: $appState.llmAPIKey)
+                    if appState.llmProviderKind.requiresAPIKey {
+                        SecureField("API key", text: $appState.llmAPIKey)
+                    } else {
+                        Text("No API key needed — the local runtime handles requests on your machine.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Button {
                         Task { await appState.testLLMConnection() }
@@ -301,6 +303,24 @@ struct SettingsView: View {
         .sheet(item: $generatedDraft, onDismiss: { appState.generatedDraft = nil }, content: { draft in
             DraftView(draft: draft).environmentObject(appState)
         })
+    }
+
+    /// Endpoint help text tailored to the selected provider.
+    private var llmBaseURLHelp: String {
+        switch appState.llmProviderKind {
+        case .ollama:
+            return """
+            Leave blank for Ollama (http://localhost:11434/v1). Point this at LM Studio \
+            (http://localhost:1234/v1) or another OpenAI-compatible local/LAN server. \
+            Remote endpoints must use HTTPS; plain HTTP works only on your local network.
+            """
+        default:
+            return """
+            Leave blank for OpenAI. Point this at any OpenAI-compatible endpoint \
+            (OpenRouter, Groq, a local server, …). Remote endpoints must use HTTPS; \
+            plain HTTP works only on your local network.
+            """
+        }
     }
 
     private var llmModelBinding: Binding<String> {

@@ -55,7 +55,7 @@ extension AppState {
     /// in-memory `skippedMessages` override entry still carries the full message
     /// for "Draft anyway"; this metadata-only event survives restart.
     func recordSkipActivity(for entry: SkippedMessage) {
-        recordActivity(ActivityEvent(
+        let event = ActivityEvent(
             kind: .skipped,
             account: entry.account,
             mailbox: entry.mailbox.imapName,
@@ -66,7 +66,11 @@ extension AppState {
             skipReason: entry.reason,
             messageUID: entry.message.id,
             messageUIDValidity: entry.message.uidValidity
-        ))
+        )
+        if refreshExistingSkipActivity(matching: event) {
+            return
+        }
+        recordActivity(event)
     }
 
     /// Clears the entire activity history and persists the empty log.
@@ -100,14 +104,16 @@ extension AppState {
     }
 
     /// Opens the source message's readable-body preview for a history entry, when
-    /// linkage is possible. Reuses `previewBody`, returning the fetched preview so
-    /// the caller can present it in a sheet. Returns `nil` when linkage isn't
-    /// available or the fetch fails.
+    /// linkage is possible. Returns the fetched preview so the caller can present
+    /// it in its own sheet. Returns `nil` when linkage isn't available, the
+    /// account changes during the fetch, or the fetch fails.
     @discardableResult
     func openActivityEvent(_ event: ActivityEvent) async -> MailBodyPreview? {
         guard canOpenActivityEvent(event),
               let uid = event.messageUID,
               let uidValidity = event.messageUIDValidity else { return nil }
+        let credentials = mailCredentials
+        guard credentials.isComplete else { return nil }
         let message = MailMessage(
             id: uid,
             uidValidity: uidValidity,
@@ -116,7 +122,14 @@ extension AppState {
             date: ""
         )
         let mailbox = event.mailbox.map(Self.mailbox(forStableName:)) ?? .inbox
-        return await previewBody(for: message, mailbox: mailbox)
+        do {
+            let preview = try await fetchBodyPreview(for: message, mailbox: mailbox, credentials: credentials)
+            guard mailCredentials == credentials else { return nil }
+            return preview
+        } catch {
+            logger.error("Failed to open activity source message: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Maps a persisted stable `imapName` back to a `Mailbox` case so linkage
@@ -148,5 +161,52 @@ extension AppState {
     private static func normalizedActivitySourceMailPort(_ port: Int?) -> Int? {
         guard let port, port > 0 else { return nil }
         return port
+    }
+
+    private func refreshExistingSkipActivity(matching event: ActivityEvent) -> Bool {
+        guard let index = activityEvents.firstIndex(where: { Self.isSameSkipActivity($0, event) }) else {
+            return false
+        }
+
+        var refreshed = activityEvents.remove(at: index)
+        refreshed.timestamp = event.timestamp
+        refreshed.account = event.account
+        refreshed.mailbox = event.mailbox
+        refreshed.sourceMailHost = event.sourceMailHost
+        refreshed.sourceMailPort = event.sourceMailPort
+        refreshed.sender = event.sender
+        refreshed.subject = event.subject
+        refreshed.skipReason = event.skipReason
+        refreshed.messageUID = event.messageUID
+        refreshed.messageUIDValidity = event.messageUIDValidity
+        activityEvents.insert(refreshed, at: 0)
+        persistence.saveActivityEvents(activityEvents)
+        logger.info("Refreshed skipped activity event")
+        return true
+    }
+
+    private static func isSameSkipActivity(_ existing: ActivityEvent, _ event: ActivityEvent) -> Bool {
+        guard existing.kind == .skipped,
+              event.kind == .skipped,
+              existing.account?.caseInsensitiveCompare(event.account ?? "") == .orderedSame,
+              existing.mailbox == event.mailbox,
+              existing.messageUID == event.messageUID,
+              existing.messageUIDValidity == event.messageUIDValidity else {
+            return false
+        }
+
+        let existingHost = normalizedActivitySourceMailHost(existing.sourceMailHost)
+        let eventHost = normalizedActivitySourceMailHost(event.sourceMailHost)
+        if let existingHost, let eventHost, existingHost != eventHost {
+            return false
+        }
+
+        let existingPort = normalizedActivitySourceMailPort(existing.sourceMailPort)
+        let eventPort = normalizedActivitySourceMailPort(event.sourceMailPort)
+        if let existingPort, let eventPort, existingPort != eventPort {
+            return false
+        }
+
+        return true
     }
 }

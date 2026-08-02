@@ -162,6 +162,42 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertEqual(persistence.loadActivityEvents().first?.skipReason, .noReplySender)
     }
 
+    func testSkipActivityRefreshesExistingEventInsteadOfDuplicating() throws {
+        let (appState, _, persistence) = makeAppState()
+        let oldEventID = UUID()
+        let oldEvent = ActivityEvent(
+            id: oldEventID,
+            timestamp: Date(timeIntervalSince1970: 1),
+            kind: .skipped,
+            account: "ME@GMAIL.COM",
+            mailbox: "INBOX",
+            sourceMailHost: "IMAP.GMAIL.COM",
+            sourceMailPort: 993,
+            sender: "Old sender",
+            subject: "Old subject",
+            skipReason: .bulkOrListMail,
+            messageUID: 1,
+            messageUIDValidity: 7
+        )
+        appState.activityEvents = [ActivityEvent(kind: .approvedSent, subject: "Keep"), oldEvent]
+
+        let entry = SkippedMessage(
+            message: message(id: 1, from: "no-reply@x.com"),
+            mailbox: .inbox,
+            account: "me@gmail.com",
+            reason: .noReplySender
+        )
+        appState.recordSkipActivity(for: entry)
+
+        XCTAssertEqual(appState.activityEvents.count, 2)
+        let refreshed = try XCTUnwrap(appState.activityEvents.first)
+        XCTAssertEqual(refreshed.id, oldEventID)
+        XCTAssertEqual(refreshed.subject, "Subject 1")
+        XCTAssertEqual(refreshed.skipReason, .noReplySender)
+        XCTAssertGreaterThan(refreshed.timestamp, oldEvent.timestamp)
+        XCTAssertEqual(persistence.loadActivityEvents().map(\.id), appState.activityEvents.map(\.id))
+    }
+
     // MARK: - Approve / deny / send-failure streams
 
     func testApproveAutoSendRecordsSentEvent() async {
@@ -364,6 +400,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
     func testOpenActivityEventFetchesSourceBodyPreview() async {
         let (appState, provider, _) = makeAppState()
         appState.isAccountConnected = true
+        let existingPreview = MailBodyPreview(id: 99, subject: "Existing", text: "Keep this")
+        appState.openedBody = existingPreview
         let event = ActivityEvent(
             kind: .draftCreated,
             account: "me@gmail.com",
@@ -380,5 +418,6 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertEqual(preview?.id, 5)
         XCTAssertEqual(provider.lastBodyUID, 5)
         XCTAssertEqual(provider.lastExpectedUIDValidity, 7)
+        XCTAssertEqual(appState.openedBody, existingPreview)
     }
 }

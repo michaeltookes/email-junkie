@@ -38,7 +38,7 @@ struct ActivityHistoryView: View {
                     .padding(.vertical, 6)
             }
 
-            if appState.activityEvents.isEmpty {
+            if filteredEvents.isEmpty {
                 emptyState
             } else {
                 ScrollView {
@@ -57,11 +57,9 @@ struct ActivityHistoryView: View {
             }
         }
         .frame(width: 640, height: 520)
-        .sheet(
-            item: $openedBody,
-            onDismiss: { appState.openedBody = nil },
-            content: { preview in MessageBodyView(preview: preview) }
-        )
+        .sheet(item: $openedBody) { preview in
+            MessageBodyView(preview: preview)
+        }
     }
 
     private var header: some View {

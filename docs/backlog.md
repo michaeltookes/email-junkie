@@ -63,13 +63,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 ## Medium Priority
 
-16. **Local model support**
-    A local-model adapter for fully-offline drafting.
-    *As Sam, I want to run drafting against a local model, so that no email content ever leaves my machine.*
-    - Local-model adapter (e.g. Ollama) implements the same provider interface as cloud adapters (item 6).
-    - Selectable in Settings with no behavioral difference elsewhere.
-    - Documented setup for the local runtime.
-
 17. **Reply-worthiness filtering**
     Decide which incoming emails get a draft.
     *As Priya, I want newsletters, no-reply, and bulk mail filtered out, so that I'm not flooded with pointless drafts and don't burn LLM cost.*

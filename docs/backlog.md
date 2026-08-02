@@ -84,13 +84,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Optional scheduled refresh interval in Settings.
     - Previous profile replaced atomically; a summary of changes shown.
 
-21. **Activity history view**
-    See what the assistant has done.
-    *As Priya, I want to see drafted/approved/denied/sent/skipped events, so that I can trust it and debug surprises.*
-    - History lists events with timestamps and reasons.
-    - Entries link back to the relevant message where possible.
-    - History stored locally and can be cleared.
-
 22. **Cost & rate guardrails for cloud LLMs**
     Prevent surprise bills.
     *As Priya, I want usage limits and cost visibility for cloud providers, so that BYO-key drafting never surprises me.*

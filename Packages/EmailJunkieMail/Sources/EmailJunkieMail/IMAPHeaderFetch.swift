@@ -303,9 +303,15 @@ final class IMAPHeaderFetchHandler: ChannelInboundHandler {
         guard case .valid(let structure) = body else { return [] }
 
         var contentTypes: [String] = []
-        structure.enumerateParts { _, part in
+        var attachedContainerParts: [SectionSpecifier.Part] = []
+        structure.enumerateParts { partPath, part in
+            guard !attachedContainerParts.contains(where: { partPath.isSubPart(of: $0) }) else { return }
             let contentType = Self.contentTypeString(for: part)
-            guard !Self.isAttachment(part) || Self.isCalendarInviteContentType(contentType) else { return }
+            let isAttachment = Self.isAttachment(part)
+            if isAttachment, part.subpartCount > 0 {
+                attachedContainerParts.append(partPath)
+            }
+            guard !isAttachment || Self.isCalendarInviteContentType(contentType) else { return }
             guard !contentTypes.contains(contentType) else { return }
             contentTypes.append(contentType)
         }

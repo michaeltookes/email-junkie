@@ -166,6 +166,29 @@ final class IMAPHeaderFetchTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testOmitsCalendarRequestInsideAttachedMessageBodyStructure() throws {
+        let (channel, future) = try makeChannel()
+        let block = "Content-Type: multipart/mixed; boundary=abc\r\n\r\n"
+        let textPart = #"("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "7BIT" 12 1 NIL NIL NIL NIL)"#
+        let attachedMessage =
+            #""MESSAGE" "RFC822" ("NAME" "forwarded.eml") NIL NIL "BASE64" 400 "# +
+            #"(NIL NIL NIL NIL NIL NIL NIL NIL NIL NIL) "# +
+            #"(("TEXT" "CALENDAR" ("METHOD" "REQUEST") NIL NIL "7BIT" 88 5) "MIXED") "# +
+            #"12 NIL ("ATTACHMENT" ("FILENAME" "forwarded.eml")) NIL NIL"#
+        let bodyStructure = "\(textPart)(\(attachedMessage)) \"MIXED\" (\"BOUNDARY\" \"abc\") NIL NIL NIL"
+
+        try feed(channel, "* OK Service Ready\r\n")
+        try feed(channel, "A1 OK LOGIN completed\r\n")
+        try feed(channel, "A2 OK SELECT completed\r\n")
+        try feed(channel, headerSection(block, bodyStructure: "(\(bodyStructure))"))
+        try feed(channel, "A3 OK FETCH completed\r\n")
+
+        let fields = try future.wait()
+        XCTAssertEqual(fields.contentType, "multipart/mixed; boundary=abc")
+        XCTAssertEqual(fields.bodyContentTypes, ["multipart/mixed", "text/plain"])
+        _ = try? channel.finish()
+    }
+
     func testUnfoldsFoldedHeaderValues() throws {
         let (channel, future) = try makeChannel()
         // A List-Unsubscribe folded across two lines must reassemble intact.

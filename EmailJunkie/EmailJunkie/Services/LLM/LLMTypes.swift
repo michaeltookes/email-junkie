@@ -10,6 +10,12 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// (OpenRouter, Groq, Mistral, DeepSeek, Together, LM Studio, Ollama's
     /// OpenAI-compat endpoint, …) by pointing the base URL at each host.
     case openAICompatible
+    /// A local model runtime (Ollama by default) exposing the same OpenAI
+    /// `/v1/chat/completions` wire format on the loopback interface. Shares the
+    /// OpenAI-compatible adapter, but authenticates with no API key and defaults
+    /// its endpoint to Ollama's local server. Pointing the base URL elsewhere
+    /// targets LM Studio (`http://localhost:1234/v1`) or a LAN box instead.
+    case ollama
 
     var id: String { rawValue }
 
@@ -18,6 +24,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .anthropic: return "Anthropic (Claude)"
         case .openAICompatible: return "OpenAI-compatible"
+        case .ollama: return "Local (Ollama)"
         }
     }
 
@@ -26,16 +33,28 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .anthropic: return "claude-sonnet-4-6"
         case .openAICompatible: return "gpt-4o-mini"
+        case .ollama: return "llama3.1"
         }
     }
 
-    /// Whether the user may override the provider's HTTP endpoint. Only the
-    /// OpenAI-compatible adapter is endpoint-configurable; that override is what
-    /// lets one adapter target OpenAI or any BYO gateway/proxy.
+    /// Whether the user may override the provider's HTTP endpoint. The
+    /// OpenAI-compatible and local adapters are endpoint-configurable; that
+    /// override is what lets one adapter target OpenAI, a BYO gateway/proxy, or a
+    /// non-default local runtime (LM Studio, a LAN box).
     var supportsCustomBaseURL: Bool {
         switch self {
         case .anthropic: return false
-        case .openAICompatible: return true
+        case .openAICompatible, .ollama: return true
+        }
+    }
+
+    /// Whether this provider authenticates with an API key. Cloud providers
+    /// require one; local runtimes (Ollama, LM Studio) don't, so an empty key is
+    /// valid and the `Authorization` header is omitted entirely.
+    var requiresAPIKey: Bool {
+        switch self {
+        case .anthropic, .openAICompatible: return true
+        case .ollama: return false
         }
     }
 
@@ -45,6 +64,18 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .anthropic: return nil
         case .openAICompatible: return "https://api.openai.com/v1"
+        case .ollama: return "http://localhost:11434/v1"
+        }
+    }
+
+    /// The chat-completions endpoint used when the base-URL field is left blank,
+    /// for the OpenAI-compatible adapter family. `nil` for providers whose
+    /// endpoint isn't configurable (Anthropic).
+    var defaultOpenAICompatibleEndpoint: URL? {
+        switch self {
+        case .anthropic: return nil
+        case .openAICompatible: return OpenAICompatibleClient.defaultEndpoint
+        case .ollama: return OpenAICompatibleClient.ollamaDefaultEndpoint
         }
     }
 

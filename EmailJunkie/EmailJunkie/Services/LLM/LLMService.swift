@@ -11,14 +11,22 @@ struct LLMService: LLMProviding {
     }
 
     /// Builds the adapter for a provider. `baseURL` is honored only by adapters
-    /// whose `supportsCustomBaseURL` is true (currently the OpenAI-compatible
-    /// one); other adapters ignore it.
+    /// whose `supportsCustomBaseURL` is true (the OpenAI-compatible and local
+    /// ones); other adapters ignore it.
     private func client(for provider: LLMProviderKind, apiKey: String, baseURL: String?) -> LLMClient {
         switch provider {
         case .anthropic:
             return AnthropicClient(apiKey: apiKey, transport: transport)
-        case .openAICompatible:
-            return OpenAICompatibleClient(apiKey: apiKey, transport: transport, baseURL: baseURL)
+        case .openAICompatible, .ollama:
+            // One adapter serves both: the local provider only differs by its
+            // default endpoint (Ollama's loopback) and key-optional auth.
+            return OpenAICompatibleClient(
+                apiKey: apiKey,
+                transport: transport,
+                baseURL: baseURL,
+                defaultEndpoint: provider.defaultOpenAICompatibleEndpoint ?? OpenAICompatibleClient.defaultEndpoint,
+                requiresAPIKey: provider.requiresAPIKey
+            )
         }
     }
 

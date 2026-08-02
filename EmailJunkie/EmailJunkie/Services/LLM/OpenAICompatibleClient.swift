@@ -12,37 +12,62 @@ struct OpenAICompatibleClient: LLMClient {
     let apiKey: String
     let transport: LLMHTTPTransport
     let baseURL: String?
+    /// The endpoint used when `baseURL` is blank/`nil`. Defaults to OpenAI's
+    /// official endpoint; the local (Ollama) provider passes its loopback one.
+    let defaultEndpoint: URL
+    /// Whether an API key is mandatory. Cloud providers require one (an empty key
+    /// fails fast with `.missingAPIKey`); local runtimes set this to `false`, so
+    /// an empty key is valid and the `Authorization` header is omitted.
+    let requiresAPIKey: Bool
 
     /// OpenAI's official chat-completions endpoint, used when the user hasn't
     /// supplied a custom base URL.
     static let defaultEndpoint = URL(string: "https://api.openai.com/v1/chat/completions")!
 
-    /// - Parameter baseURL: a user-supplied base URL (e.g.
-    ///   `https://openrouter.ai/api/v1`). Blank/`nil` falls back to OpenAI's
-    ///   official endpoint. See `resolveEndpoint(baseURL:)` for normalization.
+    /// Ollama's local OpenAI-compatible chat-completions endpoint, used as the
+    /// default for the local provider when the base-URL field is blank.
+    static let ollamaDefaultEndpoint = URL(string: "http://localhost:11434/v1/chat/completions")!
+
+    /// - Parameters:
+    ///   - baseURL: a user-supplied base URL (e.g.
+    ///     `https://openrouter.ai/api/v1`). Blank/`nil` falls back to
+    ///     `defaultEndpoint`. See `resolveEndpoint(baseURL:defaultEndpoint:)` for
+    ///     normalization.
+    ///   - defaultEndpoint: the endpoint used when `baseURL` is blank.
+    ///   - requiresAPIKey: whether an empty key should fail fast. Local runtimes
+    ///     pass `false`.
     init(
         apiKey: String,
         transport: LLMHTTPTransport,
-        baseURL: String? = nil
+        baseURL: String? = nil,
+        defaultEndpoint: URL = OpenAICompatibleClient.defaultEndpoint,
+        requiresAPIKey: Bool = true
     ) {
         self.apiKey = apiKey
         self.transport = transport
         self.baseURL = baseURL
+        self.defaultEndpoint = defaultEndpoint
+        self.requiresAPIKey = requiresAPIKey
     }
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
-        guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
+        if requiresAPIKey {
+            guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
+        }
 
         // Resolve (and validate) the endpoint before touching the network so a
         // bad base URL fails fast — never silently routing the user's key to a
         // different host.
-        let endpoint = try Self.resolveEndpoint(baseURL: baseURL)
+        let endpoint = try Self.resolveEndpoint(baseURL: baseURL, defaultEndpoint: defaultEndpoint)
 
         let body = try Self.encodeBody(request)
-        let headers = [
-            "Authorization": "Bearer \(apiKey)",
-            "content-type": "application/json"
-        ]
+        // Omit the Authorization header entirely when there's no key — some
+        // local servers reject a bare "Bearer " — rather than sending an empty
+        // credential. Cloud providers always have a key here (required above).
+        var headers = ["content-type": "application/json"]
+        if !apiKey.isEmpty {
+            headers["Authorization"] = "Bearer \(apiKey)"
+        }
 
         let response: HTTPResponse
         do {
@@ -71,9 +96,15 @@ struct OpenAICompatibleClient: LLMClient {
     ///
     /// Throws `LLMError.invalidBaseURL` for input that doesn't parse or whose
     /// scheme isn't `http`/`https` (e.g. an embedded space, or a scheme-less
-    /// `openrouter.ai/api/v1`) rather than silently falling back to OpenAI —
+    /// `openrouter.ai/api/v1`) rather than silently falling back to the default —
     /// which would leak the user's key to the wrong host.
-    static func resolveEndpoint(baseURL: String?) throws -> URL {
+    ///
+    /// - Parameter defaultEndpoint: the endpoint returned for blank input.
+    ///   Defaults to OpenAI's; the local provider passes its loopback endpoint.
+    static func resolveEndpoint(
+        baseURL: String?,
+        defaultEndpoint: URL = OpenAICompatibleClient.defaultEndpoint
+    ) throws -> URL {
         let trimmed = (baseURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return defaultEndpoint }
 

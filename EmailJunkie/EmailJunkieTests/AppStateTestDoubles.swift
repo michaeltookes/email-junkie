@@ -90,12 +90,15 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private let result: Result<Void, MailError>
     private let fetchResult: Result<[MailMessage], MailError>
     private let bodyResult: Result<Data, MailError>
+    private let headerResult: Result<MailHeaderFields, MailError>
     private let appendResult: Result<Void, MailError>
     private let sendResult: Result<Void, MailError>
     private(set) var lastCredentials: MailAccountCredentials?
     private(set) var fetchCallCount = 0
     private(set) var bodyFetchCallCount = 0
+    private(set) var headerFetchCallCount = 0
     private(set) var lastBodyUID: UInt32?
+    private(set) var lastHeaderUID: UInt32?
     private(set) var lastExpectedUIDValidity: UInt32?
     private(set) var appendedMailbox: Mailbox?
     private(set) var appendedRFC822: Data?
@@ -107,12 +110,14 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         result: Result<Void, MailError>,
         fetchResult: Result<[MailMessage], MailError> = .success([]),
         bodyResult: Result<Data, MailError> = .success(Data()),
+        headerResult: Result<MailHeaderFields, MailError> = .success(MailHeaderFields()),
         appendResult: Result<Void, MailError> = .success(()),
         sendResult: Result<Void, MailError> = .success(())
     ) {
         self.result = result
         self.fetchResult = fetchResult
         self.bodyResult = bodyResult
+        self.headerResult = headerResult
         self.appendResult = appendResult
         self.sendResult = sendResult
     }
@@ -141,6 +146,17 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         lastBodyUID = uid
         lastExpectedUIDValidity = expectedUIDValidity
         return try bodyResult.get()
+    }
+
+    func fetchHeaderFields(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        uid: UInt32,
+        expectedUIDValidity: UInt32?
+    ) async throws -> MailHeaderFields {
+        headerFetchCallCount += 1
+        lastHeaderUID = uid
+        return try headerResult.get()
     }
 
     func appendMessage(

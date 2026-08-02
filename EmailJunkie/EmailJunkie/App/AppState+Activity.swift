@@ -73,12 +73,16 @@ extension AppState {
 
     // MARK: - Link back to the source message
 
-    /// Whether the history entry can open its source message: it carries a UID and
-    /// the still-connected account matches the one the event was recorded under.
+    /// Whether the history entry can open its source message: it carries a UID
+    /// with UIDVALIDITY and the still-connected account matches the one the event
+    /// was recorded under.
     /// Mailbox naming is provider-specific, so linkage reuses the existing
     /// fetch/preview path rather than building new IMAP machinery.
     func canOpenActivityEvent(_ event: ActivityEvent) -> Bool {
-        guard event.messageUID != nil, isAccountConnected, let account = event.account else {
+        guard event.messageUID != nil,
+              event.messageUIDValidity != nil,
+              isAccountConnected,
+              let account = event.account else {
             return false
         }
         let connected = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -91,10 +95,12 @@ extension AppState {
     /// available or the fetch fails.
     @discardableResult
     func openActivityEvent(_ event: ActivityEvent) async -> MailBodyPreview? {
-        guard canOpenActivityEvent(event), let uid = event.messageUID else { return nil }
+        guard canOpenActivityEvent(event),
+              let uid = event.messageUID,
+              let uidValidity = event.messageUIDValidity else { return nil }
         let message = MailMessage(
             id: uid,
-            uidValidity: event.messageUIDValidity,
+            uidValidity: uidValidity,
             from: nil,
             subject: event.subject ?? "",
             date: ""

@@ -265,6 +265,36 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertFalse(appState.canOpenActivityEvent(event))
     }
 
+    func testCannotOpenActivityEventWithoutUIDValidity() {
+        let (appState, _, _) = makeAppState()
+        appState.isAccountConnected = true
+        let event = ActivityEvent(
+            kind: .draftCreated,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            messageUID: 5
+        )
+
+        XCTAssertFalse(appState.canOpenActivityEvent(event))
+    }
+
+    func testOpenActivityEventDoesNotFetchWithoutUIDValidity() async {
+        let (appState, provider, _) = makeAppState()
+        appState.isAccountConnected = true
+        let event = ActivityEvent(
+            kind: .draftCreated,
+            account: "me@gmail.com",
+            mailbox: "INBOX",
+            subject: "Subject 5",
+            messageUID: 5
+        )
+
+        let preview = await appState.openActivityEvent(event)
+
+        XCTAssertNil(preview)
+        XCTAssertEqual(provider.bodyFetchCallCount, 0)
+    }
+
     func testOpenActivityEventFetchesSourceBodyPreview() async {
         let (appState, provider, _) = makeAppState()
         appState.isAccountConnected = true

@@ -34,15 +34,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
-6. **Pluggable LLM provider layer** — *in progress*
-   Provider-agnostic abstraction with adapters selected via BYO key/endpoint, designed so the local-model adapter (item 16) drops in cleanly.
-   *As Sam, I want to choose which LLM provider drafts my replies, so that I'm not locked to one vendor and can keep data where I want.*
-   - ✅ Common `LLMClient` interface + DTOs (`LLMRequest`/`LLMResponse`) and an injectable JSON transport; **Anthropic (Claude)** adapter implementing the Messages API. Adapter + coordinator covered by fake-transport unit tests.
-   - ✅ `LLMService` resolves the selected provider + key into a client; `LLMConnectionTesting` seam so AppState is tested without the network. Provider/model and last verified model persisted in Settings (schema v4).
-   - ✅ A "Test Connection" action verifies the key/model with a live call; on success the key is stored in the Keychain (item 10). "AI provider" Settings section is a working provider picker + model + API key + Test.
-   - ✅ **Live-verified against a real Anthropic key (2026-07-19):** "Test Connection" succeeded and the verified model (`claude-sonnet-4-6`) persisted.
-   - ⬜ **Remaining:** a second adapter (**OpenAI**) to exercise no-code provider switching end-to-end (the picker/seam already support it); optional custom endpoint override (BYO gateway/proxy). (Local-model adapter is item 16.)
-
 9. **Send / save-as-draft (user-configurable)** — *in progress (send + save-as-draft + toggle done; live-verify remaining)*
    On approval, either send immediately or create a Gmail draft, per a setting.
    *As Priya, I want to choose whether approval sends immediately or just saves a Gmail draft, so that I can match my own comfort/trust level.*

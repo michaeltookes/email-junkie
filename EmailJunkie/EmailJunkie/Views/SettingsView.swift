@@ -194,6 +194,21 @@ struct SettingsView: View {
                     prompt: Text(appState.llmProviderKind.defaultModel)
                 )
 
+                if appState.llmProviderKind.supportsCustomBaseURL {
+                    TextField(
+                        "Base URL",
+                        text: llmBaseURLBinding,
+                        prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
+                    )
+                    Text("""
+                    Leave blank for OpenAI. Point this at any OpenAI-compatible endpoint \
+                    (OpenRouter, Groq, a local server, …). Remote endpoints must use HTTPS; \
+                    plain HTTP works only on your local network.
+                    """)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 if appState.isLLMConnected {
                     LabeledContent("Status") {
                         Text("Connected").foregroundStyle(.green)
@@ -295,6 +310,13 @@ struct SettingsView: View {
                 appState.llmModel = $0
                 appState.refreshLLMConnectionStatus()
             }
+        )
+    }
+
+    private var llmBaseURLBinding: Binding<String> {
+        Binding(
+            get: { appState.llmBaseURL },
+            set: { appState.updateLLMBaseURLFromUser($0) }
         )
     }
 

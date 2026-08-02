@@ -162,6 +162,143 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertEqual(appState.llmAPIKey, "sk-stored")
     }
 
+    // MARK: - OpenAI-compatible provider + custom base URL (item 6)
+
+    func testSelectingOpenAICompatibleProviderUpdatesDefaultModel() {
+        let appState = makeAppState()
+
+        appState.selectLLMProvider(.openAICompatible)
+
+        XCTAssertEqual(appState.llmProviderKind, .openAICompatible)
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "gpt-4o-mini")
+        XCTAssertTrue(appState.llmProviderKind.supportsCustomBaseURL)
+        XCTAssertFalse(appState.isLLMConnected)
+    }
+
+    func testSelectingProviderClearsCustomModelForNewProviderDefault() {
+        let appState = makeAppState()
+        appState.llmModel = "claude-opus-4-8"
+
+        appState.selectLLMProvider(.openAICompatible)
+
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "gpt-4o-mini")
+
+        appState.llmModel = "openrouter/custom-model"
+        appState.selectLLMProvider(.anthropic)
+
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.resolvedLLMModel, "claude-sonnet-4-6")
+    }
+
+    func testTestConnectionPassesCustomBaseURLForOpenAICompatible() async {
+        let secrets = InMemorySecretStore()
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+        appState.llmAPIKey = "sk-gateway"
+
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(tester.lastProvider, .openAICompatible)
+        XCTAssertEqual(tester.lastBaseURL, "https://openrouter.ai/api/v1")
+        XCTAssertEqual(tester.lastModel, "gpt-4o-mini")
+        XCTAssertEqual(try? secrets.value(for: .llmAPIKey(provider: "openAICompatible")), "sk-gateway")
+    }
+
+    func testCurrentBaseURLIsNilForProvidersWithoutEndpointOverride() async {
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(llm: tester)
+        // Anthropic does not support a custom endpoint; a stray field value is ignored.
+        appState.llmBaseURL = "https://example.com/v1"
+        appState.llmAPIKey = "sk-live"
+
+        XCTAssertNil(appState.currentLLMBaseURL)
+
+        await appState.testLLMConnection()
+
+        XCTAssertEqual(tester.lastProvider, .anthropic)
+        XCTAssertNil(tester.lastBaseURL)
+    }
+
+    func testInvalidBaseURLMapsToFriendlyMessage() {
+        let message = AppState.llmMessage(for: LLMError.invalidBaseURL("openrouter.ai/api/v1"))
+
+        XCTAssertTrue(message.contains("Invalid base URL"), "message should name the problem: \(message)")
+        XCTAssertTrue(message.contains("openrouter.ai/api/v1"), "message should echo the value: \(message)")
+    }
+
+    func testTestConnectionWithInvalidBaseURLSurfacesErrorAndStaysDisconnected() async {
+        let secrets = InMemorySecretStore()
+        let appState = makeAppState(secrets: secrets, llm: LLMService(transport: FakeLLMTransport(
+            response: HTTPResponse(statusCode: 200, body: Data(#"{"choices":[{"message":{"content":"OK"}}]}"#.utf8))
+        )))
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://my host/v1"
+        appState.llmAPIKey = "sk-gateway"
+
+        await appState.testLLMConnection()
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.llmError, "Invalid base URL: https://my host/v1. Enter a full http(s) URL, e.g. https://api.openai.com/v1.")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "openAICompatible"))) ?? nil)
+    }
+
+    func testEditingBaseURLRequiresRetest() async {
+        let secrets = InMemorySecretStore()
+        let appState = makeAppState(secrets: secrets)
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+        appState.llmAPIKey = "sk-gateway"
+        await appState.testLLMConnection()
+        XCTAssertTrue(appState.isLLMConnected)
+
+        appState.updateLLMBaseURLFromUser("https://api.groq.com/openai/v1")
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.llmAPIKey, "")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "openAICompatible"))) ?? nil)
+    }
+
+    func testEditingBaseURLOnSameEndpointOriginKeepsKeyButRequiresRetest() async {
+        let secrets = InMemorySecretStore()
+        let appState = makeAppState(secrets: secrets)
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+        appState.llmAPIKey = "sk-gateway"
+        await appState.testLLMConnection()
+        XCTAssertTrue(appState.isLLMConnected)
+
+        appState.updateLLMBaseURLFromUser("https://openrouter.ai/api/v1/")
+
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.llmAPIKey, "sk-gateway")
+        XCTAssertEqual(try? secrets.value(for: .llmAPIKey(provider: "openAICompatible")), "sk-gateway")
+    }
+
+    func testOpenAICompatibleBaseURLRestoredOnInit() {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "openAICompatible"): "sk-stored"])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "openAICompatible",
+            llmModel: "gpt-4o-mini",
+            llmBaseURL: "https://openrouter.ai/api/v1",
+            llmVerifiedModel: "gpt-4o-mini"
+        ))
+        let appState = makeAppState(secrets: secrets, persistence: persistence)
+
+        XCTAssertEqual(appState.llmProviderKind, .openAICompatible)
+        XCTAssertEqual(appState.llmBaseURL, "https://openrouter.ai/api/v1")
+        XCTAssertEqual(appState.currentLLMBaseURL, "https://openrouter.ai/api/v1")
+        XCTAssertTrue(appState.isLLMConnected)
+    }
+
     func testChangingConnectedLLMModelRequiresRetest() {
         let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "anthropic"): "sk-stored"])
         let persistence = AppStateMemoryPersistence(settings: Settings(

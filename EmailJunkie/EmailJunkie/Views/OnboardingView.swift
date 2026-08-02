@@ -258,6 +258,15 @@ private struct OnboardingProviderStep: View {
             TextField("Model", text: modelBinding, prompt: Text(appState.llmProviderKind.defaultModel))
                 .textFieldStyle(.roundedBorder)
 
+            if appState.llmProviderKind.supportsCustomBaseURL {
+                TextField(
+                    "Base URL (optional)",
+                    text: baseURLBinding,
+                    prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+
             if appState.isLLMConnected {
                 ConnectedBadge(text: "Connected")
                 Button("Disconnect", role: .destructive) { appState.disconnectLLM() }
@@ -289,6 +298,13 @@ private struct OnboardingProviderStep: View {
                 appState.llmModel = $0
                 appState.refreshLLMConnectionStatus()
             }
+        )
+    }
+
+    private var baseURLBinding: Binding<String> {
+        Binding(
+            get: { appState.llmBaseURL },
+            set: { appState.updateLLMBaseURLFromUser($0) }
         )
     }
 }

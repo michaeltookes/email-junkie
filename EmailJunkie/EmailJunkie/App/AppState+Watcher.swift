@@ -116,8 +116,10 @@ extension AppState {
         return true
     }
 
-    /// Records a message as processed and persists the updated set.
-    private func markProcessed(_ message: MailMessage, account: String, mailbox: Mailbox) {
+    /// Records a message as processed and persists the updated set. Internal so
+    /// the reply-worthiness gate (item 17) can mark a skipped message handled,
+    /// and the override path can mark a force-drafted message handled.
+    func markProcessed(_ message: MailMessage, account: String, mailbox: Mailbox) {
         processedMessages.insert(message, account: account, mailbox: mailbox)
         persistence.saveProcessedMessages(processedMessages)
     }
@@ -191,6 +193,18 @@ extension AppState {
               !hasPendingDraft(for: message, account: credentials.email, mailbox: mailbox) else {
             return
         }
+
+        // Reply-worthiness gate (item 17): skip obvious non-replyable mail before
+        // the costly LLM draft call. A skip is recorded and the message is marked
+        // handled so it is not re-evaluated (and re-logged) every poll; the user
+        // can still force a draft from the skip log.
+        if let reason = await replyWorthinessSkipReason(message, credentials: credentials, mailbox: mailbox) {
+            guard watchStatus == .watching, mailCredentials == credentials else { return }
+            recordSkip(message, reason: reason, account: credentials.email, mailbox: mailbox)
+            markProcessed(message, account: credentials.email, mailbox: mailbox)
+            return
+        }
+        guard watchStatus == .watching, mailCredentials == credentials else { return }
 
         do {
             if try await draftAndEnqueue(message, mailbox: mailbox) {

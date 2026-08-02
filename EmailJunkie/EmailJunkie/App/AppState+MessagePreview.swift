@@ -108,6 +108,7 @@ extension AppState {
         clearDraftPreview()
         resetMailboxBrowserForAccountChange()
         resetBulkCleanupForAccountChange()
+        clearSkippedMessages()
         isFetching = false
         isFetchingBody = false
         isGeneratingDraft = false

@@ -166,6 +166,15 @@ final class AppState: ObservableObject {
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
 
+    /// Messages the watcher passed over instead of drafting (item 17), newest
+    /// first and bounded to `skippedMessageLogLimit`. This is the minimal,
+    /// observable skip record; the activity history (item 21) will surface it.
+    /// In-memory only — it is a rolling operational log, not persisted state.
+    @Published var skippedMessages: [SkippedMessage] = []
+
+    /// Maximum number of skip-log entries kept in memory.
+    let skippedMessageLogLimit = 100
+
     /// Messages the watcher has already handled, so none is drafted twice.
     var processedMessages: ProcessedMessages
 

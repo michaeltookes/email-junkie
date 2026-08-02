@@ -12,9 +12,9 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case openAICompatible
     /// A local model runtime (Ollama by default) exposing the same OpenAI
     /// `/v1/chat/completions` wire format on the loopback interface. Shares the
-    /// OpenAI-compatible adapter, but authenticates with no API key and defaults
+    /// OpenAI-compatible adapter, but treats API keys as optional and defaults
     /// its endpoint to Ollama's local server. Pointing the base URL elsewhere
-    /// targets LM Studio (`http://localhost:1234/v1`) or a LAN box instead.
+    /// targets LM Studio (`http://localhost:1234/v1`) or a keyed LAN proxy.
     case ollama
 
     var id: String { rawValue }
@@ -48,9 +48,9 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Whether this provider authenticates with an API key. Cloud providers
-    /// require one; local runtimes (Ollama, LM Studio) don't, so an empty key is
-    /// valid and the `Authorization` header is omitted entirely.
+    /// Whether this provider requires an API key before testing. Cloud providers
+    /// require one; local runtimes (Ollama, LM Studio) can leave it blank, but a
+    /// non-empty key is still sent for authenticated local servers or proxies.
     var requiresAPIKey: Bool {
         switch self {
         case .anthropic, .openAICompatible: return true

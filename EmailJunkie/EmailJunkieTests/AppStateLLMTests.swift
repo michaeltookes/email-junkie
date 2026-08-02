@@ -192,6 +192,32 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertEqual(appState.resolvedLLMModel, "claude-sonnet-4-6")
     }
 
+    func testSelectingProviderClearsSharedCustomBaseURL() {
+        let appState = makeAppState()
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+
+        appState.selectLLMProvider(.ollama)
+
+        XCTAssertEqual(appState.llmProviderKind, .ollama)
+        XCTAssertEqual(appState.llmBaseURL, "")
+        XCTAssertNil(appState.currentLLMBaseURL)
+    }
+
+    func testSelectingLocalAfterCustomEndpointUsesProviderDefaultEndpoint() async {
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(llm: tester)
+        appState.selectLLMProvider(.openAICompatible)
+        appState.llmBaseURL = "https://openrouter.ai/api/v1"
+
+        appState.selectLLMProvider(.ollama)
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(tester.lastProvider, .ollama)
+        XCTAssertNil(tester.lastBaseURL)
+    }
+
     func testTestConnectionPassesCustomBaseURLForOpenAICompatible() async {
         let secrets = InMemorySecretStore()
         let tester = FakeLLMProvider(result: .success(()))
@@ -331,6 +357,37 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertEqual(appState.verifiedLLMModel, "llama3.1")
         XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "ollama"))) ?? nil,
                      "no empty key should be written to the Keychain")
+    }
+
+    func testTestConnectionForLocalProviderStoresOptionalKey() async {
+        let secrets = InMemorySecretStore()
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.ollama)
+        appState.llmAPIKey = "  sk-local-proxy  "
+
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertNil(appState.llmError)
+        XCTAssertEqual(tester.lastProvider, .ollama)
+        XCTAssertEqual(tester.lastAPIKey, "sk-local-proxy")
+        XCTAssertEqual(try? secrets.value(for: .llmAPIKey(provider: "ollama")), "sk-local-proxy")
+    }
+
+    func testTestConnectionForLocalProviderClearsStoredOptionalKeyWhenBlank() async {
+        let secrets = InMemorySecretStore(seed: [.llmAPIKey(provider: "ollama"): "sk-old-local"])
+        let tester = FakeLLMProvider(result: .success(()))
+        let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.ollama)
+        appState.llmAPIKey = "   "
+
+        await appState.testLLMConnection()
+
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertNil(appState.llmError)
+        XCTAssertEqual(tester.lastAPIKey, "")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "ollama"))) ?? nil)
     }
 
     func testConnectedLocalProviderStaysConnectedAfterStatusRefresh() async {

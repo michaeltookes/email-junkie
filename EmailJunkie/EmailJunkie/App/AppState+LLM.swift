@@ -56,11 +56,14 @@ extension AppState {
 
     /// Switches the selected provider, reloading its stored key and status.
     /// The model field is cleared so the new provider starts from its default
-    /// instead of reusing another provider's model id.
+    /// instead of reusing another provider's model id. The custom base URL is
+    /// shared in settings, so clear it on provider changes to avoid sending the
+    /// new provider's requests to the previous provider's endpoint.
     func selectLLMProvider(_ provider: LLMProviderKind) {
         guard provider != llmProviderKind else { return }
         llmProviderKind = provider
         llmModel = ""
+        llmBaseURL = ""
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
@@ -109,9 +112,14 @@ extension AppState {
             return
         }
 
-        // Persist the key only when there is one. Key-optional providers (local
-        // runtimes) verify with an empty key and store nothing in the Keychain.
-        if !key.isEmpty {
+        if key.isEmpty {
+            do {
+                try secrets.remove(testedProvider.apiKeySecret)
+            } catch {
+                llmError = Self.keychainLLMMessage(action: "remove", error: error)
+                return
+            }
+        } else {
             do {
                 try secrets.set(key, for: testedProvider.apiKeySecret)
             } catch {

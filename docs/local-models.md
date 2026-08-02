@@ -37,7 +37,8 @@ works. This guide covers Ollama (the default) and LM Studio.
    - **Base URL:** leave blank for Ollama's default
      (`http://localhost:11434/v1`).
 
-   No API key is required — the field is hidden for the local provider.
+   No API key is required for Ollama or LM Studio. If a local/LAN runtime or
+   proxy requires one, enter it in **API key (optional)**.
 
 4. **Test Connection.** Click **Test Connection**. On success the provider shows
    **Connected** and drafting/voice-learning use the local model. If it fails,
@@ -69,8 +70,7 @@ host's endpoint, such as `http://192.168.1.50:11434/v1`.
 addresses (`localhost`, `127.0.0.1`, and LAN IPs) — that's what makes the
 loopback and LAN cases above work. Any endpoint reached over the public internet
 must use `https://`. If the runtime requires an API key (some proxies do), enter
-it in the key field, which appears whenever a key is expected; when the field is
-absent no key is sent.
+it in **API key (optional)**; when the field is blank no key is sent.
 
 ## How it fits the provider model
 

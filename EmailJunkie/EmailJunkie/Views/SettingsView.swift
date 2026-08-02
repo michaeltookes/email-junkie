@@ -213,10 +213,10 @@ struct SettingsView: View {
                         appState.disconnectLLM()
                     }
                 } else {
-                    if appState.llmProviderKind.requiresAPIKey {
-                        SecureField("API key", text: $appState.llmAPIKey)
-                    } else {
-                        Text("No API key needed — the local runtime handles requests on your machine.")
+                    SecureField(llmAPIKeyFieldTitle, text: $appState.llmAPIKey)
+
+                    if !appState.llmProviderKind.requiresAPIKey {
+                        Text("Optional — leave blank for Ollama or unauthenticated local runtimes.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -331,6 +331,10 @@ struct SettingsView: View {
                 appState.refreshLLMConnectionStatus()
             }
         )
+    }
+
+    private var llmAPIKeyFieldTitle: String {
+        appState.llmProviderKind.requiresAPIKey ? "API key" : "API key (optional)"
     }
 
     private var llmBaseURLBinding: Binding<String> {

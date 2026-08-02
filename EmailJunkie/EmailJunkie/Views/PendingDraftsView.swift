@@ -151,6 +151,7 @@ private struct SkippedMessageRow: View {
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Dismiss")
             }
         }
         .padding(8)

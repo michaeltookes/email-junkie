@@ -128,12 +128,60 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsNine() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 9)
+    func testCurrentSchemaVersionIsTen() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 10)
     }
 
     func testLLMBaseURLSchemaVersionIsNine() {
         XCTAssertEqual(Settings.llmBaseURLSchemaVersion, 9)
+    }
+
+    func testSendDelaySchemaVersionIsTen() {
+        XCTAssertEqual(Settings.sendDelaySchemaVersion, 10)
+    }
+
+    func testDefaultSendDelayIsTenSeconds() {
+        XCTAssertEqual(Settings.default.sendDelaySeconds, 10)
+        XCTAssertEqual(Settings.defaultSendDelaySeconds, 10)
+    }
+
+    func testLegacyFileWithoutSendDelayDecodesToDefault() throws {
+        // A pre-v10 settings file has no sendDelaySeconds key; it must decode to
+        // the default undo window rather than 0 (instant) so upgrading users get
+        // the safety net.
+        let legacy = #"{"schemaVersion":9,"pollIntervalSeconds":300,"sendBehavior":"autoSend"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.sendDelaySeconds, Settings.defaultSendDelaySeconds)
+    }
+
+    func testSendDelayRoundTripsThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 30
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.sendDelaySeconds, 30)
+    }
+
+    func testValidatedClampsNegativeSendDelayToZero() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            sendDelaySeconds: -5
+        ).validated()
+        XCTAssertEqual(settings.sendDelaySeconds, 0)
+    }
+
+    func testValidatedClampsExcessiveSendDelayToMaximum() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            sendDelaySeconds: 100_000
+        ).validated()
+        XCTAssertEqual(settings.sendDelaySeconds, Settings.maxSendDelaySeconds)
     }
 
     func testLegacyFileWithoutLLMBaseURLDecodesToEmpty() throws {

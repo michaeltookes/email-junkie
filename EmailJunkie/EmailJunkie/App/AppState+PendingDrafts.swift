@@ -60,6 +60,9 @@ extension AppState {
     private func queuedApprovalCredentials(for draft: Draft) throws -> MailAccountCredentials? {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return nil }
         guard !approvingDraftIDs.contains(draft.identity) else { return nil }
+        // A draft already counting down toward an auto-send (item 23) must not be
+        // re-approved into a second countdown or a double-send.
+        guard pendingSendCountdowns[draft.identity] == nil else { return nil }
 
         approvalError = nil
         // A flagged draft needs the user's input first — never send or save it,
@@ -87,6 +90,34 @@ extension AppState {
         credentials: MailAccountCredentials
     ) async throws {
         let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
+        // Auto-send safety net (item 23): unless disabled (delay 0), or the user
+        // is forcing a stale "send anyway", an auto-send approval starts a
+        // cancellable countdown instead of dispatching now. The draft stays in the
+        // pending queue for the whole window — recoverable across a quit/crash —
+        // and the stale-thread re-check (item 12) runs at the END of the window,
+        // immediately before dispatch. Save-as-draft and instant mode dispatch now.
+        if effectiveSendBehavior == .autoSend, !force, sendDelaySeconds > 0 {
+            startSendCountdown(for: draft, credentials: credentials)
+            return
+        }
+        try await dispatchApprovedDraft(
+            draft,
+            sendBehavior: effectiveSendBehavior,
+            force: force,
+            credentials: credentials
+        )
+    }
+
+    /// Runs the stale-thread re-check (unless forced) and then sends or saves the
+    /// draft, finalizing it on success. Shared by the immediate-approval path and
+    /// the end of the auto-send countdown (item 23), so both re-check freshness at
+    /// dispatch time and record the same activity/tombstone bookkeeping.
+    func dispatchApprovedDraft(
+        _ draft: Draft,
+        sendBehavior effectiveSendBehavior: SendBehavior,
+        force: Bool,
+        credentials: MailAccountCredentials
+    ) async throws {
         var dispatchCredentials = credentials
         if !force {
             let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)

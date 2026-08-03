@@ -127,6 +127,8 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
     case skipped
     /// A stale-thread warning was raised at approval time (item 12).
     case staleWarning
+    /// An auto-send was canceled during its safety-net window (item 23).
+    case sendCanceled
     /// Sending an approved draft failed.
     case sendFailed
     /// Saving an approved draft to the Drafts mailbox failed (IMAP APPEND).
@@ -141,6 +143,7 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .denied: return "Denied"
         case .skipped: return "Skipped"
         case .staleWarning: return "Stale-thread warning"
+        case .sendCanceled: return "Send canceled"
         case .sendFailed: return "Send failed"
         case .saveFailed: return "Save failed"
         }
@@ -155,6 +158,7 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .denied: return "xmark.circle"
         case .skipped: return "nosign"
         case .staleWarning: return "exclamationmark.triangle"
+        case .sendCanceled: return "arrow.uturn.backward.circle"
         case .sendFailed: return "exclamationmark.octagon"
         case .saveFailed: return "exclamationmark.octagon"
         }

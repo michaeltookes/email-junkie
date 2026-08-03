@@ -45,6 +45,9 @@ extension AppState {
         guard watchStatus != .idle else { return }
         watchStatus = .idle
         inboxWatcher.stop()
+        // Outstanding auto-send countdowns (item 23) simply never fire; their
+        // drafts stay pending in the queue.
+        cancelAllSendCountdowns()
         logger.info("Inbox watching stopped")
     }
 

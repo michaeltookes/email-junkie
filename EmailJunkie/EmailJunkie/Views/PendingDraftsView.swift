@@ -178,6 +178,9 @@ private struct PendingDraftCard: View {
 
     private var staleReason: StaleThreadReason? { appState.pendingStaleWarnings[draft.identity] }
 
+    /// Remaining seconds on this draft's auto-send countdown (item 23), if any.
+    private var countdownRemaining: Int? { appState.sendCountdownRemaining(for: draft.identity) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.isFlagged {
@@ -191,7 +194,9 @@ private struct PendingDraftCard: View {
                 replyColumn
             }
             Divider()
-            if let staleReason {
+            if let countdownRemaining {
+                countdownRow(countdownRemaining)
+            } else if let staleReason {
                 staleWarning(staleReason)
             } else {
                 actions
@@ -304,6 +309,25 @@ private struct PendingDraftCard: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(isBusy)
             }
+        }
+    }
+
+    /// The auto-send safety-net row (item 23): a live countdown with a Cancel
+    /// button. Cancelling returns the draft to the normal pending actions with any
+    /// edits intact.
+    private func countdownRow(_ remaining: Int) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Sending in \(remaining)s…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Spacer()
+            Button("Cancel") {
+                appState.cancelSendCountdown(draft)
+            }
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("Cancel send")
         }
     }
 

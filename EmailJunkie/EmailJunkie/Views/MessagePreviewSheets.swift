@@ -40,6 +40,8 @@ struct DraftView: View {
     @State private var dispatchConfirmation: String?
     @State private var dispatchError: String?
     @State private var staleReason: StaleThreadReason?
+    @State private var countdownRemaining: Int?
+    @State private var countdownTask: Task<Void, Never>?
 
     init(draft: Draft) {
         _displayedDraft = State(initialValue: draft)
@@ -92,21 +94,26 @@ struct DraftView: View {
                 Spacer()
                 // A flagged draft has no reply to send — offer no dispatch action.
                 if !displayedDraft.isFlagged {
-                    Button {
-                        Task { await approveDisplayedDraft() }
-                    } label: {
-                        if isBusy {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text(appState.sendBehavior == .autoSend ? "Send now" : "Save to Drafts")
+                    if let remaining = countdownRemaining {
+                        countdownControls(remaining)
+                    } else {
+                        Button {
+                            dispatchOrStartCountdown()
+                        } label: {
+                            if isBusy {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text(appState.sendBehavior == .autoSend ? "Send now" : "Save to Drafts")
+                            }
                         }
+                        .disabled(isBusy || isDone)
                     }
-                    .disabled(isBusy || isDone)
                 }
             }
             .padding()
         }
         .frame(width: 480, height: 460)
+        .onDisappear { cancelPreviewCountdown() }
         .confirmationDialog(
             staleReason?.headline ?? "",
             isPresented: staleWarningBinding,
@@ -131,6 +138,64 @@ struct DraftView: View {
             get: { staleReason != nil },
             set: { if !$0 { staleReason = nil } }
         )
+    }
+
+    /// The auto-send safety-net controls (item 23) shown in place of the dispatch
+    /// button while a preview send is counting down.
+    private func countdownControls(_ remaining: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("Sending in \(remaining)s…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Button("Cancel") { cancelPreviewCountdown() }
+                .accessibilityLabel("Cancel send")
+        }
+    }
+
+    /// Starts the auto-send countdown for a preview send when the safety net is
+    /// enabled (item 23); otherwise dispatches immediately (today's behavior).
+    /// Save-as-draft and instant mode never wait.
+    private func dispatchOrStartCountdown() {
+        guard appState.sendBehavior == .autoSend, appState.sendDelaySeconds > 0 else {
+            Task { await approveDisplayedDraft() }
+            return
+        }
+        startPreviewCountdown()
+    }
+
+    private func startPreviewCountdown() {
+        countdownTask?.cancel()
+        dispatchError = nil
+        dispatchConfirmation = nil
+        let seconds = max(appState.sendDelaySeconds, 1)
+        countdownRemaining = seconds
+        countdownTask = Task { @MainActor in
+            var remaining = seconds
+            while remaining > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: appState.sendCountdownTickNanoseconds)
+                } catch {
+                    return
+                }
+                if Task.isCancelled { return }
+                remaining -= 1
+                countdownRemaining = remaining
+            }
+            if Task.isCancelled { return }
+            countdownRemaining = nil
+            countdownTask = nil
+            // The stale re-check runs inside `approveDraftPreview`, so it happens at
+            // the end of the window, immediately before dispatch (item 23 pairs with
+            // item 12).
+            await approveDisplayedDraft()
+        }
+    }
+
+    private func cancelPreviewCountdown() {
+        countdownTask?.cancel()
+        countdownTask = nil
+        countdownRemaining = nil
     }
 
     private func approveDisplayedDraft(force: Bool = false) async {

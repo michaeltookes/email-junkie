@@ -40,6 +40,7 @@ struct DraftView: View {
     @State private var dispatchConfirmation: String?
     @State private var dispatchError: String?
     @State private var staleReason: StaleThreadReason?
+    @State private var staleApprovalSendBehavior: SendBehavior?
     @State private var countdownRemaining: Int?
     @State private var countdownTask: Task<Void, Never>?
 
@@ -119,13 +120,17 @@ struct DraftView: View {
             isPresented: staleWarningBinding,
             titleVisibility: .visible
         ) {
-            Button(appState.sendBehavior == .autoSend ? "Send anyway" : "Save anyway", role: .destructive) {
-                Task { await approveDisplayedDraft(force: true) }
+            Button(staleApprovalLabel, role: .destructive) {
+                let sendBehavior = staleApprovalSendBehavior ?? appState.sendBehavior
+                Task { await approveDisplayedDraft(sendBehavior: sendBehavior, force: true) }
             }
             Button("Regenerate") {
                 Task { await regenerateDisplayedDraft() }
             }
-            Button("Cancel", role: .cancel) { staleReason = nil }
+            Button("Cancel", role: .cancel) {
+                staleReason = nil
+                staleApprovalSendBehavior = nil
+            }
         } message: {
             if let staleReason {
                 Text(staleReason.detail)
@@ -136,8 +141,17 @@ struct DraftView: View {
     private var staleWarningBinding: Binding<Bool> {
         Binding(
             get: { staleReason != nil },
-            set: { if !$0 { staleReason = nil } }
+            set: {
+                if !$0 {
+                    staleReason = nil
+                    staleApprovalSendBehavior = nil
+                }
+            }
         )
+    }
+
+    private var staleApprovalLabel: String {
+        (staleApprovalSendBehavior ?? appState.sendBehavior) == .autoSend ? "Send anyway" : "Save anyway"
     }
 
     /// The auto-send safety-net controls (item 23) shown in place of the dispatch
@@ -157,15 +171,16 @@ struct DraftView: View {
     /// enabled (item 23); otherwise dispatches immediately (today's behavior).
     /// Save-as-draft and instant mode never wait.
     private func dispatchOrStartCountdown() {
-        guard appState.sendBehavior == .autoSend, appState.sendDelaySeconds > 0 else {
-            Task { await approveDisplayedDraft() }
+        let approvalSendBehavior = appState.sendBehavior
+        guard approvalSendBehavior == .autoSend, appState.sendDelaySeconds > 0 else {
+            Task { await approveDisplayedDraft(sendBehavior: approvalSendBehavior) }
             return
         }
-        startPreviewCountdown()
+        startPreviewCountdown(sendBehavior: approvalSendBehavior)
     }
 
-    private func startPreviewCountdown() {
-        countdownTask?.cancel()
+    private func startPreviewCountdown(sendBehavior approvalSendBehavior: SendBehavior) {
+        cancelPreviewCountdown(recordActivity: false)
         dispatchError = nil
         dispatchConfirmation = nil
         let seconds = max(appState.sendDelaySeconds, 1)
@@ -188,17 +203,21 @@ struct DraftView: View {
             // The stale re-check runs inside `approveDraftPreview`, so it happens at
             // the end of the window, immediately before dispatch (item 23 pairs with
             // item 12).
-            await approveDisplayedDraft()
+            await approveDisplayedDraft(sendBehavior: approvalSendBehavior)
         }
     }
 
-    private func cancelPreviewCountdown() {
+    private func cancelPreviewCountdown(recordActivity: Bool = true) {
+        let hadCountdown = countdownTask != nil || countdownRemaining != nil
         countdownTask?.cancel()
         countdownTask = nil
         countdownRemaining = nil
+        guard recordActivity, hadCountdown else { return }
+        displayedDraft.applyEditedBody(editedBody)
+        appState.recordDraftPreviewSendCancellation(for: displayedDraft)
     }
 
-    private func approveDisplayedDraft(force: Bool = false) async {
+    private func approveDisplayedDraft(sendBehavior approvalSendBehavior: SendBehavior, force: Bool = false) async {
         guard !isDispatching else { return }
         dispatchConfirmation = nil
         dispatchError = nil
@@ -211,16 +230,24 @@ struct DraftView: View {
         displayedDraft.applyEditedBody(editedBody)
 
         do {
-            dispatchConfirmation = try await appState.approveDraftPreview(displayedDraft, force: force)
+            staleApprovalSendBehavior = approvalSendBehavior
+            dispatchConfirmation = try await appState.approveDraftPreview(
+                displayedDraft,
+                sendBehavior: approvalSendBehavior,
+                force: force
+            )
             staleReason = nil
+            staleApprovalSendBehavior = nil
         } catch let error as DraftDispatchError {
             if case .staleThread(let reason) = error {
                 staleReason = reason
             } else {
                 dispatchError = AppState.draftMessage(for: error)
+                staleApprovalSendBehavior = nil
             }
         } catch {
             dispatchError = AppState.draftMessage(for: error)
+            staleApprovalSendBehavior = nil
         }
     }
 
@@ -229,6 +256,7 @@ struct DraftView: View {
         dispatchConfirmation = nil
         dispatchError = nil
         staleReason = nil
+        staleApprovalSendBehavior = nil
         isDispatching = true
         defer { isDispatching = false }
 

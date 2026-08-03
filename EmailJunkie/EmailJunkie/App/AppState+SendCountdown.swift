@@ -23,19 +23,20 @@ extension AppState {
     /// draft, finalizing it on success. Shared by the immediate-approval path and
     /// the end of the auto-send countdown, so both re-check freshness at dispatch
     /// time and record the same activity/tombstone bookkeeping.
+    @discardableResult
     func dispatchApprovedDraft(
         _ draft: Draft,
         sendBehavior effectiveSendBehavior: SendBehavior,
         force: Bool,
         credentials: MailAccountCredentials
-    ) async throws {
+    ) async throws -> Bool {
         var dispatchCredentials = credentials
         if !force {
             let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
             dispatchCredentials = freshness.credentials
             if let reason = freshness.reason {
                 recordPendingStaleWarning(reason, for: draft)
-                return
+                return false
             }
         }
         pendingStaleWarnings.removeValue(forKey: draft.identity)
@@ -47,6 +48,7 @@ extension AppState {
             try await performSave(draft, credentials: dispatchCredentials)
         }
         try finalizeApprovedDraft(draft)
+        return true
     }
 
     /// Starts a cancellable per-draft countdown before an auto-send dispatch. The
@@ -111,13 +113,13 @@ extension AppState {
         defer { approvingDraftIDs.remove(identity) }
         do {
             // `current` carries any inline edit (item 19) made during the window.
-            try await dispatchApprovedDraft(
+            let didDispatch = try await dispatchApprovedDraft(
                 current,
                 sendBehavior: .autoSend,
                 force: false,
                 credentials: credentials
             )
-            if pendingStaleWarnings[identity] != nil {
+            if !didDispatch {
                 surfaceBlockedSendCountdown(for: current, notifyUser: shouldSurfaceBlockedDispatch)
             }
         } catch {

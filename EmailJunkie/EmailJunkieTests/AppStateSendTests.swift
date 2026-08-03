@@ -107,6 +107,30 @@ final class AppStateSendTests: XCTestCase {
         XCTAssertFalse(rfc822.contains("bob@example.com"))
     }
 
+    func testPreviewApprovalUsesCapturedAutoSendBehaviorWhenSettingChanges() async throws {
+        let displayedDraft = draft()
+        let (appState, provider) = makeAppState(sendBehavior: .autoSend, draft: displayedDraft)
+
+        appState.sendBehavior = .saveAsDraft
+        let confirmation = try await appState.approveDraftPreview(displayedDraft, sendBehavior: .autoSend)
+
+        XCTAssertEqual(confirmation, "Sent.")
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertNil(provider.appendedRFC822)
+    }
+
+    func testPreviewApprovalUsesCapturedSaveBehaviorWhenSettingChanges() async throws {
+        let displayedDraft = draft()
+        let (appState, provider) = makeAppState(sendBehavior: .saveAsDraft, draft: displayedDraft)
+
+        appState.sendBehavior = .autoSend
+        let confirmation = try await appState.approveDraftPreview(displayedDraft, sendBehavior: .saveAsDraft)
+
+        XCTAssertEqual(confirmation, "Saved to your Drafts.")
+        XCTAssertEqual(provider.appendedMailbox, .drafts)
+        XCTAssertNil(provider.sentRFC822)
+    }
+
     func testPreviewApprovalRejectsDraftAfterAccountChanges() async {
         let staleDraft = draft(sourceAccountEmail: "old@gmail.com")
         let (appState, provider) = makeAppState(sendBehavior: .autoSend, draft: staleDraft)

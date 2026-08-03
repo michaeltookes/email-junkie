@@ -251,6 +251,16 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertEqual(appState.activityEvents.first?.subject, "Lunch?")
     }
 
+    func testPreviewCountdownCancelRecordsSendCanceledEvent() {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(seed: [draft])
+
+        appState.recordDraftPreviewSendCancellation(for: draft)
+
+        XCTAssertEqual(appState.activityEvents.map(\.kind), [.sendCanceled])
+        XCTAssertEqual(appState.activityEvents.first?.subject, "Lunch?")
+    }
+
     func testSendFailureRecordsSendFailedEvent() async {
         let draft = pendingDraft()
         let (appState, _, _) = makeAppState(

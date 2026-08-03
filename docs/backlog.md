@@ -88,14 +88,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Configurable caps pause drafting when exceeded, with a clear notification.
     - Estimated cost visible in the activity log/settings.
 
-23. **Send safety net (undo / cancel window)**
-    A grace period after approval so a bad auto-send can be stopped.
-    *As Priya, I want a few seconds to cancel after I approve, so that one mistaken approval doesn't go out.*
-    - In auto-send mode, approval starts a short, configurable countdown before the actual send.
-    - The user can cancel during the window; cancel returns the draft to pending.
-    - Disabling the window is possible for users who want instant send.
-    - Pairs with item 12 — stale-thread checks run at the end of the window, immediately before send.
-
 24. **Email signature handling**
     Respect the user's signature so drafts look right.
     *As Priya, I want drafts to use my normal signature correctly, so that replies don't drop it or double it up.*

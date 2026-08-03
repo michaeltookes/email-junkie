@@ -150,4 +150,12 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         default: return false
         }
     }
+
+    /// Whether rows should render a non-error detail such as an edit note.
+    var showsSuccessDetail: Bool {
+        switch self {
+        case .approvedSent, .approvedSaved: return true
+        default: return false
+        }
+    }
 }

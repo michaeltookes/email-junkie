@@ -168,6 +168,12 @@ private struct ActivityEventRow: View {
                         .foregroundStyle(.red)
                         .lineLimit(2)
                 }
+                if let detail = event.detail, event.kind.showsSuccessDetail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()

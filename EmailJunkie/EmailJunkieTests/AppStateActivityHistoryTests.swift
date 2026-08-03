@@ -110,10 +110,13 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertTrue(persistence.loadActivityEvents().isEmpty)
     }
 
-    func testFailureDetailVisibilityIncludesSaveFailures() {
+    func testActivityDetailVisibilityIncludesSaveFailuresAndEditNotes() {
         XCTAssertTrue(ActivityEventKind.sendFailed.showsFailureDetail)
         XCTAssertTrue(ActivityEventKind.saveFailed.showsFailureDetail)
         XCTAssertFalse(ActivityEventKind.approvedSaved.showsFailureDetail)
+        XCTAssertTrue(ActivityEventKind.approvedSent.showsSuccessDetail)
+        XCTAssertTrue(ActivityEventKind.approvedSaved.showsSuccessDetail)
+        XCTAssertFalse(ActivityEventKind.saveFailed.showsSuccessDetail)
     }
 
     func testActivityEventsPersistAndReloadOnNewAppState() {

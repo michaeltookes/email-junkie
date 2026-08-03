@@ -39,7 +39,8 @@ final class AppStateSendTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: sendBehavior.rawValue
+            sendBehavior: sendBehavior.rawValue,
+            sendDelaySeconds: 0
         ))
         let provider = FakeAppMailProvider(
             result: .success(()),
@@ -152,7 +153,8 @@ final class AppStateSendTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: SendBehavior.autoSend.rawValue
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 0
         ))
         let provider = SuspendedSendMailProvider()
         let appState = AppState(

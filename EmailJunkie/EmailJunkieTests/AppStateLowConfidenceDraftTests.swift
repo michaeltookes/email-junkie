@@ -34,7 +34,8 @@ final class AppStateLowConfidenceDraftTests: XCTestCase {
             pollIntervalSeconds: 300,
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
-            llmVerifiedModel: "claude-sonnet-4-6"
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendDelaySeconds: 0
         ))
         let provider = FakeAppMailProvider(
             result: .success(()),

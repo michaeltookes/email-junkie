@@ -44,7 +44,8 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: sendBehavior.rawValue
+            sendBehavior: sendBehavior.rawValue,
+            sendDelaySeconds: 0
         ), pendingDrafts: drafts)
         let provider = FakeAppMailProvider(result: .success(()), appendResult: appendResult)
         let appState = AppState(
@@ -351,7 +352,8 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: SendBehavior.autoSend.rawValue
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 0
         ), pendingDrafts: [draft])
         let appState = AppState(
             persistence: persistence,

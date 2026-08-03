@@ -64,7 +64,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
                 mailEmail: "me@gmail.com",
                 llmProvider: "anthropic",
                 llmVerifiedModel: "claude-sonnet-4-6",
-                sendBehavior: sendBehavior.rawValue
+                sendBehavior: sendBehavior.rawValue,
+                sendDelaySeconds: 0
             ),
             processedMessages: processed ?? baselineProcessed(),
             pendingDrafts: drafts

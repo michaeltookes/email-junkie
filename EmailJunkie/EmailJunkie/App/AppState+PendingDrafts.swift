@@ -108,37 +108,7 @@ extension AppState {
         )
     }
 
-    /// Runs the stale-thread re-check (unless forced) and then sends or saves the
-    /// draft, finalizing it on success. Shared by the immediate-approval path and
-    /// the end of the auto-send countdown (item 23), so both re-check freshness at
-    /// dispatch time and record the same activity/tombstone bookkeeping.
-    func dispatchApprovedDraft(
-        _ draft: Draft,
-        sendBehavior effectiveSendBehavior: SendBehavior,
-        force: Bool,
-        credentials: MailAccountCredentials
-    ) async throws {
-        var dispatchCredentials = credentials
-        if !force {
-            let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
-            dispatchCredentials = freshness.credentials
-            if let reason = freshness.reason {
-                recordPendingStaleWarning(reason, for: draft)
-                return
-            }
-        }
-        pendingStaleWarnings.removeValue(forKey: draft.identity)
-
-        switch effectiveSendBehavior {
-        case .autoSend:
-            try await performSend(draft, credentials: dispatchCredentials)
-        case .saveAsDraft:
-            try await performSave(draft, credentials: dispatchCredentials)
-        }
-        try finalizeApprovedDraft(draft)
-    }
-
-    private func currentFreshnessCheck(
+    func currentFreshnessCheck(
         for draft: Draft,
         credentials: MailAccountCredentials
     ) async throws -> (reason: StaleThreadReason?, credentials: MailAccountCredentials) {
@@ -147,7 +117,7 @@ extension AppState {
         return (verdict.reason, currentCredentials)
     }
 
-    private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
+    func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
         pendingStaleWarnings[draft.identity] = reason
         approvalError = Self.draftMessage(for: DraftDispatchError.staleThread(reason))
         recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
@@ -269,7 +239,7 @@ extension AppState {
         }
     }
 
-    private func finalizeApprovedDraft(_ draft: Draft) throws {
+    func finalizeApprovedDraft(_ draft: Draft) throws {
         do {
             try recordApprovedDraftIdentity(draft.identity)
             removePendingDraftAfterApproval(draft)

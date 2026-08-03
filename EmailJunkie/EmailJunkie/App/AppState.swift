@@ -216,7 +216,7 @@ final class AppState: ObservableObject {
     /// Set by the menu-bar controller so the app can surface the first-run
     /// onboarding window at launch or from the menu.
     var openOnboardingHandler: (() -> Void)?
-    private let settingsDebouncer = Debouncer(delay: 0.5)
+    let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     var previewGeneration = 0
     var bodyPreviewGeneration = 0
@@ -476,56 +476,4 @@ final class AppState: ObservableObject {
         restoreMailHostGuidanceFromSettings(settings)
     }
 
-    /// Builds a `Settings` snapshot from the current published values.
-    /// Internal so the `AppState+Onboarding` extension can persist the
-    /// onboarding flag through the same path.
-    func buildSettings(
-        mailEmail: String? = nil,
-        mailHost: String? = nil,
-        mailPort: Int? = nil,
-        llmModelOverride: String? = nil
-    ) -> Settings {
-        Settings(
-            schemaVersion: Settings.currentSchemaVersion,
-            pollIntervalSeconds: pollIntervalSeconds,
-            mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
-            mailHostGuidancePendingEmail: mailHostExplicitlyEditedBeforeEmail,
-            mailPort: mailPort ?? self.mailPort,
-            llmProvider: llmProviderKind.rawValue,
-            llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
-            llmBaseURL: llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
-            llmVerifiedModel: verifiedLLMModel,
-            sendBehavior: sendBehavior.rawValue,
-            sendDelaySeconds: sendDelaySeconds,
-            onboardingCompleted: onboardingCompleted
-        )
-    }
-
-    /// Saves settings to disk (debounced).
-    func saveSettings(llmModel: String? = nil) {
-        let settings = buildSettings(llmModelOverride: llmModel)
-        settingsDebouncer.debounce { [weak self] in
-            self?.persistence.saveSettings(settings)
-        }
-    }
-
-    /// Saves a specific settings snapshot immediately, cancelling stale
-    /// debounced snapshots first.
-    func persistSettingsSync(_ settings: Settings) throws {
-        settingsDebouncer.cancel()
-        try persistence.saveSettingsSync(settings)
-    }
-
-    /// Saves settings immediately (used on app termination).
-    func saveSettingsSync() {
-        let settings = buildSettings()
-        do {
-            try persistSettingsSync(settings)
-        } catch {
-            connectionError = Self.settingsMessage(action: "save", error: error)
-            logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
-        }
-    }
 }

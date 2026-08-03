@@ -52,9 +52,16 @@ extension AppState {
     /// Starts a cancellable per-draft countdown before an auto-send dispatch. The
     /// draft stays in the pending queue for the whole window (recoverable); only
     /// after the window elapses AND the send succeeds is it removed.
-    func startSendCountdown(for draft: Draft, credentials: MailAccountCredentials) {
+    func startSendCountdown(
+        for draft: Draft,
+        credentials: MailAccountCredentials,
+        surfaceBlockedDispatch: Bool = false
+    ) {
         let identity = draft.identity
         guard sendCountdownTasks[identity] == nil else { return }
+        if surfaceBlockedDispatch {
+            sendCountdownNotificationApprovalIDs.insert(identity)
+        }
         let seconds = max(sendDelaySeconds, 1)
         pendingSendCountdowns[identity] = seconds
         let task = Task { [weak self] in
@@ -92,11 +99,11 @@ extension AppState {
     /// existing stale-warning flow surfaces instead; the draft stays pending.
     private func fireSendCountdown(for draft: Draft, credentials: MailAccountCredentials) async {
         let identity = draft.identity
+        let shouldSurfaceBlockedDispatch = sendCountdownNotificationApprovalIDs.remove(identity) != nil
         pendingSendCountdowns.removeValue(forKey: identity)
         sendCountdownTasks.removeValue(forKey: identity)
 
-        // The draft may have been denied/removed during the window.
-        guard let current = pendingDrafts.first(where: { $0.identity == identity }) else { return }
+        guard let current = currentDraftForCountdownDispatch(identity: identity) else { return }
         // Never double-dispatch if an approval is already in flight for it.
         guard !approvingDraftIDs.contains(identity) else { return }
 
@@ -110,10 +117,37 @@ extension AppState {
                 force: false,
                 credentials: credentials
             )
+            if pendingStaleWarnings[identity] != nil {
+                surfaceBlockedSendCountdown(for: current, notifyUser: shouldSurfaceBlockedDispatch)
+            }
         } catch {
             approvalError = Self.draftMessage(for: error)
             logger.error("Auto-send after countdown failed: \(error.localizedDescription)")
         }
+    }
+
+    private func currentDraftForCountdownDispatch(identity: String) -> Draft? {
+        // The draft may have been denied/removed during the window.
+        guard let current = pendingDrafts.first(where: { $0.identity == identity }) else { return nil }
+        if let editedBody = pendingDraftUncommittedEditBodies[identity] {
+            guard let updated = updatePendingDraftBody(current, to: editedBody) else {
+                openReviewHandler?()
+                return nil
+            }
+            return updated
+        }
+        guard !pendingDraftUncommittedEditIDs.contains(identity) else {
+            approvalError = "Review this draft before sending; it has unsaved edits."
+            openReviewHandler?()
+            return nil
+        }
+        return current
+    }
+
+    private func surfaceBlockedSendCountdown(for draft: Draft, notifyUser: Bool) {
+        guard notifyUser else { return }
+        notifier.notify(for: draft, sendBehavior: .autoSend)
+        openReviewHandler?()
     }
 
     /// User-initiated cancel during the window (item 23): stops the countdown and
@@ -123,6 +157,7 @@ extension AppState {
         let identity = draft.identity
         guard let task = sendCountdownTasks.removeValue(forKey: identity) else { return }
         task.cancel()
+        sendCountdownNotificationApprovalIDs.remove(identity)
         pendingSendCountdowns.removeValue(forKey: identity)
         approvalError = nil
         recordDraftActivity(.sendCanceled, for: draft)
@@ -137,6 +172,7 @@ extension AppState {
             task.cancel()
         }
         sendCountdownTasks.removeAll()
+        sendCountdownNotificationApprovalIDs.removeAll()
         pendingSendCountdowns.removeAll()
     }
 }

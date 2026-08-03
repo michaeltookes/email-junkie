@@ -29,6 +29,7 @@ final class AppStateSendCountdownTests: XCTestCase {
         provider: MailProvider,
         sendDelaySeconds: Int,
         tickNanoseconds: UInt64,
+        notifier: DraftNotifying = FakeDraftNotifier(),
         seed drafts: [Draft]
     ) -> AppState {
         let secrets = InMemorySecretStore(seed: [
@@ -49,7 +50,7 @@ final class AppStateSendCountdownTests: XCTestCase {
             secrets: secrets,
             mailProvider: provider,
             llm: FakeLLMProvider(result: .success(())),
-            notifier: FakeDraftNotifier()
+            notifier: notifier
         )
         appState.pendingDrafts = drafts
         appState.pendingDraftCount = drafts.count
@@ -74,6 +75,19 @@ final class AppStateSendCountdownTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 500_000)
             await Task.yield()
         }
+    }
+
+    private func decodedBody(from rfc822: Data?) -> String {
+        guard let rfc822, let text = String(data: rfc822, encoding: .utf8),
+              let separator = text.range(of: "\r\n\r\n") else {
+            return ""
+        }
+        let encoded = text[separator.upperBound...]
+            .components(separatedBy: .newlines)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: encoded) else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     // MARK: - Delay 0 keeps today's instant-send behavior
@@ -164,6 +178,53 @@ final class AppStateSendCountdownTests: XCTestCase {
         XCTAssertEqual(appState.activityEvents.first?.kind, .sendCanceled)
     }
 
+    func testCountdownFlushesRegisteredInlineEditBeforeSending() async {
+        let draft = pendingDraft()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 2,
+            tickNanoseconds: 2_000_000,
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+        appState.notePendingDraftBodyEdit(draft, editedBody: "Edited during countdown.")
+        await waitUntil { appState.pendingDrafts.isEmpty }
+
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertEqual(decodedBody(from: provider.sentRFC822), "Edited during countdown.")
+        XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNil(appState.pendingDraftUncommittedEditBodies[draft.identity])
+    }
+
+    func testCountdownBlocksWhenRegisteredInlineEditCannotPersist() async {
+        let draft = pendingDraft()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 2,
+            tickNanoseconds: 2_000_000,
+            seed: [draft]
+        )
+        let persistence = appState.persistence as? AppStateMemoryPersistence
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
+
+        await appState.approveDraft(draft)
+        persistence?.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+        XCTAssertNil(appState.updatePendingDraftBody(draft, to: "Edited during countdown."))
+        await waitUntil { appState.pendingSendCountdowns.isEmpty }
+
+        XCTAssertEqual(provider.sendCallCount, 0)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Thursday works!")
+        XCTAssertEqual(appState.pendingDraftUncommittedEditBodies[draft.identity], "Edited during countdown.")
+        XCTAssertTrue(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertTrue(openedReview)
+        XCTAssertNotNil(appState.approvalError)
+    }
+
     // MARK: - Stale verdict at fire time blocks the send and warns
 
     func testStaleVerdictAtFireTimeBlocksSendAndSurfacesWarning() async {
@@ -195,6 +256,43 @@ final class AppStateSendCountdownTests: XCTestCase {
         XCTAssertEqual(appState.pendingStaleWarnings[draft.identity], .newerReplyInThread)
         XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
         XCTAssertTrue(appState.pendingSendCountdowns.isEmpty)
+    }
+
+    func testNotificationCountdownStaleVerdictOpensReviewWindowAndRepostsNotification() async {
+        let draft = pendingDraft()
+        let provider = SearchStubMailProvider(
+            threadResult: MailSearchResult(
+                messages: [
+                    MailMessage(id: 1, uidValidity: 10, from: MailAddress(email: "alice@example.com"),
+                                subject: "Lunch?", date: ""),
+                    MailMessage(id: 9, uidValidity: 10, from: MailAddress(email: "alice@example.com"),
+                                subject: "Re: Lunch?", date: "")
+                ],
+                totalMatches: 2,
+                offset: 0,
+                hasMore: false
+            )
+        )
+        let notifier = FakeDraftNotifier()
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 2,
+            tickNanoseconds: 2_000_000,
+            notifier: notifier,
+            seed: [draft]
+        )
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
+
+        await notifier.fireAction(.approve(.autoSend), identity: draft.identity)
+        await waitUntil { appState.pendingStaleWarnings[draft.identity] != nil }
+
+        XCTAssertEqual(provider.sendCount, 0)
+        XCTAssertEqual(appState.pendingStaleWarnings[draft.identity], .newerReplyInThread)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertTrue(appState.pendingSendCountdowns.isEmpty)
+        XCTAssertTrue(openedReview)
+        XCTAssertEqual(notifier.notifiedDrafts.map(\.identity), [draft.identity])
     }
 
     // MARK: - A double-approve while counting down never double-sends

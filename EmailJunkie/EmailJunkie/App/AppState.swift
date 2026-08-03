@@ -167,6 +167,10 @@ final class AppState: ObservableObject {
     /// Cancelling one stops its send; the draft remains pending untouched.
     var sendCountdownTasks: [String: Task<Void, Never>] = [:]
 
+    /// Countdown draft identities that originated from notification approval and
+    /// need explicit user feedback if the delayed dispatch is blocked.
+    var sendCountdownNotificationApprovalIDs: Set<String> = []
+
     /// One countdown tick, in nanoseconds. Overridable so tests can drive the
     /// window without waiting real seconds (mirrors `bulkSweepPacingNanoseconds`).
     var sendCountdownTickNanoseconds: UInt64 = 1_000_000_000

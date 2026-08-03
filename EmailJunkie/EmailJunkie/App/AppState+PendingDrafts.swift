@@ -39,7 +39,8 @@ extension AppState {
     func approveDraft(
         _ draft: Draft,
         sendBehavior approvalSendBehavior: SendBehavior? = nil,
-        force: Bool = false
+        force: Bool = false,
+        surfaceDelayedBlocks: Bool = false
     ) async {
         do {
             guard let credentials = try queuedApprovalCredentials(for: draft) else { return }
@@ -50,6 +51,7 @@ extension AppState {
                 draft,
                 sendBehavior: approvalSendBehavior,
                 force: force,
+                surfaceDelayedBlocks: surfaceDelayedBlocks,
                 credentials: credentials
             )
         } catch {
@@ -87,6 +89,7 @@ extension AppState {
         _ draft: Draft,
         sendBehavior approvalSendBehavior: SendBehavior?,
         force: Bool,
+        surfaceDelayedBlocks: Bool,
         credentials: MailAccountCredentials
     ) async throws {
         let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
@@ -97,7 +100,11 @@ extension AppState {
         // and the stale-thread re-check (item 12) runs at the END of the window,
         // immediately before dispatch. Save-as-draft and instant mode dispatch now.
         if effectiveSendBehavior == .autoSend, !force, sendDelaySeconds > 0 {
-            startSendCountdown(for: draft, credentials: credentials)
+            startSendCountdown(
+                for: draft,
+                credentials: credentials,
+                surfaceBlockedDispatch: surfaceDelayedBlocks
+            )
             return
         }
         try await dispatchApprovedDraft(
@@ -229,7 +236,11 @@ extension AppState {
                 openReviewHandler?()
                 return
             }
-            await approveDraft(draft, sendBehavior: sendBehavior)
+            guard pendingStaleWarnings[identity] == nil else {
+                openReviewHandler?()
+                return
+            }
+            await approveDraft(draft, sendBehavior: sendBehavior, surfaceDelayedBlocks: true)
             if pendingStaleWarnings[identity] != nil {
                 openReviewHandler?()
             }

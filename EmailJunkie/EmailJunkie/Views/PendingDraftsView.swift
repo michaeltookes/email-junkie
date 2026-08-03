@@ -266,11 +266,10 @@ private struct PendingDraftCard: View {
                         }
                     }
                     // Resync when the underlying draft body changes externally
-                    // (e.g. a regenerate) while the user isn't actively editing.
+                    // (e.g. a same-identity regenerate). Typing only changes
+                    // `editedBody`, so external draft replacements should win.
                     .onChange(of: draft.body) { _, newValue in
-                        if !isBodyFocused {
-                            editedBody = newValue
-                        }
+                        editedBody = newValue
                     }
             }
         }
@@ -291,19 +290,12 @@ private struct PendingDraftCard: View {
             // A flagged draft can't be approved — there is nothing safe to send.
             if !draft.isFlagged {
                 Button(appState.approveActionLabel) {
-                    Task { await approve() }
+                    Task { await appState.approvePendingDraft(draft, withEditedBody: editedBody) }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(isBusy)
             }
         }
-    }
-
-    /// Folds the inline edit into the queued draft (item 19), then approves the
-    /// edited draft so the edited body is exactly what sends or saves.
-    private func approve(force: Bool = false) async {
-        let updated = appState.updatePendingDraftBody(draft, to: editedBody)
-        await appState.approveDraft(updated, force: force)
     }
 
     /// The conflict warning shown when a draft's thread changed since it was
@@ -331,7 +323,7 @@ private struct PendingDraftCard: View {
                 }
                 .disabled(isBusy)
                 Button("\(appState.approveActionLabel) anyway") {
-                    Task { await approve(force: true) }
+                    Task { await appState.approvePendingDraft(draft, withEditedBody: editedBody, force: true) }
                 }
                 .disabled(isBusy)
             }

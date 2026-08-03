@@ -134,8 +134,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let draft = pendingDraft(body: "Generated reply body.")
         let (appState, provider, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
 
-        let updated = appState.updatePendingDraftBody(draft, to: "My hand-written reply.")
-        await appState.approveDraft(updated)
+        await appState.approvePendingDraft(draft, withEditedBody: "My hand-written reply.")
 
         XCTAssertEqual(decodedBody(from: provider.sentRFC822), "My hand-written reply.")
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
@@ -145,8 +144,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let draft = pendingDraft(body: "Generated reply body.")
         let (appState, provider, _) = makeAppState(sendBehavior: .saveAsDraft, seed: [draft])
 
-        let updated = appState.updatePendingDraftBody(draft, to: "Edited save body.")
-        await appState.approveDraft(updated)
+        await appState.approvePendingDraft(draft, withEditedBody: "Edited save body.")
 
         XCTAssertEqual(decodedBody(from: provider.appendedRFC822), "Edited save body.")
         XCTAssertEqual(provider.appendedMailbox, .drafts)
@@ -199,18 +197,18 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
 
         let result = appState.updatePendingDraftBody(draft, to: "Unchanged.")
 
-        XCTAssertEqual(result.body, "Unchanged.")
-        XCTAssertNil(result.originalBody)
+        XCTAssertEqual(result?.body, "Unchanged.")
+        XCTAssertNil(result?.originalBody)
         XCTAssertEqual(persistence.pendingDraftSaveCount, before)
     }
 
-    func testUpdatePendingDraftBodyReturnsDraftWhenNotQueued() {
+    func testUpdatePendingDraftBodyReturnsNilWhenNotQueued() {
         let (appState, _, _) = makeAppState(seed: [])
         let orphan = pendingDraft(id: 99, body: "Orphan.")
 
         let result = appState.updatePendingDraftBody(orphan, to: "Edited.")
 
-        XCTAssertEqual(result.body, "Orphan.")
+        XCTAssertNil(result)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
@@ -221,9 +219,23 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
 
         let result = appState.updatePendingDraftBody(draft, to: "Edited.")
 
-        XCTAssertEqual(result.body, "Generated.")
+        XCTAssertNil(result)
         XCTAssertEqual(appState.pendingDrafts.first?.body, "Generated.")
         XCTAssertNil(appState.pendingDrafts.first?.originalBody)
+        XCTAssertNotNil(appState.approvalError)
+    }
+
+    func testApprovePendingDraftStopsWhenEditPersistenceFails() async {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, provider, persistence) = makeAppState(seed: [draft])
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        await appState.approvePendingDraft(draft, withEditedBody: "Edited.")
+
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Generated.")
         XCTAssertNotNil(appState.approvalError)
     }
 
@@ -280,8 +292,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         appState.pendingDrafts = [draft]
         appState.pendingDraftCount = 1
 
-        let updated = appState.updatePendingDraftBody(draft, to: "Edited but the thread moved on.")
-        await appState.approveDraft(updated)
+        await appState.approvePendingDraft(draft, withEditedBody: "Edited but the thread moved on.")
 
         // The edit did not bypass the stale-thread gate.
         XCTAssertEqual(appState.pendingStaleWarnings[draft.identity], .newerReplyInThread)
@@ -297,8 +308,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let draft = pendingDraft()
         let (appState, _, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
 
-        let updated = appState.updatePendingDraftBody(draft, to: "Edited reply.")
-        await appState.approveDraft(updated)
+        await appState.approvePendingDraft(draft, withEditedBody: "Edited reply.")
 
         let sent = appState.activityEvents.first { $0.kind == .approvedSent }
         XCTAssertEqual(sent?.detail, "Edited before send")
@@ -308,8 +318,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let draft = pendingDraft()
         let (appState, _, _) = makeAppState(sendBehavior: .saveAsDraft, seed: [draft])
 
-        let updated = appState.updatePendingDraftBody(draft, to: "Edited reply.")
-        await appState.approveDraft(updated)
+        await appState.approvePendingDraft(draft, withEditedBody: "Edited reply.")
 
         let saved = appState.activityEvents.first { $0.kind == .approvedSaved }
         XCTAssertEqual(saved?.detail, "Edited before send")

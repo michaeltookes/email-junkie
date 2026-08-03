@@ -125,14 +125,14 @@ extension AppState {
     /// Applies a user's inline edit to a queued draft's reply body (item 19) and
     /// persists it, so the edited text is what later dispatches and the edit
     /// survives a relaunch. Captures the assistant's original body the first time
-    /// it diverges (for future voice tuning). Returns the updated draft, or the
-    /// unchanged draft when the text is identical or the draft is no longer
-    /// queued. A best-effort persist: on write failure the in-memory edit is
-    /// rolled back so memory and disk stay consistent.
+    /// it diverges (for future voice tuning). Returns the updated draft, the
+    /// unchanged draft when the text is identical, or `nil` if the edit could not
+    /// be applied durably. On write failure the in-memory edit is rolled back so
+    /// memory and disk stay consistent.
     @discardableResult
-    func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft {
+    func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft? {
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
-            return draft
+            return nil
         }
         guard pendingDrafts[index].body != newBody else { return pendingDrafts[index] }
 
@@ -144,9 +144,17 @@ extension AppState {
             pendingDrafts[index] = previous
             logger.error("Failed to persist edited pending draft: \(error.localizedDescription)")
             approvalError = Self.draftMessage(for: error)
-            return previous
+            return nil
         }
         return pendingDrafts[index]
+    }
+
+    /// Applies the current inline editor contents before dispatching. Approval
+    /// stops if the edited body cannot be persisted, so the user never sends or
+    /// saves a different body from the one shown in the review UI.
+    func approvePendingDraft(_ draft: Draft, withEditedBody editedBody: String, force: Bool = false) async {
+        guard let updated = updatePendingDraftBody(draft, to: editedBody) else { return }
+        await approveDraft(updated, force: force)
     }
 
     /// Denies (discards) a pending draft without sending or saving it.

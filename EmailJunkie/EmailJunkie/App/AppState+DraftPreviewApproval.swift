@@ -62,6 +62,7 @@ extension AppState {
         let verdict = await threadStalenessVerdict(for: draft, credentials: credentials)
         let currentCredentials = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
         if case .stale(let reason) = verdict {
+            recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
             throw DraftDispatchError.staleThread(reason)
         }
         return currentCredentials

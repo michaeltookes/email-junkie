@@ -72,6 +72,11 @@ extension AppState {
         if skippedMessages.count > skippedMessageLogLimit {
             skippedMessages.removeLast(skippedMessages.count - skippedMessageLogLimit)
         }
+        // The in-memory override entry above carries the full message for "Draft
+        // anyway"; the activity log records the skip durably as metadata only, so
+        // it survives restart even though the override entry does not (item 21,
+        // closing item 17's deferred "skip reasons visible in the activity log").
+        recordSkipActivity(for: entry)
         logger.info("Recorded skipped message (\(reason.rawValue, privacy: .public)); \(self.skippedMessages.count) visible entries")
     }
 

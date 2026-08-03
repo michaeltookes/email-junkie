@@ -69,18 +69,8 @@ extension AppState {
         }
 
         do {
-            let raw = try await mailProvider.fetchBodyText(
-                credentials,
-                mailbox: mailbox,
-                uid: message.id,
-                expectedUIDValidity: message.uidValidity
-            )
+            let preview = try await fetchBodyPreview(for: message, mailbox: mailbox, credentials: credentials)
             guard isCurrentBodyPreviewRequest(requestGeneration, credentials: credentials) else { return nil }
-            let preview = MailBodyPreview(
-                id: message.id,
-                subject: message.subject,
-                text: MailBodyText.plainText(from: raw)
-            )
             openedBody = preview
             return preview
         } catch {
@@ -88,6 +78,25 @@ extension AppState {
             bodyError = Self.message(for: error)
             return nil
         }
+    }
+
+    /// Fetches and reduces a body preview without mutating shared presentation state.
+    func fetchBodyPreview(
+        for message: MailMessage,
+        mailbox: Mailbox = .inbox,
+        credentials: MailAccountCredentials
+    ) async throws -> MailBodyPreview {
+        let raw = try await mailProvider.fetchBodyText(
+            credentials,
+            mailbox: mailbox,
+            uid: message.id,
+            expectedUIDValidity: message.uidValidity
+        )
+        return MailBodyPreview(
+            id: message.id,
+            subject: message.subject,
+            text: MailBodyText.plainText(from: raw)
+        )
     }
 
     func nextPreviewGeneration() -> Int {

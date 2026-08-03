@@ -31,6 +31,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var browserWindow: NSWindow?
     private var browserCloseObserver: NSObjectProtocol?
 
+    /// The activity-history window, created lazily.
+    private var activityWindow: NSWindow?
+    private var activityCloseObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -56,6 +60,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = browserCloseObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = activityCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -156,6 +163,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         settings.target = self
         items.append(settings)
 
+        // Activity History… (always available; the log persists across launches).
+        let activity = NSMenuItem(title: "Activity History…", action: #selector(openActivityMenu), keyEquivalent: "")
+        activity.target = self
+        items.append(activity)
+
         items.append(.separator())
 
         // Launch at Login toggle
@@ -206,6 +218,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openBrowserMenu() {
         openBrowser()
+    }
+
+    @objc private func openActivityMenu() {
+        openActivity()
     }
 
     func openBrowser() {
@@ -318,6 +334,43 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         reviewWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func openActivity() {
+        if activityWindow == nil {
+            let view = ActivityHistoryView()
+                .environmentObject(appState)
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Activity History"
+            window.contentView = NSHostingView(rootView: view)
+            window.center()
+            window.isReleasedWhenClosed = false
+            window.setAccessibilityLabel("Activity History")
+            activityWindow = window
+
+            activityCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    if let observer = self?.activityCloseObserver {
+                        NotificationCenter.default.removeObserver(observer)
+                        self?.activityCloseObserver = nil
+                    }
+                    self?.activityWindow = nil
+                }
+            }
+        }
+
+        activityWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

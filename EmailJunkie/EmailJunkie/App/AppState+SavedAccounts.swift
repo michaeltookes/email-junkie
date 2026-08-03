@@ -194,4 +194,56 @@ extension AppState {
         stopWatching()
         resetMessagePreviewForAccountChange()
     }
+
+    // MARK: - Verified-connection persistence
+
+    /// Adopts verified credentials as the active account, remembers it, and
+    /// persists the settings snapshot. Called from `testConnection`.
+    func persistVerifiedConnection(_ credentials: MailAccountCredentials) throws {
+        mailEmail = credentials.email
+        mailHost = credentials.host
+        mailPort = credentials.port
+        mailAppPassword = credentials.appPassword
+        markMailHostVerifiedForGuidance()
+        // Remember this account so it can be switched back to without re-entry.
+        upsertSavedAccount(email: credentials.email, host: credentials.host, port: credentials.port)
+
+        try persistSettingsSync(buildSettings(
+            mailEmail: credentials.email,
+            mailHost: credentials.host,
+            mailPort: credentials.port
+        ))
+    }
+
+    /// Restores the connecting account's Keychain slot after a failed persist.
+    func rollbackMailAppPassword(to previousAppPassword: String?, for key: SecretKey) -> Error? {
+        do {
+            if let previousAppPassword {
+                try secrets.set(previousAppPassword, for: key)
+            } else {
+                try secrets.remove(key)
+            }
+            return nil
+        } catch {
+            logger.error("Failed to roll back mail app password: \(error.localizedDescription)")
+            return error
+        }
+    }
+
+    /// Restores UI/account state to a previous settings snapshot after a failed
+    /// connect. Per-account keys are isolated, so the previously-active account's
+    /// secret was never touched by the failed attempt — it is re-read honestly.
+    func restoreConnectionSnapshot(settings: Settings) {
+        mailEmail = settings.mailEmail
+        mailHost = settings.mailHost
+        mailPort = settings.mailPort
+        savedAccounts = settings.savedAccounts
+        mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
+        mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
+        let previousEmail = settings.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previousPassword = storedMailPassword(forEmail: previousEmail) ?? ""
+        mailAppPassword = previousPassword
+        isAccountConnected = !previousEmail.isEmpty && !previousPassword.isEmpty
+        restoreMailHostGuidanceFromSettings(settings)
+    }
 }

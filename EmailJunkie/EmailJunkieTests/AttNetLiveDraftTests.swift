@@ -93,9 +93,17 @@ final class AttNetLiveDraftTests: XCTestCase {
             XCTAssertEqual(saved.inReplyTo, originalMessageID, "draft should thread via In-Reply-To")
         }
 
-        // Clean up: move the test draft to Trash so the real Drafts folder is left
-        // clean. (Permanent expunge is out of scope for the provider; Trash keeps
-        // it recoverable, matching item 42's non-destructive delete.)
+        try await cleanUpTestDraft(provider: provider, credentials: credentials, marker: marker)
+    }
+
+    /// Moves the test draft to Trash so the real Drafts folder is left clean, then
+    /// asserts it is gone. (Permanent expunge is out of scope for the provider;
+    /// Trash keeps it recoverable, matching item 42's non-destructive delete.)
+    private func cleanUpTestDraft(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String
+    ) async throws {
         _ = try await provider.applyBulkCleanup(
             credentials,
             mailbox: .drafts,

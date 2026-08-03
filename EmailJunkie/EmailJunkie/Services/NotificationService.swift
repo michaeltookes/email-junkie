@@ -11,6 +11,65 @@ private let draftSendBehaviorUserInfoKey = "sendBehavior"
 /// `userInfo` key used when replacing notification copy without a new alert.
 private let suppressPresentationUserInfoKey = "suppressPresentation"
 
+protocol UserNotificationCentering: AnyObject {
+    var delegate: UNUserNotificationCenterDelegate? { get set }
+
+    func requestAuthorization(options: UNAuthorizationOptions, completionHandler: @escaping (Bool, Error?) -> Void)
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>)
+    func add(_ request: UNNotificationRequest, withCompletionHandler completionHandler: ((Error?) -> Void)?)
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String])
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String])
+    func pendingNotificationRequestIdentifiers(completionHandler: @escaping (Set<String>) -> Void)
+    func deliveredNotificationIdentifiers(completionHandler: @escaping (Set<String>) -> Void)
+}
+
+final class SystemUserNotificationCenter: UserNotificationCentering {
+    private let center: UNUserNotificationCenter
+
+    var delegate: UNUserNotificationCenterDelegate? {
+        get { center.delegate }
+        set { center.delegate = newValue }
+    }
+
+    init(center: UNUserNotificationCenter = .current()) {
+        self.center = center
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions, completionHandler: @escaping (Bool, Error?) -> Void) {
+        center.requestAuthorization(options: options, completionHandler: completionHandler)
+    }
+
+    func setNotificationCategories(_ categories: Set<UNNotificationCategory>) {
+        center.setNotificationCategories(categories)
+    }
+
+    func add(_ request: UNNotificationRequest, withCompletionHandler completionHandler: ((Error?) -> Void)?) {
+        center.add(request, withCompletionHandler: completionHandler)
+    }
+
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String]) {
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
+
+    func pendingNotificationRequestIdentifiers(completionHandler: @escaping (Set<String>) -> Void) {
+        center.getPendingNotificationRequests { requests in
+            let identifiers = Set(requests.map(\.identifier))
+            Task { @MainActor in completionHandler(identifiers) }
+        }
+    }
+
+    func deliveredNotificationIdentifiers(completionHandler: @escaping (Set<String>) -> Void) {
+        center.getDeliveredNotifications { notifications in
+            let identifiers = Set(notifications.map(\.request.identifier))
+            Task { @MainActor in completionHandler(identifiers) }
+        }
+    }
+}
+
 /// An action the user took on a draft-ready notification.
 enum DraftNotificationAction: Equatable {
     /// Approve inline using the send behavior displayed on the notification.
@@ -68,7 +127,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
 
     var onAction: ((DraftNotificationAction, String) async -> Void)?
 
-    private let center = UNUserNotificationCenter.current()
+    private let center: UserNotificationCentering
 
     static let categoryIdentifier = "DRAFT_READY"
     /// Category for a flagged "needs input" draft — Deny only, no Approve, since
@@ -76,6 +135,11 @@ final class UserNotificationService: NSObject, DraftNotifying {
     static let needsInputCategoryIdentifier = "DRAFT_NEEDS_INPUT"
     static let approveActionIdentifier = "APPROVE_DRAFT"
     static let denyActionIdentifier = "DENY_DRAFT"
+
+    init(center: UserNotificationCentering = SystemUserNotificationCenter()) {
+        self.center = center
+        super.init()
+    }
 
     func requestAuthorization() {
         center.delegate = self
@@ -94,7 +158,21 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {
-        postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+        let center = center
+        center.pendingNotificationRequestIdentifiers { [weak self] pendingIdentifiers in
+            if pendingIdentifiers.contains(draft.identity) {
+                Task { @MainActor in
+                    self?.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+                }
+                return
+            }
+            center.deliveredNotificationIdentifiers { [weak self] deliveredIdentifiers in
+                guard deliveredIdentifiers.contains(draft.identity) else { return }
+                Task { @MainActor in
+                    self?.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+                }
+            }
+        }
     }
 
     private func postNotification(

@@ -122,6 +122,33 @@ extension AppState {
         recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
     }
 
+    /// Applies a user's inline edit to a queued draft's reply body (item 19) and
+    /// persists it, so the edited text is what later dispatches and the edit
+    /// survives a relaunch. Captures the assistant's original body the first time
+    /// it diverges (for future voice tuning). Returns the updated draft, or the
+    /// unchanged draft when the text is identical or the draft is no longer
+    /// queued. A best-effort persist: on write failure the in-memory edit is
+    /// rolled back so memory and disk stay consistent.
+    @discardableResult
+    func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft {
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
+            return draft
+        }
+        guard pendingDrafts[index].body != newBody else { return pendingDrafts[index] }
+
+        let previous = pendingDrafts[index]
+        pendingDrafts[index].applyEditedBody(newBody)
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            pendingDrafts[index] = previous
+            logger.error("Failed to persist edited pending draft: \(error.localizedDescription)")
+            approvalError = Self.draftMessage(for: error)
+            return previous
+        }
+        return pendingDrafts[index]
+    }
+
     /// Denies (discards) a pending draft without sending or saving it.
     func denyDraft(_ draft: Draft) {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
@@ -194,7 +221,7 @@ extension AppState {
             throw DraftDispatchError.missingCredentials
         }
         guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
-            if generatedDraft == draft {
+            if generatedDraft?.identity == draft.identity {
                 generatedDraft = nil
             }
             throw DraftDispatchError.accountMismatch

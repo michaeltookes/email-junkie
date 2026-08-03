@@ -24,9 +24,7 @@ extension AppState {
         switch effectiveSendBehavior {
         case .autoSend:
             try await performSend(draft, credentials: dispatchCredentials)
-            if generatedDraft == draft {
-                generatedDraft = nil
-            }
+            clearGeneratedDraftIfDisplayed(draft)
             return "Sent."
         case .saveAsDraft:
             try await performSave(draft, credentials: dispatchCredentials)
@@ -69,7 +67,10 @@ extension AppState {
     }
 
     private func clearGeneratedDraftIfDisplayed(_ draft: Draft) {
-        if generatedDraft == draft {
+        // Compare by identity, not full equality: an inline-edited draft (item 19)
+        // differs from the stored `generatedDraft` only in body, yet still refers
+        // to the same displayed draft that should be cleared.
+        if generatedDraft?.identity == draft.identity {
             generatedDraft = nil
         }
     }

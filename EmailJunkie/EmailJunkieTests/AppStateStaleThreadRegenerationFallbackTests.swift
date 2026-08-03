@@ -58,7 +58,8 @@ final class StaleThreadRegenerationFallbackTests: XCTestCase {
             mailHost: "imap.mail.att.net",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: SendBehavior.autoSend.rawValue
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 0
         ))
         let llm = FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: llmText)))
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)

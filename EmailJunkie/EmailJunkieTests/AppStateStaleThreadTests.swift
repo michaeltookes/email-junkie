@@ -59,7 +59,8 @@ final class AppStateStaleThreadTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: sendBehavior.rawValue
+            sendBehavior: sendBehavior.rawValue,
+            sendDelaySeconds: 0
         ))
         let llm = FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: llmText)))
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)

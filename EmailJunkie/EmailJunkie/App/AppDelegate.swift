@@ -57,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Flush any pending edits/settings to disk before quitting.
         appState.flushPendingDraftBodyEdits()
+        // Outstanding auto-send countdowns (item 23) must not fire during teardown;
+        // their drafts remain pending in the persisted queue.
+        appState.cancelAllSendCountdowns()
         appState.saveSettingsSync()
         logger.info("Email Junkie terminating")
     }

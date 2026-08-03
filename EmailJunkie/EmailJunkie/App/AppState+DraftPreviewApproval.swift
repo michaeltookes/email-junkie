@@ -12,9 +12,13 @@ extension AppState {
     /// if it changed since the draft was generated, this throws
     /// `DraftDispatchError.staleThread` so the sheet can warn before sending.
     /// Passing `force: true` is the user's "send anyway" override.
-    func approveDraftPreview(_ draft: Draft, force: Bool = false) async throws -> String {
+    func approveDraftPreview(
+        _ draft: Draft,
+        sendBehavior approvalSendBehavior: SendBehavior? = nil,
+        force: Bool = false
+    ) async throws -> String {
         let credentials = try previewDraftCredentials(for: draft)
-        let effectiveSendBehavior = sendBehavior
+        let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
         let dispatchCredentials = try await previewDispatchCredentials(
             for: draft,
             credentials: credentials,
@@ -30,6 +34,12 @@ extension AppState {
             try await performSave(draft, credentials: dispatchCredentials)
             return "Saved to your Drafts."
         }
+    }
+
+    /// Records a canceled preview auto-send countdown in the same audit stream as
+    /// queued countdown cancellation.
+    func recordDraftPreviewSendCancellation(for draft: Draft) {
+        recordDraftActivity(.sendCanceled, for: draft)
     }
 
     private func previewDraftCredentials(for draft: Draft) throws -> MailAccountCredentials {

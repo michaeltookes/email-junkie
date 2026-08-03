@@ -121,6 +121,11 @@ final class AppState: ObservableObject {
     /// What approving a draft does: save a Gmail draft or send immediately.
     @Published var sendBehavior: SendBehavior
 
+    /// The auto-send safety-net window in seconds (item 23). After approving an
+    /// auto-send draft the app waits this long — with a Cancel affordance —
+    /// before sending. Zero disables the window (instant send).
+    @Published var sendDelaySeconds: Int
+
     /// Whether first-run onboarding has been completed or dismissed.
     @Published var onboardingCompleted: Bool
 
@@ -152,6 +157,23 @@ final class AppState: ObservableObject {
 
     /// Stale-thread warnings raised at approval time, keyed by draft identity.
     @Published var pendingStaleWarnings: [String: StaleThreadReason] = [:]
+
+    /// Remaining seconds on an in-progress auto-send countdown (item 23), keyed by
+    /// draft identity. Presence means that draft is counting down; the review UI
+    /// shows "Sending in Ns…" with a Cancel button while an entry exists.
+    @Published var pendingSendCountdowns: [String: Int] = [:]
+
+    /// The live per-draft countdown tasks (item 23), keyed by draft identity.
+    /// Cancelling one stops its send; the draft remains pending untouched.
+    var sendCountdownTasks: [String: Task<Void, Never>] = [:]
+
+    /// Countdown draft identities that originated from notification approval and
+    /// need explicit user feedback if the delayed dispatch is blocked.
+    var sendCountdownNotificationApprovalIDs: Set<String> = []
+
+    /// One countdown tick, in nanoseconds. Overridable so tests can drive the
+    /// window without waiting real seconds (mirrors `bulkSweepPacingNanoseconds`).
+    var sendCountdownTickNanoseconds: UInt64 = 1_000_000_000
 
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
@@ -198,7 +220,7 @@ final class AppState: ObservableObject {
     /// Set by the menu-bar controller so the app can surface the first-run
     /// onboarding window at launch or from the menu.
     var openOnboardingHandler: (() -> Void)?
-    private let settingsDebouncer = Debouncer(delay: 0.5)
+    let settingsDebouncer = Debouncer(delay: 0.5)
     private var cancellables = Set<AnyCancellable>()
     var previewGeneration = 0
     var bodyPreviewGeneration = 0
@@ -227,6 +249,7 @@ final class AppState: ObservableObject {
         let settings = persistence.loadSettings()
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
+        self.sendDelaySeconds = settings.sendDelaySeconds
         self.onboardingCompleted = settings.onboardingCompleted
         self.loadedSettingsPredateOnboardingCompletion =
             settings.schemaVersion < Settings.onboardingCompletionSchemaVersion
@@ -342,6 +365,11 @@ final class AppState: ObservableObject {
             return
         }
         isAccountConnected = true
+        if accountChanged {
+            // A different account invalidates any in-flight auto-send countdowns
+            // (item 23); they must not fire against the newly connected account.
+            cancelAllSendCountdowns()
+        }
         resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
         logger.info("Mailbox connected")
     }
@@ -365,6 +393,7 @@ final class AppState: ObservableObject {
         mailAppPassword = ""
         markMailHostVerifiedForGuidance()
         isAccountConnected = false
+        cancelAllSendCountdowns()
         stopWatching()
         resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
@@ -381,6 +410,11 @@ final class AppState: ObservableObject {
             .store(in: &cancellables)
 
         $sendBehavior
+            .dropFirst()
+            .sink { [weak self] _ in self?.saveSettings() }
+            .store(in: &cancellables)
+
+        $sendDelaySeconds
             .dropFirst()
             .sink { [weak self] _ in self?.saveSettings() }
             .store(in: &cancellables)
@@ -446,55 +480,4 @@ final class AppState: ObservableObject {
         restoreMailHostGuidanceFromSettings(settings)
     }
 
-    /// Builds a `Settings` snapshot from the current published values.
-    /// Internal so the `AppState+Onboarding` extension can persist the
-    /// onboarding flag through the same path.
-    func buildSettings(
-        mailEmail: String? = nil,
-        mailHost: String? = nil,
-        mailPort: Int? = nil,
-        llmModelOverride: String? = nil
-    ) -> Settings {
-        Settings(
-            schemaVersion: Settings.currentSchemaVersion,
-            pollIntervalSeconds: pollIntervalSeconds,
-            mailEmail: (mailEmail ?? self.mailEmail).trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHost: (mailHost ?? self.mailHost).trimmingCharacters(in: .whitespacesAndNewlines),
-            mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
-            mailHostGuidancePendingEmail: mailHostExplicitlyEditedBeforeEmail,
-            mailPort: mailPort ?? self.mailPort,
-            llmProvider: llmProviderKind.rawValue,
-            llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
-            llmBaseURL: llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
-            llmVerifiedModel: verifiedLLMModel,
-            sendBehavior: sendBehavior.rawValue,
-            onboardingCompleted: onboardingCompleted
-        )
-    }
-
-    /// Saves settings to disk (debounced).
-    func saveSettings(llmModel: String? = nil) {
-        let settings = buildSettings(llmModelOverride: llmModel)
-        settingsDebouncer.debounce { [weak self] in
-            self?.persistence.saveSettings(settings)
-        }
-    }
-
-    /// Saves a specific settings snapshot immediately, cancelling stale
-    /// debounced snapshots first.
-    func persistSettingsSync(_ settings: Settings) throws {
-        settingsDebouncer.cancel()
-        try persistence.saveSettingsSync(settings)
-    }
-
-    /// Saves settings immediately (used on app termination).
-    func saveSettingsSync() {
-        let settings = buildSettings()
-        do {
-            try persistSettingsSync(settings)
-        } catch {
-            connectionError = Self.settingsMessage(action: "save", error: error)
-            logger.error("Failed to save settings synchronously: \(error.localizedDescription)")
-        }
-    }
 }

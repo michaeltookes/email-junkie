@@ -39,7 +39,8 @@ extension AppState {
     func approveDraft(
         _ draft: Draft,
         sendBehavior approvalSendBehavior: SendBehavior? = nil,
-        force: Bool = false
+        force: Bool = false,
+        surfaceDelayedBlocks: Bool = false
     ) async {
         do {
             guard let credentials = try queuedApprovalCredentials(for: draft) else { return }
@@ -50,6 +51,7 @@ extension AppState {
                 draft,
                 sendBehavior: approvalSendBehavior,
                 force: force,
+                surfaceDelayedBlocks: surfaceDelayedBlocks,
                 credentials: credentials
             )
         } catch {
@@ -60,6 +62,9 @@ extension AppState {
     private func queuedApprovalCredentials(for draft: Draft) throws -> MailAccountCredentials? {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return nil }
         guard !approvingDraftIDs.contains(draft.identity) else { return nil }
+        // A draft already counting down toward an auto-send (item 23) must not be
+        // re-approved into a second countdown or a double-send.
+        guard pendingSendCountdowns[draft.identity] == nil else { return nil }
 
         approvalError = nil
         // A flagged draft needs the user's input first — never send or save it,
@@ -84,30 +89,33 @@ extension AppState {
         _ draft: Draft,
         sendBehavior approvalSendBehavior: SendBehavior?,
         force: Bool,
+        surfaceDelayedBlocks: Bool,
         credentials: MailAccountCredentials
     ) async throws {
         let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
-        var dispatchCredentials = credentials
-        if !force {
-            let freshness = try await currentFreshnessCheck(for: draft, credentials: credentials)
-            dispatchCredentials = freshness.credentials
-            if let reason = freshness.reason {
-                recordPendingStaleWarning(reason, for: draft)
-                return
-            }
+        // Auto-send safety net (item 23): unless disabled (delay 0), or the user
+        // is forcing a stale "send anyway", an auto-send approval starts a
+        // cancellable countdown instead of dispatching now. The draft stays in the
+        // pending queue for the whole window — recoverable across a quit/crash —
+        // and the stale-thread re-check (item 12) runs at the END of the window,
+        // immediately before dispatch. Save-as-draft and instant mode dispatch now.
+        if effectiveSendBehavior == .autoSend, !force, sendDelaySeconds > 0 {
+            startSendCountdown(
+                for: draft,
+                credentials: credentials,
+                surfaceBlockedDispatch: surfaceDelayedBlocks
+            )
+            return
         }
-        pendingStaleWarnings.removeValue(forKey: draft.identity)
-
-        switch effectiveSendBehavior {
-        case .autoSend:
-            try await performSend(draft, credentials: dispatchCredentials)
-        case .saveAsDraft:
-            try await performSave(draft, credentials: dispatchCredentials)
-        }
-        try finalizeApprovedDraft(draft)
+        try await dispatchApprovedDraft(
+            draft,
+            sendBehavior: effectiveSendBehavior,
+            force: force,
+            credentials: credentials
+        )
     }
 
-    private func currentFreshnessCheck(
+    func currentFreshnessCheck(
         for draft: Draft,
         credentials: MailAccountCredentials
     ) async throws -> (reason: StaleThreadReason?, credentials: MailAccountCredentials) {
@@ -116,7 +124,7 @@ extension AppState {
         return (verdict.reason, currentCredentials)
     }
 
-    private func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
+    func recordPendingStaleWarning(_ reason: StaleThreadReason, for draft: Draft) {
         pendingStaleWarnings[draft.identity] = reason
         approvalError = Self.draftMessage(for: DraftDispatchError.staleThread(reason))
         recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
@@ -228,8 +236,17 @@ extension AppState {
                 openReviewHandler?()
                 return
             }
-            await approveDraft(draft, sendBehavior: sendBehavior)
-            if pendingStaleWarnings[identity] != nil {
+            guard pendingStaleWarnings[identity] == nil else {
+                openReviewHandler?()
+                return
+            }
+            await approveDraft(
+                draft,
+                sendBehavior: sendBehavior,
+                surfaceDelayedBlocks: true
+            )
+            let needsReviewSurface = pendingSendCountdowns[identity] != nil || pendingStaleWarnings[identity] != nil
+            if needsReviewSurface {
                 openReviewHandler?()
             }
         case .deny:
@@ -238,7 +255,7 @@ extension AppState {
         }
     }
 
-    private func finalizeApprovedDraft(_ draft: Draft) throws {
+    func finalizeApprovedDraft(_ draft: Draft) throws {
         do {
             try recordApprovedDraftIdentity(draft.identity)
             removePendingDraftAfterApproval(draft)

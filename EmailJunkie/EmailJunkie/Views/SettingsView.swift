@@ -35,6 +35,22 @@ struct SettingsView: View {
                      : "Approving a draft saves it to your Gmail Drafts to send yourself.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if appState.sendBehavior == .autoSend {
+                    Picker("Undo window", selection: $appState.sendDelaySeconds) {
+                        Text("Off (send instantly)").tag(0)
+                        Text("5 seconds").tag(5)
+                        Text("10 seconds").tag(10)
+                        Text("30 seconds").tag(30)
+                        Text("60 seconds").tag(60)
+                    }
+                    Text(appState.sendDelaySeconds > 0
+                         ? "After you approve, Email Junkie waits "
+                           + "\(appState.sendDelaySeconds)s so you can cancel before it sends."
+                         : "Approved drafts send immediately with no cancel window.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Email account") {

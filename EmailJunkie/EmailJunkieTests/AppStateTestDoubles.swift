@@ -115,6 +115,7 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
     private(set) var appendedFlags: [MailFlag]?
     private(set) var sentRFC822: Data?
     private(set) var sentEnvelope: SMTPEnvelope?
+    private(set) var sendCallCount = 0
 
     init(
         result: Result<Void, MailError>,
@@ -186,6 +187,7 @@ final class FakeAppMailProvider: MailProvider, @unchecked Sendable {
         rfc822: Data,
         envelope: SMTPEnvelope
     ) async throws {
+        sendCallCount += 1
         sentRFC822 = rfc822
         sentEnvelope = envelope
         try sendResult.get()

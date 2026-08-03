@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 9
+    static let currentSchemaVersion = 10
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -32,6 +32,15 @@ struct Settings: Codable, Equatable {
 
     /// Schema version that introduced the per-provider custom LLM base URL.
     static let llmBaseURLSchemaVersion = 9
+
+    /// Schema version that introduced the auto-send safety-net delay (item 23).
+    static let sendDelaySchemaVersion = 10
+
+    /// The default auto-send undo window, in seconds (item 23). Zero disables it.
+    static let defaultSendDelaySeconds = 10
+
+    /// The largest auto-send undo window we persist, in seconds.
+    static let maxSendDelaySeconds = 300
 
     /// Schema version of the persisted file.
     var schemaVersion: Int
@@ -73,6 +82,12 @@ struct Settings: Codable, Equatable {
     /// string so an unknown/future value decodes gracefully to the default.
     var sendBehavior: String
 
+    /// The auto-send safety-net window (item 23), in seconds. After the user
+    /// approves an auto-send draft, the app waits this long — showing a Cancel
+    /// affordance — before actually sending. Zero disables the window (instant
+    /// send). Only meaningful in auto-send mode; save-as-draft is unaffected.
+    var sendDelaySeconds: Int
+
     /// Whether the user has finished (or explicitly dismissed) the first-run
     /// onboarding flow. Old files without this key decode to `false`; an
     /// already-configured install is treated as complete at launch.
@@ -91,6 +106,7 @@ struct Settings: Codable, Equatable {
         llmBaseURL: String = "",
         llmVerifiedModel: String = "",
         sendBehavior: String = SendBehavior.default.rawValue,
+        sendDelaySeconds: Int = Settings.defaultSendDelaySeconds,
         onboardingCompleted: Bool = false
     ) {
         self.schemaVersion = schemaVersion
@@ -105,6 +121,7 @@ struct Settings: Codable, Equatable {
         self.llmBaseURL = llmBaseURL
         self.llmVerifiedModel = llmVerifiedModel
         self.sendBehavior = sendBehavior
+        self.sendDelaySeconds = sendDelaySeconds
         self.onboardingCompleted = onboardingCompleted
     }
 
@@ -117,7 +134,7 @@ struct Settings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
         case mailHostGuidancePendingEmail, mailPort
-        case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, onboardingCompleted
+        case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
     }
 
     init(from decoder: Decoder) throws {
@@ -135,6 +152,8 @@ struct Settings: Codable, Equatable {
         llmBaseURL = try container.decodeIfPresent(String.self, forKey: .llmBaseURL) ?? ""
         llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
         sendBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior) ?? SendBehavior.default.rawValue
+        sendDelaySeconds =
+            try container.decodeIfPresent(Int.self, forKey: .sendDelaySeconds) ?? Settings.defaultSendDelaySeconds
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
     }
 
@@ -143,6 +162,7 @@ struct Settings: Codable, Equatable {
         var copy = self
         copy.pollIntervalSeconds = min(max(pollIntervalSeconds, 30), 3600)
         copy.mailPort = min(max(mailPort, 1), 65535)
+        copy.sendDelaySeconds = min(max(sendDelaySeconds, 0), Settings.maxSendDelaySeconds)
         copy.llmBaseURL = llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasStoredGuidanceHost = !copy.mailHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if copy.mailHost.isEmpty && copy.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

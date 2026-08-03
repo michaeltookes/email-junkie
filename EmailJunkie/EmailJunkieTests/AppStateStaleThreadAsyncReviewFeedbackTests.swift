@@ -134,7 +134,8 @@ final class AppStateAsyncReviewFeedbackTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: SendBehavior.autoSend.rawValue
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 0
         ))
         let llm = FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: llmText)))
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
@@ -268,7 +269,8 @@ final class AppStateAsyncReviewFeedbackTests: XCTestCase {
             mailEmail: "me@gmail.com",
             llmProvider: "anthropic",
             llmVerifiedModel: "claude-sonnet-4-6",
-            sendBehavior: SendBehavior.autoSend.rawValue
+            sendBehavior: SendBehavior.autoSend.rawValue,
+            sendDelaySeconds: 0
         ))
         let llm = SuspendedLLMProvider()
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)

@@ -64,7 +64,8 @@ final class AppStateActivityHistoryTests: XCTestCase {
                 mailEmail: "me@gmail.com",
                 llmProvider: "anthropic",
                 llmVerifiedModel: "claude-sonnet-4-6",
-                sendBehavior: sendBehavior.rawValue
+                sendBehavior: sendBehavior.rawValue,
+                sendDelaySeconds: 0
             ),
             processedMessages: processed ?? baselineProcessed(),
             pendingDrafts: drafts
@@ -247,6 +248,16 @@ final class AppStateActivityHistoryTests: XCTestCase {
         appState.denyDraft(draft)
 
         XCTAssertEqual(appState.activityEvents.map(\.kind), [.denied])
+        XCTAssertEqual(appState.activityEvents.first?.subject, "Lunch?")
+    }
+
+    func testPreviewCountdownCancelRecordsSendCanceledEvent() {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(seed: [draft])
+
+        appState.recordDraftPreviewSendCancellation(for: draft)
+
+        XCTAssertEqual(appState.activityEvents.map(\.kind), [.sendCanceled])
         XCTAssertEqual(appState.activityEvents.first?.subject, "Lunch?")
     }
 

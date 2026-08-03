@@ -70,6 +70,23 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         )
     }
 
+    /// Decodes the base64 text/plain body from an outgoing RFC 822 message.
+    /// `OutgoingMessage.rfc822()` base64-encodes the body (Content-Transfer-
+    /// Encoding: base64), so the reply text is not a literal substring — assert
+    /// on the decoded body instead.
+    private func decodedBody(from rfc822: Data?) -> String {
+        guard let rfc822, let text = String(data: rfc822, encoding: .utf8),
+              let separator = text.range(of: "\r\n\r\n") else {
+            return ""
+        }
+        let encoded = text[separator.upperBound...]
+            .components(separatedBy: .newlines)
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = Data(base64Encoded: encoded) else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
     // MARK: - Draft model
 
     func testApplyEditedBodyCapturesOriginalOnceAndTracksLatest() {
@@ -120,9 +137,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let updated = appState.updatePendingDraftBody(draft, to: "My hand-written reply.")
         await appState.approveDraft(updated)
 
-        let rfc822 = String(data: provider.sentRFC822 ?? Data(), encoding: .utf8) ?? ""
-        XCTAssertTrue(rfc822.contains("My hand-written reply."))
-        XCTAssertFalse(rfc822.contains("Generated reply body."))
+        XCTAssertEqual(decodedBody(from: provider.sentRFC822), "My hand-written reply.")
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
@@ -133,9 +148,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let updated = appState.updatePendingDraftBody(draft, to: "Edited save body.")
         await appState.approveDraft(updated)
 
-        let rfc822 = String(data: provider.appendedRFC822 ?? Data(), encoding: .utf8) ?? ""
-        XCTAssertTrue(rfc822.contains("Edited save body."))
-        XCTAssertFalse(rfc822.contains("Generated reply body."))
+        XCTAssertEqual(decodedBody(from: provider.appendedRFC822), "Edited save body.")
         XCTAssertEqual(provider.appendedMailbox, .drafts)
     }
 
@@ -148,9 +161,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let confirmation = try? await appState.approveDraftPreview(draft)
 
         XCTAssertEqual(confirmation, "Sent.")
-        let rfc822 = String(data: provider.sentRFC822 ?? Data(), encoding: .utf8) ?? ""
-        XCTAssertTrue(rfc822.contains("Edited preview body."))
-        XCTAssertFalse(rfc822.contains("Generated preview body."))
+        XCTAssertEqual(decodedBody(from: provider.sentRFC822), "Edited preview body.")
         // The edited draft still clears the stored preview (identity match).
         XCTAssertNil(appState.generatedDraft)
     }
@@ -222,9 +233,26 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let draft = pendingDraft(id: 5)
         let provider = SearchStubMailProvider(
             threadResult: MailSearchResult(
+                // A newer reply (UID 9 > source UID 5) from the same sender is a
+                // genuine related follow-up, so the thread reads as stale. The
+                // sender is required: relatedThreadMessages only links a
+                // same-subject message when it shares a thread participant.
                 messages: [
-                    MailMessage(id: 5, uidValidity: 10, from: nil, subject: "Lunch?", date: ""),
-                    MailMessage(id: 9, uidValidity: 10, from: nil, subject: "Re: Lunch?", date: "")
+                    MailMessage(
+                        id: 5,
+                        uidValidity: 10,
+                        from: MailAddress(name: "Alice", email: "alice@example.com"),
+                        subject: "Lunch?",
+                        date: "",
+                        messageID: "<orig@example.com>"
+                    ),
+                    MailMessage(
+                        id: 9,
+                        uidValidity: 10,
+                        from: MailAddress(name: "Alice", email: "alice@example.com"),
+                        subject: "Re: Lunch?",
+                        date: ""
+                    )
                 ],
                 totalMatches: 2,
                 offset: 0,

@@ -145,7 +145,8 @@ final class AppState: ObservableObject {
 
     /// Identities of pending drafts currently being approved (send/save in flight).
     @Published var approvingDraftIDs: Set<String> = []
-
+    var pendingDraftUncommittedEditIDs: Set<String> = []
+    var pendingDraftUncommittedEditBodies: [String: String] = [:]
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 
@@ -154,7 +155,6 @@ final class AppState: ObservableObject {
 
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
-
     /// Messages the watcher passed over instead of drafting, newest first.
     /// This rolling operational log is in-memory only.
     @Published var skippedMessages: [SkippedMessage] = []

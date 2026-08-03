@@ -395,7 +395,7 @@ extension AppState {
             recordDraftActivity(.sendFailed, for: draft, detail: Self.draftMessage(for: error))
             throw error
         }
-        recordDraftActivity(.approvedSent, for: draft)
+        recordDraftActivity(.approvedSent, for: draft, detail: Self.editedBeforeSendDetail(for: draft))
     }
 
     /// Saves `draft` to the Drafts mailbox. Shared by the Settings preview and
@@ -407,13 +407,26 @@ extension AppState {
             date: Date(),
             messageID: Self.generateMessageID(forEmail: credentials.email)
         )
-        try await mailProvider.appendMessage(
-            credentials,
-            mailbox: .drafts,
-            rfc822: outgoing.rfc822(),
-            flags: [.draft]
-        )
-        recordDraftActivity(.approvedSaved, for: draft)
+        do {
+            try await mailProvider.appendMessage(
+                credentials,
+                mailbox: .drafts,
+                rfc822: outgoing.rfc822(),
+                flags: [.draft]
+            )
+        } catch {
+            recordDraftActivity(.saveFailed, for: draft, detail: Self.draftMessage(for: error))
+            throw error
+        }
+        recordDraftActivity(.approvedSaved, for: draft, detail: Self.editedBeforeSendDetail(for: draft))
+    }
+
+    /// The activity-log note for an approved draft that the user edited before
+    /// dispatching (item 19), or `nil` when the assistant's body was sent as-is.
+    /// Metadata only — never the draft content itself, per the activity log's
+    /// privacy rule.
+    static func editedBeforeSendDetail(for draft: Draft) -> String? {
+        draft.wasEdited ? "Edited before send" : nil
     }
 
     static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {

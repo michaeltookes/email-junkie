@@ -194,7 +194,7 @@ extension AppState {
             throw DraftDispatchError.missingCredentials
         }
         guard draftMatchesCurrentAccount(draft, credentials: credentials) else {
-            if generatedDraft == draft {
+            if generatedDraft?.identity == draft.identity {
                 generatedDraft = nil
             }
             throw DraftDispatchError.accountMismatch
@@ -223,6 +223,11 @@ extension AppState {
             openReviewHandler?()
         case .approve(let sendBehavior):
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
+            guard !pendingDraftUncommittedEditIDs.contains(identity) else {
+                approvalError = "Review this draft before approving it from a notification; it has unsaved edits."
+                openReviewHandler?()
+                return
+            }
             await approveDraft(draft, sendBehavior: sendBehavior)
             if pendingStaleWarnings[identity] != nil {
                 openReviewHandler?()
@@ -253,6 +258,7 @@ extension AppState {
     private func removePendingDraftAfterApproval(_ draft: Draft) {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         pendingDrafts.removeAll { $0.identity == draft.identity }
+        clearPendingDraftBodyEdit(identity: draft.identity)
         pendingDraftCount = pendingDrafts.count
 
         do {
@@ -281,6 +287,7 @@ extension AppState {
         if removeNotification {
             notifier.removeNotification(identity: draft.identity)
         }
+        clearPendingDraftBodyEdit(identity: draft.identity)
         return removalIndex
     }
 
@@ -411,6 +418,8 @@ extension AppState {
 
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         pendingStaleWarnings.removeValue(forKey: replacement.identity)
+        clearPendingDraftBodyEdit(identity: draft.identity)
+        clearPendingDraftBodyEdit(identity: replacement.identity)
         if let staleReason {
             pendingStaleWarnings[replacement.identity] = staleReason
         }

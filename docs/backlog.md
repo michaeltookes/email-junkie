@@ -70,13 +70,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Rules take effect on the next poll without restart.
     - Rules persisted locally.
 
-19. **Inline draft editing before send**
-    Tweak a draft in the approval UI before approving.
-    *As Priya, I want to tweak a draft before approving, so that I can fix small things without rejecting the whole reply.*
-    - Approval UI allows inline editing of the draft body.
-    - Edited content is what gets sent or saved.
-    - Edits can optionally be captured as a signal for future voice tuning.
-
 20. **Voice profile refresh / re-learn**
     Keep the profile current.
     *As Priya, I want to re-learn my voice on demand or on a schedule, so that drafts keep up as my style changes.*

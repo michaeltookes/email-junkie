@@ -93,6 +93,23 @@ struct ActivityEvent: Codable, Identifiable, Equatable {
         guard let subject, !subject.isEmpty else { return "(no subject)" }
         return subject
     }
+
+    /// The free-form detail currently rendered in the activity-history row.
+    var activityHistoryVisibleDetail: String? {
+        guard let detail else { return nil }
+        return kind.showsFailureDetail || kind.showsSuccessDetail ? detail : nil
+    }
+
+    /// The explicit accessibility label installed by the activity-history row.
+    var activityHistoryAccessibilityLabel: String {
+        var parts = [kind.headline]
+        if let reason = reasonHeadline { parts.append(reason) }
+        parts.append(senderDisplay)
+        parts.append(subjectDisplay)
+        if let detail = activityHistoryVisibleDetail { parts.append(detail) }
+        parts.append(timestamp.formatted(date: .abbreviated, time: .shortened))
+        return parts.joined(separator: ", ")
+    }
 }
 
 /// The kinds of activity the assistant records. These map one-to-one to streams
@@ -112,6 +129,8 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
     case staleWarning
     /// Sending an approved draft failed.
     case sendFailed
+    /// Saving an approved draft to the Drafts mailbox failed (IMAP APPEND).
+    case saveFailed
 
     /// A short label for the event row.
     var headline: String {
@@ -123,6 +142,7 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .skipped: return "Skipped"
         case .staleWarning: return "Stale-thread warning"
         case .sendFailed: return "Send failed"
+        case .saveFailed: return "Save failed"
         }
     }
 
@@ -136,6 +156,23 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .skipped: return "nosign"
         case .staleWarning: return "exclamationmark.triangle"
         case .sendFailed: return "exclamationmark.octagon"
+        case .saveFailed: return "exclamationmark.octagon"
+        }
+    }
+
+    /// Whether rows should render the free-form failure diagnostic.
+    var showsFailureDetail: Bool {
+        switch self {
+        case .sendFailed, .saveFailed: return true
+        default: return false
+        }
+    }
+
+    /// Whether rows should render a non-error detail such as an edit note.
+    var showsSuccessDetail: Bool {
+        switch self {
+        case .approvedSent, .approvedSaved: return true
+        default: return false
         }
     }
 }

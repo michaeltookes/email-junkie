@@ -162,10 +162,16 @@ private struct ActivityEventRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let detail = event.detail, event.kind == .sendFailed {
+                if let detail = event.activityHistoryVisibleDetail, event.kind.showsFailureDetail {
                     Text(detail)
                         .font(.caption2)
                         .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+                if let detail = event.activityHistoryVisibleDetail, event.kind.showsSuccessDetail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
@@ -190,15 +196,6 @@ private struct ActivityEventRow: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
-    }
-
-    private var accessibilityLabel: String {
-        var parts = [event.kind.headline]
-        if let reason = event.reasonHeadline { parts.append(reason) }
-        parts.append(event.senderDisplay)
-        parts.append(event.subjectDisplay)
-        parts.append(event.timestamp.formatted(date: .abbreviated, time: .shortened))
-        return parts.joined(separator: ", ")
+        .accessibilityLabel(event.activityHistoryAccessibilityLabel)
     }
 }

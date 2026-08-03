@@ -35,6 +35,7 @@ struct DraftView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var displayedDraft: Draft
+    @State private var editedBody: String
     @State private var isDispatching = false
     @State private var dispatchConfirmation: String?
     @State private var dispatchError: String?
@@ -42,6 +43,7 @@ struct DraftView: View {
 
     init(draft: Draft) {
         _displayedDraft = State(initialValue: draft)
+        _editedBody = State(initialValue: draft.body)
     }
 
     var body: some View {
@@ -62,17 +64,19 @@ struct DraftView: View {
             }
             .padding()
             Divider()
-            ScrollView {
-                if let needsInfo = displayedDraft.needsInfo {
+            if let needsInfo = displayedDraft.needsInfo {
+                ScrollView {
                     DraftNeedsInfoView(needsInfo: needsInfo)
                         .padding()
-                } else {
-                    Text(displayedDraft.body)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
                 }
+            } else {
+                TextEditor(text: $editedBody)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .disabled(isBusy)
+                    .accessibilityLabel("Reply body")
             }
             Divider()
             HStack {
@@ -136,6 +140,11 @@ struct DraftView: View {
         isDispatching = true
         defer { isDispatching = false }
 
+        // Fold the user's inline edit (item 19) into the draft so the edited body
+        // is exactly what dispatches, retaining the assistant's original for
+        // future voice tuning.
+        displayedDraft.applyEditedBody(editedBody)
+
         do {
             dispatchConfirmation = try await appState.approveDraftPreview(displayedDraft, force: force)
             staleReason = nil
@@ -160,6 +169,9 @@ struct DraftView: View {
 
         do {
             displayedDraft = try await appState.regenerateDraftPreview(displayedDraft)
+            // Regeneration produces a fresh reply; discard the prior inline edit
+            // by resyncing the editor to the new body.
+            editedBody = displayedDraft.body
         } catch {
             dispatchError = AppState.draftMessage(for: error)
         }

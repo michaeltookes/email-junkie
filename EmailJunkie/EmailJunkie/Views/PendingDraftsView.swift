@@ -165,6 +165,7 @@ private struct PendingDraftCard: View {
     let draft: Draft
     @EnvironmentObject var appState: AppState
     @State private var editedBody: String
+    @State private var editSaveDebouncer = Debouncer(delay: 0.4)
     @FocusState private var isBodyFocused: Bool
 
     init(draft: Draft) {
@@ -198,6 +199,9 @@ private struct PendingDraftCard: View {
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(cardStroke, lineWidth: draft.isFlagged ? 1.5 : 1))
+        .onDisappear {
+            persistEditedBodyImmediately()
+        }
     }
 
     private var cardStroke: Color {
@@ -258,11 +262,15 @@ private struct PendingDraftCard: View {
                     .focused($isBodyFocused)
                     .disabled(isBusy)
                     .accessibilityLabel("Reply body")
-                    // Persist the inline edit (item 19) when the editor loses
-                    // focus, so it survives relaunch even before approval.
+                    // Keep notification approval from racing focused edits, but
+                    // coalesce disk writes while the user is typing.
+                    .onChange(of: editedBody) { _, newValue in
+                        queueEditedBodyPersist(newValue)
+                    }
+                    // Flush any pending inline edit when the editor loses focus.
                     .onChange(of: isBodyFocused) { _, focused in
                         if !focused {
-                            appState.updatePendingDraftBody(draft, to: editedBody)
+                            persistEditedBodyImmediately()
                         }
                     }
                     // Resync when the underlying draft body changes externally
@@ -290,12 +298,38 @@ private struct PendingDraftCard: View {
             // A flagged draft can't be approved — there is nothing safe to send.
             if !draft.isFlagged {
                 Button(appState.approveActionLabel) {
-                    Task { await appState.approvePendingDraft(draft, withEditedBody: editedBody) }
+                    Task { await approve() }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(isBusy)
             }
         }
+    }
+
+    private func queueEditedBodyPersist(_ newValue: String) {
+        appState.notePendingDraftBodyEdit(draft, editedBody: newValue)
+        editSaveDebouncer.debounce {
+            Task { @MainActor in
+                appState.updatePendingDraftBody(draft, to: newValue)
+            }
+        }
+    }
+
+    private func persistEditedBodyImmediately() {
+        editSaveDebouncer.cancel()
+        appState.updatePendingDraftBody(draft, to: editedBody)
+    }
+
+    /// Folds the inline edit into the queued draft (item 19), then approves the
+    /// edited draft so the edited body is exactly what sends or saves.
+    private func approve(force: Bool = false) async {
+        editSaveDebouncer.cancel()
+        await appState.approvePendingDraft(draft, withEditedBody: editedBody, force: force)
+    }
+
+    private func regenerate() async {
+        editSaveDebouncer.cancel()
+        await appState.regeneratePendingDraft(draft)
     }
 
     /// The conflict warning shown when a draft's thread changed since it was
@@ -319,11 +353,11 @@ private struct PendingDraftCard: View {
                 }
                 .disabled(isBusy)
                 Button("Regenerate") {
-                    Task { await appState.regeneratePendingDraft(draft) }
+                    Task { await regenerate() }
                 }
                 .disabled(isBusy)
                 Button("\(appState.approveActionLabel) anyway") {
-                    Task { await appState.approvePendingDraft(draft, withEditedBody: editedBody, force: true) }
+                    Task { await approve(force: true) }
                 }
                 .disabled(isBusy)
             }

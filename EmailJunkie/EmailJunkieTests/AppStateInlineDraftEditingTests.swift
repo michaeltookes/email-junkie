@@ -239,6 +239,36 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         XCTAssertNotNil(appState.approvalError)
     }
 
+    func testNotificationApprovalOpensReviewWhenInlineEditIsUncommitted() async {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, provider, _) = makeAppState(seed: [draft])
+        var opened = false
+        appState.openReviewHandler = { opened = true }
+        appState.notePendingDraftBodyEdit(draft, editedBody: "Edited.")
+
+        await appState.handleNotificationAction(.approve(.autoSend), identity: draft.identity)
+
+        XCTAssertTrue(opened)
+        XCTAssertNil(provider.sentRFC822)
+        XCTAssertNil(provider.appendedRFC822)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Generated.")
+        XCTAssertNotNil(appState.approvalError)
+    }
+
+    func testNotificationApprovalUsesDurableInlineEditAfterDebouncedPersist() async {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, provider, _) = makeAppState(seed: [draft])
+        appState.notePendingDraftBodyEdit(draft, editedBody: "Edited.")
+
+        let persisted = appState.updatePendingDraftBody(draft, to: "Edited.")
+        await appState.handleNotificationAction(.approve(.autoSend), identity: draft.identity)
+
+        XCTAssertEqual(persisted?.body, "Edited.")
+        XCTAssertEqual(decodedBody(from: provider.sentRFC822), "Edited.")
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
     // MARK: - Stale checks still run on edited drafts
 
     func testStaleThreadCheckStillEnforcedAfterEdit() async {

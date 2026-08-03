@@ -122,41 +122,6 @@ extension AppState {
         recordDraftActivity(.staleWarning, for: draft, staleReason: reason)
     }
 
-    /// Applies a user's inline edit to a queued draft's reply body (item 19) and
-    /// persists it, so the edited text is what later dispatches and the edit
-    /// survives a relaunch. Captures the assistant's original body the first time
-    /// it diverges (for future voice tuning). Returns the updated draft, the
-    /// unchanged draft when the text is identical, or `nil` if the edit could not
-    /// be applied durably. On write failure the in-memory edit is rolled back so
-    /// memory and disk stay consistent.
-    @discardableResult
-    func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft? {
-        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
-            return nil
-        }
-        guard pendingDrafts[index].body != newBody else { return pendingDrafts[index] }
-
-        let previous = pendingDrafts[index]
-        pendingDrafts[index].applyEditedBody(newBody)
-        do {
-            try persistence.savePendingDraftsSync(pendingDrafts)
-        } catch {
-            pendingDrafts[index] = previous
-            logger.error("Failed to persist edited pending draft: \(error.localizedDescription)")
-            approvalError = Self.draftMessage(for: error)
-            return nil
-        }
-        return pendingDrafts[index]
-    }
-
-    /// Applies the current inline editor contents before dispatching. Approval
-    /// stops if the edited body cannot be persisted, so the user never sends or
-    /// saves a different body from the one shown in the review UI.
-    func approvePendingDraft(_ draft: Draft, withEditedBody editedBody: String, force: Bool = false) async {
-        guard let updated = updatePendingDraftBody(draft, to: editedBody) else { return }
-        await approveDraft(updated, force: force)
-    }
-
     /// Denies (discards) a pending draft without sending or saving it.
     func denyDraft(_ draft: Draft) {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
@@ -258,6 +223,11 @@ extension AppState {
             openReviewHandler?()
         case .approve(let sendBehavior):
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { return }
+            guard !pendingDraftUncommittedEditIDs.contains(identity) else {
+                approvalError = "Review this draft before approving it from a notification; it has unsaved edits."
+                openReviewHandler?()
+                return
+            }
             await approveDraft(draft, sendBehavior: sendBehavior)
             if pendingStaleWarnings[identity] != nil {
                 openReviewHandler?()
@@ -288,6 +258,7 @@ extension AppState {
     private func removePendingDraftAfterApproval(_ draft: Draft) {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         pendingDrafts.removeAll { $0.identity == draft.identity }
+        pendingDraftUncommittedEditIDs.remove(draft.identity)
         pendingDraftCount = pendingDrafts.count
 
         do {
@@ -316,6 +287,7 @@ extension AppState {
         if removeNotification {
             notifier.removeNotification(identity: draft.identity)
         }
+        pendingDraftUncommittedEditIDs.remove(draft.identity)
         return removalIndex
     }
 
@@ -446,6 +418,8 @@ extension AppState {
 
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         pendingStaleWarnings.removeValue(forKey: replacement.identity)
+        pendingDraftUncommittedEditIDs.remove(draft.identity)
+        pendingDraftUncommittedEditIDs.remove(replacement.identity)
         if let staleReason {
             pendingStaleWarnings[replacement.identity] = staleReason
         }

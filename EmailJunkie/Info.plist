@@ -15,5 +15,31 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+
+	<!--
+	  Sparkle auto-update configuration.
+
+	  SUFeedURL: the appcast the updater polls. We publish it as a release
+	  asset on the "latest" GitHub release so the URL is stable across
+	  versions. The release pipeline (Distribution/scripts/release.sh) writes
+	  and uploads appcast.xml; see docs/releasing.md.
+
+	  SUEnableAutomaticChecks: quiet check-on-launch. Sparkle only surfaces UI
+	  when an update is actually found; the explicit "Check for Updates…" menu
+	  item is the always-interactive path.
+
+	  SUPublicEDKey: TODO — REPLACE BEFORE FIRST RELEASE. This is a placeholder
+	  (32 zero bytes, base64). Generate the real EdDSA keypair once with
+	  Sparkle's `generate_keys` tool, keep the PRIVATE key in the login
+	  Keychain (never in the repo), and paste the printed PUBLIC key here.
+	  Until then, downloaded updates fail signature verification and are
+	  rejected — the app still launches and runs normally.
+	-->
+	<key>SUFeedURL</key>
+	<string>https://github.com/michaeltookes/email-junkie/releases/latest/download/appcast.xml</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUPublicEDKey</key>
+	<string>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</string>
 </dict>
 </plist>

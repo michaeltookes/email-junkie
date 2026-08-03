@@ -1,33 +1,75 @@
 import AppKit
 import os
+import Sparkle
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Updates")
 
-/// Manages application updates.
+/// Manages application updates via Sparkle.
 ///
-/// This is a deliberate no-op stub. The real Sparkle integration is added at
-/// the distribution milestone (signed DMG + appcast + auto-update). The API
-/// surface here mirrors what the Sparkle-backed version will expose, so the
-/// swap is drop-in and `MenuBarController` needs no changes.
+/// Menu-bar apps must never surprise the user with UI, so the updater is
+/// configured for a quiet check on launch (`SUEnableAutomaticChecks` in
+/// Info.plist) plus the explicit "Check for Updates…" menu item, which is the
+/// only path that shows Sparkle's update window.
+///
+/// The API surface (`isConfigured`, `canCheckForUpdates`, `unavailableReason`,
+/// `startUpdater()`, `checkForUpdates()`) is unchanged from the earlier no-op
+/// stub, so `MenuBarController` needs no changes.
+///
+/// - Note: The updater verifies downloads against the `SUPublicEDKey` in
+///   Info.plist. Until a real EdDSA keypair is generated at release time (see
+///   `docs/releasing.md`) that key is a placeholder, so updates will simply
+///   fail signature verification rather than install — the app still launches
+///   and runs normally.
 @MainActor
 final class UpdateManager {
 
-    /// Whether updates are configured (appcast + signing key present).
+    /// The standard Sparkle controller. Created with `startingUpdater: false`
+    /// so we can start it explicitly (and catch a start failure gracefully)
+    /// rather than letting Sparkle pop a modal alert at launch.
+    private let updaterController: SPUStandardUpdaterController
+
+    /// Whether the updater started successfully (feed + key wired).
     private(set) var isConfigured: Bool = false
 
-    /// Why update checks are unavailable (shown as a menu tooltip).
-    private(set) var unavailableReason: String? = "Auto-update is added at the distribution milestone."
+    /// Why update checks are unavailable (shown as a menu tooltip). `nil` once
+    /// the updater is running.
+    private(set) var unavailableReason: String? =
+        "Auto-update starts once the app finishes launching."
 
-    /// Whether the updater can currently check for updates.
-    var canCheckForUpdates: Bool { isConfigured }
-
-    /// Starts the updater. Call after launch completes.
-    func startUpdater() {
-        logger.info("Updates disabled (Sparkle not yet integrated)")
+    init() {
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: false,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
     }
 
-    /// Manually checks for updates (user-initiated).
+    /// Whether the updater can currently check for updates. Sparkle exposes this
+    /// as a KVO property that is briefly false while a check is in flight; the
+    /// menu is rebuilt on demand so it always reflects the live value.
+    var canCheckForUpdates: Bool {
+        isConfigured && updaterController.updater.canCheckForUpdates
+    }
+
+    /// Starts the updater. Call after launch completes. A start failure (e.g. a
+    /// malformed feed URL or public key) leaves the app fully usable with
+    /// updates disabled instead of interrupting the user.
+    func startUpdater() {
+        do {
+            try updaterController.updater.start()
+            isConfigured = true
+            unavailableReason = nil
+            logger.info("Sparkle updater started")
+        } catch {
+            isConfigured = false
+            unavailableReason =
+                "Auto-update is unavailable until a signed release with a valid update key ships."
+            logger.error("Sparkle updater failed to start: \(error.localizedDescription)")
+        }
+    }
+
+    /// Manually checks for updates (user-initiated). Shows Sparkle's update UI.
     func checkForUpdates() {
-        logger.info("Update check requested, but the updater is unavailable")
+        updaterController.checkForUpdates(nil)
     }
 }

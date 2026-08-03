@@ -1,0 +1,333 @@
+import EmailJunkieMail
+import XCTest
+@testable import EmailJunkie
+
+/// Coverage for inline draft editing before send (item 19): the edited body is
+/// exactly what dispatches, the edit persists across relaunch, the assistant's
+/// original body is retained for future voice tuning, stale-thread checks still
+/// run on edited drafts, and the save-failure activity rider is symmetric with
+/// the send path.
+@MainActor
+final class AppStateInlineDraftEditingTests: XCTestCase {
+
+    private func pendingDraft(id: UInt32 = 1, body: String = "Thursday works!") -> Draft {
+        Draft(
+            id: id,
+            sourceUIDValidity: 10,
+            sourceAccountEmail: "me@gmail.com",
+            sourceMailbox: "INBOX",
+            sourceSubject: "Lunch?",
+            sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
+            sourceReplyTo: nil,
+            sourceMessageID: "<orig@example.com>",
+            incomingBody: "Are you free Thursday?",
+            replySubject: "Re: Lunch?",
+            body: body,
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
+    private func makeAppState(
+        sendBehavior: SendBehavior = .autoSend,
+        appendResult: Result<Void, MailError> = .success(()),
+        seed drafts: [Draft] = []
+    ) -> (AppState, FakeAppMailProvider, AppStateMemoryPersistence) {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: sendBehavior.rawValue
+        ), pendingDrafts: drafts)
+        let provider = FakeAppMailProvider(result: .success(()), appendResult: appendResult)
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()))
+        )
+        appState.pendingDrafts = drafts
+        appState.pendingDraftCount = drafts.count
+        return (appState, provider, persistence)
+    }
+
+    private func makeConnectedAppState(persistence: AppStateMemoryPersistence) -> AppState {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        return AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+    }
+
+    // MARK: - Draft model
+
+    func testApplyEditedBodyCapturesOriginalOnceAndTracksLatest() {
+        var draft = pendingDraft(body: "Generated reply.")
+        XCTAssertFalse(draft.wasEdited)
+        XCTAssertNil(draft.originalBody)
+
+        draft.applyEditedBody("First edit.")
+        XCTAssertEqual(draft.body, "First edit.")
+        XCTAssertEqual(draft.originalBody, "Generated reply.")
+        XCTAssertTrue(draft.wasEdited)
+
+        draft.applyEditedBody("Second edit.")
+        XCTAssertEqual(draft.body, "Second edit.")
+        // The original is captured only on first divergence, not overwritten.
+        XCTAssertEqual(draft.originalBody, "Generated reply.")
+    }
+
+    func testApplyEditedBodyIsNoOpWhenUnchanged() {
+        var draft = pendingDraft(body: "Same.")
+        draft.applyEditedBody("Same.")
+        XCTAssertNil(draft.originalBody)
+        XCTAssertFalse(draft.wasEdited)
+    }
+
+    func testWasEditedFalseWhenRevertedToOriginal() {
+        var draft = pendingDraft(body: "Original.")
+        draft.applyEditedBody("Changed.")
+        draft.applyEditedBody("Original.")
+        XCTAssertEqual(draft.body, "Original.")
+        // Original stays captured, but a body equal to it reads as not edited.
+        XCTAssertFalse(draft.wasEdited)
+    }
+
+    func testEditingBodyDoesNotChangeIdentity() {
+        var draft = pendingDraft(body: "Before.")
+        let identity = draft.identity
+        draft.applyEditedBody("After.")
+        XCTAssertEqual(draft.identity, identity)
+    }
+
+    // MARK: - Edited body is what dispatches
+
+    func testEditedBodyIsWhatSends() async {
+        let draft = pendingDraft(body: "Generated reply body.")
+        let (appState, provider, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        let updated = appState.updatePendingDraftBody(draft, to: "My hand-written reply.")
+        await appState.approveDraft(updated)
+
+        let rfc822 = String(data: provider.sentRFC822 ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(rfc822.contains("My hand-written reply."))
+        XCTAssertFalse(rfc822.contains("Generated reply body."))
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
+    func testEditedBodyIsWhatSaves() async {
+        let draft = pendingDraft(body: "Generated reply body.")
+        let (appState, provider, _) = makeAppState(sendBehavior: .saveAsDraft, seed: [draft])
+
+        let updated = appState.updatePendingDraftBody(draft, to: "Edited save body.")
+        await appState.approveDraft(updated)
+
+        let rfc822 = String(data: provider.appendedRFC822 ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(rfc822.contains("Edited save body."))
+        XCTAssertFalse(rfc822.contains("Generated reply body."))
+        XCTAssertEqual(provider.appendedMailbox, .drafts)
+    }
+
+    func testPreviewApproveDispatchesEditedBody() async {
+        let (appState, provider, _) = makeAppState(sendBehavior: .autoSend)
+        var draft = pendingDraft(body: "Generated preview body.")
+        appState.generatedDraft = draft
+        draft.applyEditedBody("Edited preview body.")
+
+        let confirmation = try? await appState.approveDraftPreview(draft)
+
+        XCTAssertEqual(confirmation, "Sent.")
+        let rfc822 = String(data: provider.sentRFC822 ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertTrue(rfc822.contains("Edited preview body."))
+        XCTAssertFalse(rfc822.contains("Generated preview body."))
+        // The edited draft still clears the stored preview (identity match).
+        XCTAssertNil(appState.generatedDraft)
+    }
+
+    // MARK: - Persistence + original retention
+
+    func testEditPersistsAndRetainsOriginal() {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+
+        appState.updatePendingDraftBody(draft, to: "Persisted edit.")
+
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Persisted edit.")
+        XCTAssertEqual(appState.pendingDrafts.first?.originalBody, "Generated.")
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.body, "Persisted edit.")
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.originalBody, "Generated.")
+    }
+
+    func testEditSurvivesSimulatedRelaunch() {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+
+        appState.updatePendingDraftBody(draft, to: "Edit before restart.")
+
+        // A fresh AppState loads pending drafts from the same persistence.
+        let relaunched = makeConnectedAppState(persistence: persistence)
+        XCTAssertEqual(relaunched.pendingDrafts.first?.body, "Edit before restart.")
+        XCTAssertEqual(relaunched.pendingDrafts.first?.originalBody, "Generated.")
+    }
+
+    func testUpdatePendingDraftBodyIsNoOpWhenUnchanged() {
+        let draft = pendingDraft(body: "Unchanged.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+        let before = persistence.pendingDraftSaveCount
+
+        let result = appState.updatePendingDraftBody(draft, to: "Unchanged.")
+
+        XCTAssertEqual(result.body, "Unchanged.")
+        XCTAssertNil(result.originalBody)
+        XCTAssertEqual(persistence.pendingDraftSaveCount, before)
+    }
+
+    func testUpdatePendingDraftBodyReturnsDraftWhenNotQueued() {
+        let (appState, _, _) = makeAppState(seed: [])
+        let orphan = pendingDraft(id: 99, body: "Orphan.")
+
+        let result = appState.updatePendingDraftBody(orphan, to: "Edited.")
+
+        XCTAssertEqual(result.body, "Orphan.")
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
+    func testUpdatePendingDraftBodyRollsBackOnPersistenceFailure() {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        let result = appState.updatePendingDraftBody(draft, to: "Edited.")
+
+        XCTAssertEqual(result.body, "Generated.")
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Generated.")
+        XCTAssertNil(appState.pendingDrafts.first?.originalBody)
+        XCTAssertNotNil(appState.approvalError)
+    }
+
+    // MARK: - Stale checks still run on edited drafts
+
+    func testStaleThreadCheckStillEnforcedAfterEdit() async {
+        let draft = pendingDraft(id: 5)
+        let provider = SearchStubMailProvider(
+            threadResult: MailSearchResult(
+                messages: [
+                    MailMessage(id: 5, uidValidity: 10, from: nil, subject: "Lunch?", date: ""),
+                    MailMessage(id: 9, uidValidity: 10, from: nil, subject: "Re: Lunch?", date: "")
+                ],
+                totalMatches: 2,
+                offset: 0,
+                hasMore: false
+            )
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: SendBehavior.autoSend.rawValue
+        ), pendingDrafts: [draft])
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()))
+        )
+        appState.pendingDrafts = [draft]
+        appState.pendingDraftCount = 1
+
+        let updated = appState.updatePendingDraftBody(draft, to: "Edited but the thread moved on.")
+        await appState.approveDraft(updated)
+
+        // The edit did not bypass the stale-thread gate.
+        XCTAssertEqual(appState.pendingStaleWarnings[draft.identity], .newerReplyInThread)
+        XCTAssertEqual(provider.sendCount, 0)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        // The edit still persisted so it is not lost when the user resolves the warning.
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Edited but the thread moved on.")
+    }
+
+    // MARK: - Activity signal
+
+    func testApprovedSentActivityNotesEditedBeforeSend() async {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        let updated = appState.updatePendingDraftBody(draft, to: "Edited reply.")
+        await appState.approveDraft(updated)
+
+        let sent = appState.activityEvents.first { $0.kind == .approvedSent }
+        XCTAssertEqual(sent?.detail, "Edited before send")
+    }
+
+    func testApprovedSavedActivityNotesEditedBeforeSend() async {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(sendBehavior: .saveAsDraft, seed: [draft])
+
+        let updated = appState.updatePendingDraftBody(draft, to: "Edited reply.")
+        await appState.approveDraft(updated)
+
+        let saved = appState.activityEvents.first { $0.kind == .approvedSaved }
+        XCTAssertEqual(saved?.detail, "Edited before send")
+    }
+
+    func testUneditedApprovalHasNoEditDetail() async {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        await appState.approveDraft(draft)
+
+        let sent = appState.activityEvents.first { $0.kind == .approvedSent }
+        XCTAssertNil(sent?.detail)
+    }
+
+    // MARK: - Save-failure rider (symmetry with send)
+
+    func testSaveFailureRecordsSaveFailedActivity() async {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(
+            sendBehavior: .saveAsDraft,
+            appendResult: .failure(.commandFailed("APPEND failed")),
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .saveFailed })
+        XCTAssertFalse(appState.activityEvents.contains { $0.kind == .approvedSaved })
+        XCTAssertNotNil(appState.approvalError)
+        // The draft is kept for another attempt.
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+    }
+
+    func testSaveFailedActivityCarriesErrorDetail() async {
+        let draft = pendingDraft()
+        let (appState, _, _) = makeAppState(
+            sendBehavior: .saveAsDraft,
+            appendResult: .failure(.commandFailed("APPEND failed")),
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+
+        let failure = appState.activityEvents.first { $0.kind == .saveFailed }
+        XCTAssertNotNil(failure?.detail)
+        XCTAssertFalse(failure?.detail?.isEmpty ?? true)
+    }
+}

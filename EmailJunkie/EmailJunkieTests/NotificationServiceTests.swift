@@ -75,7 +75,7 @@ final class NotificationServiceTests: XCTestCase {
         let service = UserNotificationService(center: center)
 
         service.refreshNotification(for: pendingDraft(), sendBehavior: .autoSend)
-        await Task.yield()
+        await drainNotificationRefreshTasks()
 
         XCTAssertTrue(center.addedRequests.isEmpty)
         XCTAssertEqual(center.pendingLookupCount, 1)
@@ -89,7 +89,7 @@ final class NotificationServiceTests: XCTestCase {
         let service = UserNotificationService(center: center)
 
         service.refreshNotification(for: draft, sendBehavior: .autoSend)
-        await Task.yield()
+        await drainNotificationRefreshTasks()
 
         let request = try XCTUnwrap(center.addedRequests.first)
         XCTAssertEqual(center.addedRequests.count, 1)
@@ -106,7 +106,7 @@ final class NotificationServiceTests: XCTestCase {
         let service = UserNotificationService(center: center)
 
         service.refreshNotification(for: draft, sendBehavior: .saveAsDraft)
-        await Task.yield()
+        await drainNotificationRefreshTasks()
 
         let request = try XCTUnwrap(center.addedRequests.first)
         XCTAssertEqual(center.addedRequests.count, 1)
@@ -114,12 +114,41 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertTrue(UserNotificationService.suppressesPresentation(userInfo: request.content.userInfo))
         XCTAssertEqual(request.content.interruptionLevel, .passive)
     }
+
+    func testRemoveNotificationInvalidatesOutstandingRefreshLookup() async throws {
+        let draft = pendingDraft()
+        let center = FakeUserNotificationCenter()
+        var pendingCompletion: ((Set<String>) -> Void)?
+        center.pendingLookupHandler = { completion in
+            pendingCompletion = completion
+        }
+        let service = UserNotificationService(center: center)
+
+        service.refreshNotification(for: draft, sendBehavior: .autoSend)
+        service.removeNotification(identity: draft.identity)
+        try XCTUnwrap(pendingCompletion)([draft.identity])
+        await drainNotificationRefreshTasks()
+
+        XCTAssertTrue(center.addedRequests.isEmpty)
+        XCTAssertEqual(center.removedDeliveredIdentifiers, [draft.identity])
+        XCTAssertEqual(center.removedPendingIdentifiers, [draft.identity])
+    }
+
+    private func drainNotificationRefreshTasks() async {
+        for _ in 0..<5 {
+            await Task.yield()
+        }
+    }
 }
+
+private typealias NotificationIdentifierLookupHandler = (@escaping (Set<String>) -> Void) -> Void
 
 private final class FakeUserNotificationCenter: UserNotificationCentering {
     var delegate: UNUserNotificationCenterDelegate?
     var pendingIdentifiers: Set<String> = []
     var deliveredIdentifiers: Set<String> = []
+    var pendingLookupHandler: NotificationIdentifierLookupHandler?
+    var deliveredLookupHandler: NotificationIdentifierLookupHandler?
     private(set) var addedRequests: [UNNotificationRequest] = []
     private(set) var pendingLookupCount = 0
     private(set) var deliveredLookupCount = 0
@@ -150,11 +179,19 @@ private final class FakeUserNotificationCenter: UserNotificationCentering {
 
     func pendingNotificationRequestIdentifiers(completionHandler: @escaping (Set<String>) -> Void) {
         pendingLookupCount += 1
-        completionHandler(pendingIdentifiers)
+        if let pendingLookupHandler {
+            pendingLookupHandler(completionHandler)
+        } else {
+            completionHandler(pendingIdentifiers)
+        }
     }
 
     func deliveredNotificationIdentifiers(completionHandler: @escaping (Set<String>) -> Void) {
         deliveredLookupCount += 1
-        completionHandler(deliveredIdentifiers)
+        if let deliveredLookupHandler {
+            deliveredLookupHandler(completionHandler)
+        } else {
+            completionHandler(deliveredIdentifiers)
+        }
     }
 }

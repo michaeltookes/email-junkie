@@ -128,6 +128,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
     var onAction: ((DraftNotificationAction, String) async -> Void)?
 
     private let center: UserNotificationCentering
+    private var notificationRefreshGenerations: [String: Int] = [:]
 
     static let categoryIdentifier = "DRAFT_READY"
     /// Category for a flagged "needs input" draft — Deny only, no Approve, since
@@ -154,22 +155,30 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     func notify(for draft: Draft, sendBehavior: SendBehavior) {
+        advanceNotificationRefreshGeneration(identity: draft.identity)
         postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: false)
     }
 
     func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {
         let center = center
+        let generation = advanceNotificationRefreshGeneration(identity: draft.identity)
         center.pendingNotificationRequestIdentifiers { [weak self] pendingIdentifiers in
-            if pendingIdentifiers.contains(draft.identity) {
-                Task { @MainActor in
-                    self?.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+            Task { @MainActor in
+                guard let self,
+                      self.isCurrentNotificationRefreshGeneration(generation, identity: draft.identity) else { return }
+                if pendingIdentifiers.contains(draft.identity) {
+                    self.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+                    return
                 }
-                return
-            }
-            center.deliveredNotificationIdentifiers { [weak self] deliveredIdentifiers in
-                guard deliveredIdentifiers.contains(draft.identity) else { return }
-                Task { @MainActor in
-                    self?.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+                center.deliveredNotificationIdentifiers { [weak self] deliveredIdentifiers in
+                    Task { @MainActor in
+                        guard let self,
+                              deliveredIdentifiers.contains(draft.identity),
+                              self.isCurrentNotificationRefreshGeneration(generation, identity: draft.identity) else {
+                            return
+                        }
+                        self.postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
+                    }
                 }
             }
         }
@@ -198,6 +207,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     func removeNotification(identity: String) {
+        advanceNotificationRefreshGeneration(identity: identity)
         center.removeDeliveredNotifications(withIdentifiers: [identity])
         center.removePendingNotificationRequests(withIdentifiers: [identity])
     }
@@ -232,6 +242,17 @@ final class UserNotificationService: NSObject, DraftNotifying {
             content.interruptionLevel = .passive
         }
         return content
+    }
+
+    @discardableResult
+    private func advanceNotificationRefreshGeneration(identity: String) -> Int {
+        let generation = (notificationRefreshGenerations[identity] ?? 0) + 1
+        notificationRefreshGenerations[identity] = generation
+        return generation
+    }
+
+    private func isCurrentNotificationRefreshGeneration(_ generation: Int, identity: String) -> Bool {
+        notificationRefreshGenerations[identity] == generation
     }
 
     static func categoryIdentifier(for sendBehavior: SendBehavior) -> String {

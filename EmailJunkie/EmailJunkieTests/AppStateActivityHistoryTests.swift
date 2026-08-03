@@ -110,6 +110,12 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertTrue(persistence.loadActivityEvents().isEmpty)
     }
 
+    func testFailureDetailVisibilityIncludesSaveFailures() {
+        XCTAssertTrue(ActivityEventKind.sendFailed.showsFailureDetail)
+        XCTAssertTrue(ActivityEventKind.saveFailed.showsFailureDetail)
+        XCTAssertFalse(ActivityEventKind.approvedSaved.showsFailureDetail)
+    }
+
     func testActivityEventsPersistAndReloadOnNewAppState() {
         let (appState, _, persistence) = makeAppState()
         appState.recordActivity(ActivityEvent(kind: .approvedSent, subject: "Persisted"))

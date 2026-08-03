@@ -31,6 +31,7 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
     private func makeAppState(
         sendBehavior: SendBehavior = .autoSend,
         appendResult: Result<Void, MailError> = .success(()),
+        notifier: DraftNotifying = NullDraftNotifier(),
         seed drafts: [Draft] = []
     ) -> (AppState, FakeAppMailProvider, AppStateMemoryPersistence) {
         let secrets = InMemorySecretStore(seed: [
@@ -50,7 +51,8 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
             persistence: persistence,
             secrets: secrets,
             mailProvider: provider,
-            llm: FakeLLMProvider(result: .success(()))
+            llm: FakeLLMProvider(result: .success(())),
+            notifier: notifier
         )
         appState.pendingDrafts = drafts
         appState.pendingDraftCount = drafts.count
@@ -188,6 +190,16 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         let relaunched = makeConnectedAppState(persistence: persistence)
         XCTAssertEqual(relaunched.pendingDrafts.first?.body, "Edit before restart.")
         XCTAssertEqual(relaunched.pendingDrafts.first?.originalBody, "Generated.")
+    }
+
+    func testEditPersistenceRefreshesNotificationCopy() {
+        let draft = pendingDraft(body: "Generated.")
+        let notifier = FakeDraftNotifier()
+        let (appState, _, _) = makeAppState(notifier: notifier, seed: [draft])
+
+        appState.updatePendingDraftBody(draft, to: "Edited.")
+
+        XCTAssertEqual(notifier.notifiedDrafts.map(\.body), ["Edited."])
     }
 
     func testUpdatePendingDraftBodyIsNoOpWhenUnchanged() {

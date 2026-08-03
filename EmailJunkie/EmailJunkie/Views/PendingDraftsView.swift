@@ -165,7 +165,8 @@ private struct PendingDraftCard: View {
     let draft: Draft
     @EnvironmentObject var appState: AppState
     @State private var editedBody: String
-    @State private var editSaveDebouncer = Debouncer(delay: 0.4)
+    @State private var editSaveTask: Task<Void, Never>?
+    @State private var editPersistRevision = 0
     @FocusState private var isBodyFocused: Bool
 
     init(draft: Draft) {
@@ -307,28 +308,41 @@ private struct PendingDraftCard: View {
     }
 
     private func queueEditedBodyPersist(_ newValue: String) {
+        editPersistRevision += 1
+        let revision = editPersistRevision
         appState.notePendingDraftBodyEdit(draft, editedBody: newValue)
-        editSaveDebouncer.debounce {
-            Task { @MainActor in
-                appState.updatePendingDraftBody(draft, to: newValue)
+        editSaveTask?.cancel()
+        editSaveTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 400_000_000)
+            } catch {
+                return
             }
+            guard !Task.isCancelled, editPersistRevision == revision else { return }
+            appState.updatePendingDraftBody(draft, to: newValue)
         }
     }
 
     private func persistEditedBodyImmediately() {
-        editSaveDebouncer.cancel()
+        cancelQueuedEditPersist()
         appState.updatePendingDraftBody(draft, to: editedBody)
+    }
+
+    private func cancelQueuedEditPersist() {
+        editPersistRevision += 1
+        editSaveTask?.cancel()
+        editSaveTask = nil
     }
 
     /// Folds the inline edit into the queued draft (item 19), then approves the
     /// edited draft so the edited body is exactly what sends or saves.
     private func approve(force: Bool = false) async {
-        editSaveDebouncer.cancel()
+        cancelQueuedEditPersist()
         await appState.approvePendingDraft(draft, withEditedBody: editedBody, force: force)
     }
 
     private func regenerate() async {
-        editSaveDebouncer.cancel()
+        cancelQueuedEditPersist()
         await appState.regeneratePendingDraft(draft)
     }
 

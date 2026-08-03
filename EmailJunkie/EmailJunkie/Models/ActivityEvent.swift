@@ -142,4 +142,12 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .saveFailed: return "exclamationmark.octagon"
         }
     }
+
+    /// Whether rows should render the free-form failure diagnostic.
+    var showsFailureDetail: Bool {
+        switch self {
+        case .sendFailed, .saveFailed: return true
+        default: return false
+        }
+    }
 }

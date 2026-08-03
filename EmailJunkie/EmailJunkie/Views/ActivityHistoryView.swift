@@ -162,7 +162,7 @@ private struct ActivityEventRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let detail = event.detail, event.kind == .sendFailed {
+                if let detail = event.detail, event.kind.showsFailureDetail {
                     Text(detail)
                         .font(.caption2)
                         .foregroundStyle(.red)

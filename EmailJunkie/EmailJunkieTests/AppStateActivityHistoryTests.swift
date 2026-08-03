@@ -119,6 +119,18 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertFalse(ActivityEventKind.saveFailed.showsSuccessDetail)
     }
 
+    func testActivityAccessibilityLabelIncludesVisibleDetail() {
+        let event = ActivityEvent(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            kind: .approvedSent,
+            sender: "Alice",
+            subject: "Lunch?",
+            detail: "Edited before send"
+        )
+
+        XCTAssertTrue(event.activityHistoryAccessibilityLabel.contains("Edited before send"))
+    }
+
     func testActivityEventsPersistAndReloadOnNewAppState() {
         let (appState, _, persistence) = makeAppState()
         appState.recordActivity(ActivityEvent(kind: .approvedSent, subject: "Persisted"))

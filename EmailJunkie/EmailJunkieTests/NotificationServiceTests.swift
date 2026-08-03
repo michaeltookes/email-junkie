@@ -39,18 +39,33 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertTrue(actions.contains { $0.identifier == UserNotificationService.approveActionIdentifier })
     }
 
-    func testRefreshUserInfoSuppressesForegroundPresentation() {
+    func testRefreshUserInfoSuppressesPresentation() {
         let normal = UserNotificationService.notificationUserInfo(
             for: pendingDraft(),
             sendBehavior: .autoSend
         )
-        XCTAssertFalse(UserNotificationService.suppressesForegroundPresentation(userInfo: normal))
+        XCTAssertFalse(UserNotificationService.suppressesPresentation(userInfo: normal))
 
         let refresh = UserNotificationService.notificationUserInfo(
             for: pendingDraft(),
             sendBehavior: .autoSend,
-            suppressForegroundPresentation: true
+            suppressPresentation: true
         )
-        XCTAssertTrue(UserNotificationService.suppressesForegroundPresentation(userInfo: refresh))
+        XCTAssertTrue(UserNotificationService.suppressesPresentation(userInfo: refresh))
+    }
+
+    func testRefreshNotificationContentUsesPassiveDelivery() {
+        let normal = UserNotificationService.notificationContent(
+            for: pendingDraft(),
+            sendBehavior: .autoSend
+        )
+        XCTAssertNotEqual(normal.interruptionLevel, .passive)
+
+        let refresh = UserNotificationService.notificationContent(
+            for: pendingDraft(),
+            sendBehavior: .autoSend,
+            suppressPresentation: true
+        )
+        XCTAssertEqual(refresh.interruptionLevel, .passive)
     }
 }

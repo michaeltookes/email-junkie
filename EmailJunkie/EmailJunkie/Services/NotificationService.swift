@@ -8,8 +8,8 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Noti
 private let draftIdentityUserInfoKey = "draftIdentity"
 /// `userInfo` key carrying the send behavior displayed on the notification.
 private let draftSendBehaviorUserInfoKey = "sendBehavior"
-/// `userInfo` key used when replacing notification copy from foreground edits.
-private let suppressForegroundPresentationUserInfoKey = "suppressForegroundPresentation"
+/// `userInfo` key used when replacing notification copy without a new alert.
+private let suppressPresentationUserInfoKey = "suppressPresentation"
 
 /// An action the user took on a draft-ready notification.
 enum DraftNotificationAction: Equatable {
@@ -90,38 +90,23 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     func notify(for draft: Draft, sendBehavior: SendBehavior) {
-        postNotification(for: draft, sendBehavior: sendBehavior, suppressForegroundPresentation: false)
+        postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: false)
     }
 
     func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {
-        postNotification(for: draft, sendBehavior: sendBehavior, suppressForegroundPresentation: true)
+        postNotification(for: draft, sendBehavior: sendBehavior, suppressPresentation: true)
     }
 
     private func postNotification(
         for draft: Draft,
         sendBehavior: SendBehavior,
-        suppressForegroundPresentation: Bool
+        suppressPresentation: Bool
     ) {
-        let content = UNMutableNotificationContent()
-        let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
-        if let needsInfo = draft.needsInfo {
-            content.title = "Reply to \(sender) needs your input"
-            content.subtitle = draft.sourceSubject
-            content.body = Self.snippet(needsInfo.summary)
-            content.categoryIdentifier = Self.needsInputCategoryIdentifier
-        } else {
-            content.title = "Reply ready for \(sender)"
-            content.subtitle = draft.sourceSubject
-            content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
-            content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
-        }
-        content.userInfo = Self.notificationUserInfo(
+        let content = Self.notificationContent(
             for: draft,
             sendBehavior: sendBehavior,
-            suppressForegroundPresentation: suppressForegroundPresentation
+            suppressPresentation: suppressPresentation
         )
-        content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
-
         let request = UNNotificationRequest(
             identifier: draft.identity,
             content: content,
@@ -140,6 +125,36 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     // MARK: - Helpers
+
+    static func notificationContent(
+        for draft: Draft,
+        sendBehavior: SendBehavior,
+        suppressPresentation: Bool = false
+    ) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
+        if let needsInfo = draft.needsInfo {
+            content.title = "Reply to \(sender) needs your input"
+            content.subtitle = draft.sourceSubject
+            content.body = Self.snippet(needsInfo.summary)
+            content.categoryIdentifier = Self.needsInputCategoryIdentifier
+        } else {
+            content.title = "Reply ready for \(sender)"
+            content.subtitle = draft.sourceSubject
+            content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
+            content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
+        }
+        content.userInfo = Self.notificationUserInfo(
+            for: draft,
+            sendBehavior: sendBehavior,
+            suppressPresentation: suppressPresentation
+        )
+        content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
+        if suppressPresentation {
+            content.interruptionLevel = .passive
+        }
+        return content
+    }
 
     static func categoryIdentifier(for sendBehavior: SendBehavior) -> String {
         switch sendBehavior {
@@ -225,20 +240,20 @@ final class UserNotificationService: NSObject, DraftNotifying {
     static func notificationUserInfo(
         for draft: Draft,
         sendBehavior: SendBehavior,
-        suppressForegroundPresentation: Bool = false
+        suppressPresentation: Bool = false
     ) -> [AnyHashable: Any] {
         var userInfo: [AnyHashable: Any] = [
             draftIdentityUserInfoKey: draft.identity,
             draftSendBehaviorUserInfoKey: sendBehavior.rawValue
         ]
-        if suppressForegroundPresentation {
-            userInfo[suppressForegroundPresentationUserInfoKey] = true
+        if suppressPresentation {
+            userInfo[suppressPresentationUserInfoKey] = true
         }
         return userInfo
     }
 
-    nonisolated static func suppressesForegroundPresentation(userInfo: [AnyHashable: Any]) -> Bool {
-        userInfo[suppressForegroundPresentationUserInfoKey] as? Bool == true
+    nonisolated static func suppressesPresentation(userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo[suppressPresentationUserInfoKey] as? Bool == true
     }
 
     static func action(for actionIdentifier: String, userInfo: [AnyHashable: Any]) -> DraftNotificationAction {
@@ -266,7 +281,7 @@ extension UserNotificationService: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        if Self.suppressesForegroundPresentation(userInfo: notification.request.content.userInfo) {
+        if Self.suppressesPresentation(userInfo: notification.request.content.userInfo) {
             completionHandler([])
         } else {
             completionHandler([.banner, .sound])

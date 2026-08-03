@@ -93,6 +93,23 @@ struct ActivityEvent: Codable, Identifiable, Equatable {
         guard let subject, !subject.isEmpty else { return "(no subject)" }
         return subject
     }
+
+    /// The free-form detail currently rendered in the activity-history row.
+    var activityHistoryVisibleDetail: String? {
+        guard let detail else { return nil }
+        return kind.showsFailureDetail || kind.showsSuccessDetail ? detail : nil
+    }
+
+    /// The explicit accessibility label installed by the activity-history row.
+    var activityHistoryAccessibilityLabel: String {
+        var parts = [kind.headline]
+        if let reason = reasonHeadline { parts.append(reason) }
+        parts.append(senderDisplay)
+        parts.append(subjectDisplay)
+        if let detail = activityHistoryVisibleDetail { parts.append(detail) }
+        parts.append(timestamp.formatted(date: .abbreviated, time: .shortened))
+        return parts.joined(separator: ", ")
+    }
 }
 
 /// The kinds of activity the assistant records. These map one-to-one to streams

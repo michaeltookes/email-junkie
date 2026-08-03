@@ -8,6 +8,8 @@ private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Noti
 private let draftIdentityUserInfoKey = "draftIdentity"
 /// `userInfo` key carrying the send behavior displayed on the notification.
 private let draftSendBehaviorUserInfoKey = "sendBehavior"
+/// `userInfo` key used when replacing notification copy from foreground edits.
+private let suppressForegroundPresentationUserInfoKey = "suppressForegroundPresentation"
 
 /// An action the user took on a draft-ready notification.
 enum DraftNotificationAction: Equatable {
@@ -35,6 +37,9 @@ protocol DraftNotifying: AnyObject {
     /// Posts a notification announcing `draft`; `sendBehavior` tailors the copy.
     func notify(for draft: Draft, sendBehavior: SendBehavior)
 
+    /// Replaces the notification copy for `draft` without showing a new banner.
+    func refreshNotification(for draft: Draft, sendBehavior: SendBehavior)
+
     /// Removes any delivered/pending notification for the given draft identity.
     func removeNotification(identity: String)
 }
@@ -48,6 +53,7 @@ final class NullDraftNotifier: DraftNotifying {
     nonisolated init() {}
     func requestAuthorization() {}
     func notify(for draft: Draft, sendBehavior: SendBehavior) {}
+    func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {}
     func removeNotification(identity: String) {}
 }
 
@@ -84,6 +90,18 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     func notify(for draft: Draft, sendBehavior: SendBehavior) {
+        postNotification(for: draft, sendBehavior: sendBehavior, suppressForegroundPresentation: false)
+    }
+
+    func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {
+        postNotification(for: draft, sendBehavior: sendBehavior, suppressForegroundPresentation: true)
+    }
+
+    private func postNotification(
+        for draft: Draft,
+        sendBehavior: SendBehavior,
+        suppressForegroundPresentation: Bool
+    ) {
         let content = UNMutableNotificationContent()
         let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
         if let needsInfo = draft.needsInfo {
@@ -97,7 +115,11 @@ final class UserNotificationService: NSObject, DraftNotifying {
             content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
             content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
         }
-        content.userInfo = Self.notificationUserInfo(for: draft, sendBehavior: sendBehavior)
+        content.userInfo = Self.notificationUserInfo(
+            for: draft,
+            sendBehavior: sendBehavior,
+            suppressForegroundPresentation: suppressForegroundPresentation
+        )
         content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
 
         let request = UNNotificationRequest(
@@ -200,11 +222,23 @@ final class UserNotificationService: NSObject, DraftNotifying {
         "\(approvalNotice(for: sendBehavior)). \(snippet(replyBody))"
     }
 
-    static func notificationUserInfo(for draft: Draft, sendBehavior: SendBehavior) -> [AnyHashable: Any] {
-        [
+    static func notificationUserInfo(
+        for draft: Draft,
+        sendBehavior: SendBehavior,
+        suppressForegroundPresentation: Bool = false
+    ) -> [AnyHashable: Any] {
+        var userInfo: [AnyHashable: Any] = [
             draftIdentityUserInfoKey: draft.identity,
             draftSendBehaviorUserInfoKey: sendBehavior.rawValue
         ]
+        if suppressForegroundPresentation {
+            userInfo[suppressForegroundPresentationUserInfoKey] = true
+        }
+        return userInfo
+    }
+
+    nonisolated static func suppressesForegroundPresentation(userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo[suppressForegroundPresentationUserInfoKey] as? Bool == true
     }
 
     static func action(for actionIdentifier: String, userInfo: [AnyHashable: Any]) -> DraftNotificationAction {
@@ -232,7 +266,11 @@ extension UserNotificationService: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        if Self.suppressesForegroundPresentation(userInfo: notification.request.content.userInfo) {
+            completionHandler([])
+        } else {
+            completionHandler([.banner, .sound])
+        }
     }
 
     nonisolated func userNotificationCenter(

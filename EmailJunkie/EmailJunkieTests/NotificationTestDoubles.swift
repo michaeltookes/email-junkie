@@ -8,6 +8,7 @@ final class FakeDraftNotifier: DraftNotifying {
     var onAction: ((DraftNotificationAction, String) async -> Void)?
     private(set) var authorizationRequested = false
     private(set) var notifiedDrafts: [Draft] = []
+    private(set) var refreshedDrafts: [Draft] = []
     private(set) var removedIdentities: [String] = []
 
     nonisolated init() {}
@@ -16,6 +17,10 @@ final class FakeDraftNotifier: DraftNotifying {
 
     func notify(for draft: Draft, sendBehavior: SendBehavior) {
         notifiedDrafts.append(draft)
+    }
+
+    func refreshNotification(for draft: Draft, sendBehavior: SendBehavior) {
+        refreshedDrafts.append(draft)
     }
 
     func removeNotification(identity: String) {

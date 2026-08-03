@@ -192,14 +192,15 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         XCTAssertEqual(relaunched.pendingDrafts.first?.originalBody, "Generated.")
     }
 
-    func testEditPersistenceRefreshesNotificationCopy() {
+    func testEditPersistenceRefreshesNotificationCopyQuietly() {
         let draft = pendingDraft(body: "Generated.")
         let notifier = FakeDraftNotifier()
         let (appState, _, _) = makeAppState(notifier: notifier, seed: [draft])
 
         appState.updatePendingDraftBody(draft, to: "Edited.")
 
-        XCTAssertEqual(notifier.notifiedDrafts.map(\.body), ["Edited."])
+        XCTAssertTrue(notifier.notifiedDrafts.isEmpty)
+        XCTAssertEqual(notifier.refreshedDrafts.map(\.body), ["Edited."])
     }
 
     func testUpdatePendingDraftBodyIsNoOpWhenUnchanged() {

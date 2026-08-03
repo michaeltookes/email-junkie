@@ -7,6 +7,24 @@ import XCTest
 @MainActor
 final class NotificationServiceTests: XCTestCase {
 
+    private func pendingDraft() -> Draft {
+        Draft(
+            id: 7,
+            sourceUIDValidity: 10,
+            sourceAccountEmail: "me@gmail.com",
+            sourceMailbox: "INBOX",
+            sourceSubject: "Lunch?",
+            sourceFrom: nil,
+            sourceReplyTo: nil,
+            sourceMessageID: "<orig@example.com>",
+            incomingBody: "Are you free Thursday?",
+            replySubject: "Re: Lunch?",
+            body: "Thursday works!",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+    }
+
     func testFlaggedNotificationOffersNoApproveAction() {
         let actions = UserNotificationService.needsInputActions()
         XCTAssertFalse(
@@ -19,5 +37,20 @@ final class NotificationServiceTests: XCTestCase {
     func testReadyDraftNotificationStillOffersApprove() {
         let actions = UserNotificationService.draftActions(for: .autoSend)
         XCTAssertTrue(actions.contains { $0.identifier == UserNotificationService.approveActionIdentifier })
+    }
+
+    func testRefreshUserInfoSuppressesForegroundPresentation() {
+        let normal = UserNotificationService.notificationUserInfo(
+            for: pendingDraft(),
+            sendBehavior: .autoSend
+        )
+        XCTAssertFalse(UserNotificationService.suppressesForegroundPresentation(userInfo: normal))
+
+        let refresh = UserNotificationService.notificationUserInfo(
+            for: pendingDraft(),
+            sendBehavior: .autoSend,
+            suppressForegroundPresentation: true
+        )
+        XCTAssertTrue(UserNotificationService.suppressesForegroundPresentation(userInfo: refresh))
     }
 }

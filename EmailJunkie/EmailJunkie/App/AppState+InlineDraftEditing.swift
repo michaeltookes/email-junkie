@@ -35,7 +35,7 @@ extension AppState {
             return nil
         }
         pendingDraftUncommittedEditIDs.remove(draft.identity)
-        notifier.notify(for: pendingDrafts[index], sendBehavior: sendBehavior)
+        notifier.refreshNotification(for: pendingDrafts[index], sendBehavior: sendBehavior)
         return pendingDrafts[index]
     }
 

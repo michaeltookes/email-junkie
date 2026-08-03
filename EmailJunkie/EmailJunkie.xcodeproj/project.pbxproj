@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		CC0000000000000000000003 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000002 /* EmailJunkieMail */; };
 		CC0000000000000000000004 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* EmailJunkieMail */; };
+		DD0000000000000000000003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +46,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CC0000000000000000000003 /* EmailJunkieMail in Frameworks */,
+				DD0000000000000000000003 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,6 +100,7 @@
 			name = EmailJunkie;
 			packageProductDependencies = (
 				CC0000000000000000000002 /* EmailJunkieMail */,
+				DD0000000000000000000002 /* Sparkle */,
 			);
 			productName = EmailJunkie;
 			productReference = AA00000000000000000000A0 /* EmailJunkie.app */;
@@ -158,6 +161,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */,
+				DD0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000003 /* Products */;
@@ -177,6 +181,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		DD0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		CC0000000000000000000002 /* EmailJunkieMail */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -187,6 +202,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
 			productName = EmailJunkieMail;
+		};
+		DD0000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 

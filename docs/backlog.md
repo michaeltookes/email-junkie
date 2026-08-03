@@ -44,13 +44,17 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ **Save-as-draft live-verified end-to-end against real Gmail (2026-07-19):** an approved reply appeared in Gmail → Drafts, correctly addressed and threaded under the original message.
    - ⬜ **Remaining (deferred by user for a later, self-addressed test):** live-verify the **auto-send (SMTP)** path against real Gmail, and exercise the watcher → notification → approve path with a real watcher-produced draft (item 8) once a fresh message arrives.
 
-11. **Distribution: signed DMG + Sparkle + Homebrew cask**
+11. **Distribution: signed DMG + Sparkle + Homebrew cask** — *scaffolding built (branch `distribution-pipeline`); live signed release remaining*
     Reuse the Prompter shipping pipeline.
+    > **Scaffolding landed 2026-08-03 (branch `distribution-pipeline`):** the code/asset half is in the repo — branded app icon, DMG assets, a credential-parameterized release pipeline with a proven unsigned dry-run, Sparkle wiring (placeholder key), the cask template, and the release runbook. The ⬜ items below can only be met by an actual signed release using the user's Developer ID cert, notarytool profile, and a real EdDSA keypair — done later via the release-prep skill (see [`releasing.md`](./releasing.md)). CI automation of this pipeline is item 29.
     *As Priya, I want to install via DMG or Homebrew and get automatic updates, so that setup and upkeep are frictionless and not scary.*
-    - Signed, notarized DMG installs without Gatekeeper "unidentified developer" warnings.
-    - Homebrew cask available in a tap.
-    - Sparkle auto-update works against a published appcast.
-    - Pipeline mirrors the Prompter release workflow.
+    - ✅ Branded app icon compiled into the app (AppIcon asset catalog, verified `CFBundleIconName`) and DMG background/icon masters vendored under `Distribution/`.
+    - ✅ Release pipeline `Distribution/scripts/release.sh` (archive → export → notarize → DMG → appcast → checksums), all credentials via env vars; unsigned `--dry-run` verified to build the branded DMG (volume "Email Junkie", drag-to-Applications, branded background, staged "Email Junkie.app", 0.1.0).
+    - ✅ Sparkle 2.x integrated as an SPM dependency and wired via `SPUStandardUpdaterController`; `SUFeedURL` + `SUEnableAutomaticChecks` set in Info.plist.
+    - ✅ Homebrew cask template `Distribution/email-junkie.rb` (house style) and full release runbook `docs/releasing.md`.
+    - ⬜ Signed, notarized DMG installs without Gatekeeper "unidentified developer" warnings — needs the Developer ID cert + notarytool profile at release time.
+    - ⬜ Homebrew cask published live in the tap with the real DMG `sha256`.
+    - ⬜ Sparkle auto-update verified against a published appcast — needs the real EdDSA keypair (replace the placeholder `SUPublicEDKey`).
 
 44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
     Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).

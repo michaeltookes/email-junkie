@@ -241,7 +241,7 @@ extension AppState {
                 return
             }
             await approveDraft(draft, sendBehavior: sendBehavior, surfaceDelayedBlocks: true)
-            if pendingStaleWarnings[identity] != nil {
+            if pendingSendCountdowns[identity] != nil || pendingStaleWarnings[identity] != nil {
                 openReviewHandler?()
             }
         case .deny:

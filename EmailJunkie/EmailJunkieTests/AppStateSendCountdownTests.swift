@@ -346,12 +346,15 @@ final class AppStateSendCountdownTests: XCTestCase {
         appState.pendingDrafts = [draft]
         appState.pendingDraftCount = 1
         appState.sendCountdownTickNanoseconds = 1_000_000_000
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
 
         await notifier.fireAction(.approve(.autoSend), identity: draft.identity)
 
         XCTAssertEqual(appState.pendingSendCountdowns[draft.identity], 5)
         XCTAssertEqual(provider.sendCallCount, 0)
         XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertTrue(openedReview)
 
         appState.cancelAllSendCountdowns()
     }

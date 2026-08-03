@@ -55,7 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Flush any pending settings to disk before quitting.
+        // Flush any pending edits/settings to disk before quitting.
+        appState.flushPendingDraftBodyEdits()
         appState.saveSettingsSync()
         logger.info("Email Junkie terminating")
     }

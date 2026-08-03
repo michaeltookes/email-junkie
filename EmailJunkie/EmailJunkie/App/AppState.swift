@@ -146,6 +146,7 @@ final class AppState: ObservableObject {
     /// Identities of pending drafts currently being approved (send/save in flight).
     @Published var approvingDraftIDs: Set<String> = []
     var pendingDraftUncommittedEditIDs: Set<String> = []
+    var pendingDraftUncommittedEditBodies: [String: String] = [:]
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 

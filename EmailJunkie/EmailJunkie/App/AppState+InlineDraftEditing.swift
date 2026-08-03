@@ -15,11 +15,11 @@ extension AppState {
     @discardableResult
     func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft? {
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
-            pendingDraftUncommittedEditIDs.remove(draft.identity)
+            clearPendingDraftBodyEdit(identity: draft.identity)
             return nil
         }
         guard pendingDrafts[index].body != newBody else {
-            pendingDraftUncommittedEditIDs.remove(draft.identity)
+            clearPendingDraftBodyEdit(identity: draft.identity)
             return pendingDrafts[index]
         }
 
@@ -30,11 +30,12 @@ extension AppState {
         } catch {
             pendingDrafts[index] = previous
             pendingDraftUncommittedEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditBodies[draft.identity] = newBody
             inlineDraftEditingLogger.error("Failed to persist edited pending draft: \(error.localizedDescription)")
             approvalError = Self.draftMessage(for: error)
             return nil
         }
-        pendingDraftUncommittedEditIDs.remove(draft.identity)
+        clearPendingDraftBodyEdit(identity: draft.identity)
         notifier.refreshNotification(for: pendingDrafts[index], sendBehavior: sendBehavior)
         return pendingDrafts[index]
     }
@@ -43,14 +44,34 @@ extension AppState {
     /// persisted. Notification approvals check this before dispatching.
     func notePendingDraftBodyEdit(_ draft: Draft, editedBody: String) {
         guard let queued = pendingDrafts.first(where: { $0.identity == draft.identity }) else {
-            pendingDraftUncommittedEditIDs.remove(draft.identity)
+            clearPendingDraftBodyEdit(identity: draft.identity)
             return
         }
         if queued.body == editedBody {
-            pendingDraftUncommittedEditIDs.remove(draft.identity)
+            clearPendingDraftBodyEdit(identity: draft.identity)
         } else {
             pendingDraftUncommittedEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditBodies[draft.identity] = editedBody
         }
+    }
+
+    /// Persists any inline editor text already registered with the debounce
+    /// guard. Used during application termination when SwiftUI may not run
+    /// `onDisappear` before the process exits.
+    func flushPendingDraftBodyEdits() {
+        let edits = pendingDraftUncommittedEditBodies
+        for (identity, editedBody) in edits {
+            guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else {
+                clearPendingDraftBodyEdit(identity: identity)
+                continue
+            }
+            updatePendingDraftBody(draft, to: editedBody)
+        }
+    }
+
+    func clearPendingDraftBodyEdit(identity: String) {
+        pendingDraftUncommittedEditIDs.remove(identity)
+        pendingDraftUncommittedEditBodies.removeValue(forKey: identity)
     }
 
     /// Applies the current inline editor contents before dispatching. Approval

@@ -282,6 +282,33 @@ final class AppStateInlineDraftEditingTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
+    func testFlushPendingDraftBodyEditsPersistsQueuedEdit() {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+        appState.notePendingDraftBodyEdit(draft, editedBody: "Edited before quit.")
+
+        appState.flushPendingDraftBodyEdits()
+
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Edited before quit.")
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.body, "Edited before quit.")
+        XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNil(appState.pendingDraftUncommittedEditBodies[draft.identity])
+    }
+
+    func testFlushPendingDraftBodyEditsKeepsQueuedEditOnFailure() {
+        let draft = pendingDraft(body: "Generated.")
+        let (appState, _, persistence) = makeAppState(seed: [draft])
+        appState.notePendingDraftBodyEdit(draft, editedBody: "Edited before quit.")
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        appState.flushPendingDraftBodyEdits()
+
+        XCTAssertEqual(appState.pendingDrafts.first?.body, "Generated.")
+        XCTAssertEqual(appState.pendingDraftUncommittedEditBodies[draft.identity], "Edited before quit.")
+        XCTAssertTrue(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNotNil(appState.approvalError)
+    }
+
     // MARK: - Stale checks still run on edited drafts
 
     func testStaleThreadCheckStillEnforcedAfterEdit() async {

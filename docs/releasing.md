@@ -111,7 +111,10 @@ What `release.sh` does, step by step:
 
 1. **Archive** the `EmailJunkie` scheme in Release, stamping the version/build.
 2. **Export** a Developer-ID-signed `.app` (hardened runtime, secure timestamp)
-   via a generated `ExportOptions.plist`.
+   via a generated `ExportOptions.plist`. It then **hard-aborts if the built
+   app's `SUPublicEDKey` is still the placeholder** (or empty), so a signed
+   release can never ship with auto-update silently broken — generate the real
+   key (prerequisite 3) and update `Info.plist` first.
 3. **Stage** the app as `Email Junkie.app` so the DMG icon label reads as the
    brand name.
 4. **Build the DMG** with the branded background (`make-dmg.sh`, fixed geometry).

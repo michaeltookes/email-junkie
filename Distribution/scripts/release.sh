@@ -63,6 +63,13 @@ EXPORT_DIR="$OUT/export"
 STAGE_DIR="$OUT/stage"
 DMG="$OUT/EmailJunkie-$VERSION.dmg"
 
+# The all-zero SUPublicEDKey placeholder shipped in Info.plist until a real
+# EdDSA keypair is generated at release time. Shipping a signed build with this
+# key silently breaks auto-update (the app would verify against a degenerate
+# zero key while generate_appcast signs with the real private key), so the
+# signed path hard-aborts if the built app still carries it.
+PLACEHOLDER_EDKEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 step "Email Junkie release  (version $VERSION, build $BUILD, dry-run=$DRY_RUN)"
 rm -rf "$ARCHIVE" "$EXPORT_DIR" "$STAGE_DIR"
 mkdir -p "$OUT"
@@ -115,6 +122,26 @@ PLIST
     -archivePath "$ARCHIVE" \
     -exportOptionsPlist "$OUT/ExportOptions.plist" \
     -exportPath "$EXPORT_DIR"
+fi
+
+# ---- 2b. guard the update-signing key --------------------------------------
+# Validate what actually SHIPS (the built app's merged Info.plist), not the
+# source plist. A signed release with the placeholder key would install fine
+# but never accept an update, so this is a hard stop for real releases.
+built_edkey="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' \
+  "$EXPORT_DIR/EmailJunkie.app/Contents/Info.plist" 2>/dev/null || true)"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  if [[ "$built_edkey" == "$PLACEHOLDER_EDKEY" || -z "$built_edkey" ]]; then
+    log "NOTE: SUPublicEDKey is the placeholder — expected for a dry run; a real signed release would abort here."
+  fi
+else
+  if [[ -z "$built_edkey" || "$built_edkey" == "$PLACEHOLDER_EDKEY" ]]; then
+    echo "release: SUPublicEDKey is still the placeholder (or empty/missing) in the built app." >&2
+    echo "         Run Sparkle's generate_keys and paste the real public key into" >&2
+    echo "         EmailJunkie/Info.plist, then rebuild. See docs/releasing.md." >&2
+    exit 1
+  fi
+  log "SUPublicEDKey verified present (non-placeholder)"
 fi
 
 # ---- 3. stage under the branded name ---------------------------------------

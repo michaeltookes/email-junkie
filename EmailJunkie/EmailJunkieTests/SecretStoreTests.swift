@@ -60,4 +60,34 @@ final class SecretStoreTests: XCTestCase {
             SecretKey.llmAPIKey(provider: "openai")
         )
     }
+
+    func testMailAppPasswordIsAccountScopedAndNormalized() {
+        XCTAssertEqual(
+            SecretKey.mailAppPassword(email: "me@gmail.com").rawValue,
+            "mail.appPassword.me@gmail.com"
+        )
+        // Casing/whitespace normalize to one identity so a re-typed email maps to
+        // the same Keychain item.
+        XCTAssertEqual(
+            SecretKey.mailAppPassword(email: "  Me@Gmail.com "),
+            SecretKey.mailAppPassword(email: "me@gmail.com")
+        )
+        XCTAssertNotEqual(
+            SecretKey.mailAppPassword(email: "me@gmail.com"),
+            SecretKey.mailAppPassword(email: "me@att.net")
+        )
+        // Per-account keys are distinct from the legacy shared slot.
+        XCTAssertNotEqual(SecretKey.mailAppPassword(email: "me@gmail.com"), .mailAppPassword)
+    }
+
+    func testPerAccountSecretsAreIsolated() throws {
+        let store = InMemorySecretStore()
+        try store.set("gmail-pw", for: .mailAppPassword(email: "me@gmail.com"))
+        try store.set("att-pw", for: .mailAppPassword(email: "me@att.net"))
+
+        // Removing one account's secret leaves the other untouched.
+        try store.remove(.mailAppPassword(email: "me@gmail.com"))
+        XCTAssertNil(try store.value(for: .mailAppPassword(email: "me@gmail.com")))
+        XCTAssertEqual(try store.value(for: .mailAppPassword(email: "me@att.net")), "att-pw")
+    }
 }

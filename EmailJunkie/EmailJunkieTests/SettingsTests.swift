@@ -128,8 +128,47 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsTen() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 10)
+    func testCurrentSchemaVersionIsEleven() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 11)
+    }
+
+    func testSavedAccountsSchemaVersionIsEleven() {
+        XCTAssertEqual(Settings.savedAccountsSchemaVersion, 11)
+    }
+
+    func testLegacyFileWithoutSavedAccountsDecodesToEmpty() throws {
+        // A pre-v11 file has no savedAccounts key; it must decode to an empty list.
+        let legacy = #"{"schemaVersion":10,"pollIntervalSeconds":300,"mailEmail":"me@x.com"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertTrue(decoded.savedAccounts.isEmpty)
+    }
+
+    func testSavedAccountsRoundTripThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            savedAccounts: [
+                SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993),
+                SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+            ]
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.savedAccounts, original.savedAccounts)
+    }
+
+    func testValidatedDedupesSavedAccountsByNormalizedEmail() {
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            savedAccounts: [
+                SavedMailAccount(email: "Me@Gmail.com", host: "imap.gmail.com", port: 993),
+                SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993),
+                SavedMailAccount(email: "  ", host: "imap.gmail.com", port: 993)
+            ]
+        ).validated()
+        XCTAssertEqual(settings.savedAccounts.map(\.email), ["Me@Gmail.com"])
     }
 
     func testLLMBaseURLSchemaVersionIsNine() {

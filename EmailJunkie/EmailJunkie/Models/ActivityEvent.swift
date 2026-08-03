@@ -112,6 +112,8 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
     case staleWarning
     /// Sending an approved draft failed.
     case sendFailed
+    /// Saving an approved draft to the Drafts mailbox failed (IMAP APPEND).
+    case saveFailed
 
     /// A short label for the event row.
     var headline: String {
@@ -123,6 +125,7 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .skipped: return "Skipped"
         case .staleWarning: return "Stale-thread warning"
         case .sendFailed: return "Send failed"
+        case .saveFailed: return "Save failed"
         }
     }
 
@@ -136,6 +139,7 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .skipped: return "nosign"
         case .staleWarning: return "exclamationmark.triangle"
         case .sendFailed: return "exclamationmark.octagon"
+        case .saveFailed: return "exclamationmark.octagon"
         }
     }
 }

@@ -46,7 +46,14 @@ struct Draft: Codable, Identifiable, Equatable {
     var replySubject: String
     /// The generated reply body. Empty when the draft is flagged as needing the
     /// user's input (`needsInfo` set) — there is no fabricated reply to send.
+    /// When the user edits the draft before approving (item 19), this holds the
+    /// edited text — it is what actually gets sent or saved.
     var body: String
+    /// The assistant's originally generated body, captured the first time the
+    /// user edits `body` (item 19). Retained so a later voice-tuning step
+    /// (items 20/34) can compare what was generated against what the user sent.
+    /// `nil` when the draft has never been edited.
+    var originalBody: String?
     /// The model that produced the draft.
     var model: String
     /// When the draft was generated.
@@ -59,6 +66,27 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Whether this draft is flagged as needing the user's input rather than
     /// carrying a ready-to-send reply.
     var isFlagged: Bool { needsInfo != nil }
+
+    /// Whether the user edited the reply body away from what the assistant
+    /// generated (item 19). True only when an original was captured and the
+    /// current body still differs from it.
+    var wasEdited: Bool {
+        guard let originalBody else { return false }
+        return originalBody != body
+    }
+
+    /// Applies a user edit to the reply body (item 19), capturing the assistant's
+    /// original body the first time it diverges so a later voice-tuning step can
+    /// learn from the difference. A no-op when the text is unchanged, so `body`
+    /// stays the edited text and `identity` is unaffected (identity excludes the
+    /// body — see `identity`).
+    mutating func applyEditedBody(_ newBody: String) {
+        guard newBody != body else { return }
+        if originalBody == nil {
+            originalBody = body
+        }
+        body = newBody
+    }
 
     init(
         id: UInt32,
@@ -74,6 +102,7 @@ struct Draft: Codable, Identifiable, Equatable {
         incomingBody: String? = nil,
         replySubject: String,
         body: String,
+        originalBody: String? = nil,
         model: String,
         generatedAt: Date,
         needsInfo: DraftNeedsInfo? = nil
@@ -91,6 +120,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.incomingBody = incomingBody
         self.replySubject = replySubject
         self.body = body
+        self.originalBody = originalBody
         self.model = model
         self.generatedAt = generatedAt
         self.needsInfo = needsInfo
@@ -98,6 +128,8 @@ struct Draft: Codable, Identifiable, Equatable {
 
     /// A stable identity across the pending queue and notifications, scoped by
     /// account/mailbox so the same UID in different mailboxes never collides.
+    /// Deliberately excludes `body`, so editing the reply (item 19) keeps the
+    /// draft's approval/stale-warning bookkeeping keys stable.
     var identity: String {
         let account = sourceAccountEmail ?? "?"
         let mailbox = sourceMailbox ?? "?"

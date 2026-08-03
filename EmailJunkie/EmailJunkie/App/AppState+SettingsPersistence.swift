@@ -24,6 +24,7 @@ extension AppState {
             mailHostGuidanceEmail: mailHostExplicitlyEditedEmail,
             mailHostGuidancePendingEmail: mailHostExplicitlyEditedBeforeEmail,
             mailPort: mailPort ?? self.mailPort,
+            savedAccounts: savedAccounts,
             llmProvider: llmProviderKind.rawValue,
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
             llmBaseURL: llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),

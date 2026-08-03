@@ -42,6 +42,11 @@ final class AppState: ObservableObject {
     var mailHostExplicitlyEditedEmail: String?
     var mailHostExplicitlyEditedBeforeEmail = false
 
+    /// Accounts the user has connected and can switch between without re-entering
+    /// credentials (item 48). The active account is the one whose email matches
+    /// `mailEmail`; each account's app password lives in its own Keychain item.
+    @Published var savedAccounts: [SavedMailAccount] = []
+
     // MARK: - Recent Messages (preview)
 
     /// The most recently fetched messages (envelope-level), newest first.
@@ -246,13 +251,22 @@ final class AppState: ObservableObject {
         self.llm = llm
         self.notifier = notifier
 
-        let settings = persistence.loadSettings()
+        // Migrate a pre-v11 file to the saved-accounts model before anything reads
+        // the mail secret, so the per-account key is populated (item 48). The
+        // original (pre-migration) settings drive the schema-version-sensitive
+        // guidance/onboarding checks below so those one-shot migrations still fire.
+        let loadedSettings = persistence.loadSettings()
+        let settings = Self.migratedSavedAccountsSettings(
+            loadedSettings,
+            secrets: secrets,
+            persistence: persistence
+        )
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.sendDelaySeconds = settings.sendDelaySeconds
         self.onboardingCompleted = settings.onboardingCompleted
         self.loadedSettingsPredateOnboardingCompletion =
-            settings.schemaVersion < Settings.onboardingCompletionSchemaVersion
+            loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
         let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
         let loadedPendingDrafts = persistence.loadPendingDrafts()
@@ -270,9 +284,12 @@ final class AppState: ObservableObject {
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
         self.mailPort = settings.mailPort
+        self.savedAccounts = settings.savedAccounts
         self.mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         self.mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
-        self.mailAppPassword = ((try? secrets.value(for: .mailAppPassword)) ?? nil) ?? ""
+        let activeEmail = settings.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activePassword = Self.storedMailPassword(forEmail: activeEmail, secrets: secrets) ?? ""
+        self.mailAppPassword = activePassword
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
@@ -285,8 +302,8 @@ final class AppState: ObservableObject {
         self.voiceProfile = persistence.loadVoiceProfile()
 
         cleanupLegacyOAuthCredentials()
-        self.isAccountConnected = !settings.mailEmail.isEmpty && secrets.hasValue(for: .mailAppPassword)
-        restoreMailHostGuidanceFromSettings(settings)
+        self.isAccountConnected = !settings.mailEmail.isEmpty && !activePassword.isEmpty
+        restoreMailHostGuidanceFromSettings(loadedSettings)
         refreshLLMConnectionStatus()
 
         setupAutoSave()
@@ -337,16 +354,19 @@ final class AppState: ObservableObject {
         let previousSettings = persistence.loadSettings()
         let accountChanged = !isAccountConnected
             || previousSettings.mailEmail.caseInsensitiveCompare(credentials.email) != .orderedSame
+        // Per-account key (item 48): writing a second account never overwrites the
+        // first account's secret, so switching back to it later needs no re-entry.
+        let accountKey = SecretKey.mailAppPassword(email: credentials.email)
         let previousAppPassword: String?
         do {
-            previousAppPassword = try secrets.value(for: .mailAppPassword)
+            previousAppPassword = try secrets.value(for: accountKey)
         } catch {
             connectionError = Self.keychainMessage(action: "read", error: error)
             return
         }
 
         do {
-            try secrets.set(credentials.appPassword, for: .mailAppPassword)
+            try secrets.set(credentials.appPassword, for: accountKey)
         } catch {
             connectionError = Self.keychainMessage(action: "save", error: error)
             return
@@ -355,8 +375,8 @@ final class AppState: ObservableObject {
         do {
             try persistVerifiedConnection(credentials)
         } catch {
-            let rollbackError = rollbackMailAppPassword(to: previousAppPassword)
-            restoreConnectionSnapshot(settings: previousSettings, appPassword: previousAppPassword)
+            let rollbackError = rollbackMailAppPassword(to: previousAppPassword, for: accountKey)
+            restoreConnectionSnapshot(settings: previousSettings)
             var message = Self.settingsMessage(action: "save", error: error)
             if let rollbackError {
                 message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
@@ -384,8 +404,18 @@ final class AppState: ObservableObject {
             return
         }
 
+        // Remove the active account's secret so the app stays disconnected across
+        // relaunch. The legacy shared slot is removed first (it is the one older
+        // installs and test fixtures store under) so a failure there leaves the
+        // per-account secret untouched. Other saved accounts' secrets are never
+        // touched — only switching preserves credentials; disconnect forgets this
+        // account's password.
+        let activeEmail = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             try secrets.remove(.mailAppPassword)
+            if !activeEmail.isEmpty {
+                try secrets.remove(.mailAppPassword(email: activeEmail))
+            }
         } catch {
             connectionError = Self.keychainMessage(action: "remove", error: error)
             return
@@ -447,6 +477,8 @@ final class AppState: ObservableObject {
         mailPort = credentials.port
         mailAppPassword = credentials.appPassword
         markMailHostVerifiedForGuidance()
+        // Remember this account so it can be switched back to without re-entry.
+        upsertSavedAccount(email: credentials.email, host: credentials.host, port: credentials.port)
 
         try persistSettingsSync(buildSettings(
             mailEmail: credentials.email,
@@ -455,12 +487,12 @@ final class AppState: ObservableObject {
         ))
     }
 
-    private func rollbackMailAppPassword(to previousAppPassword: String?) -> Error? {
+    private func rollbackMailAppPassword(to previousAppPassword: String?, for key: SecretKey) -> Error? {
         do {
             if let previousAppPassword {
-                try secrets.set(previousAppPassword, for: .mailAppPassword)
+                try secrets.set(previousAppPassword, for: key)
             } else {
-                try secrets.remove(.mailAppPassword)
+                try secrets.remove(key)
             }
             return nil
         } catch {
@@ -469,14 +501,19 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func restoreConnectionSnapshot(settings: Settings, appPassword: String?) {
+    private func restoreConnectionSnapshot(settings: Settings) {
         mailEmail = settings.mailEmail
         mailHost = settings.mailHost
         mailPort = settings.mailPort
+        savedAccounts = settings.savedAccounts
         mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
-        mailAppPassword = appPassword ?? ""
-        isAccountConnected = !settings.mailEmail.isEmpty && !(appPassword ?? "").isEmpty
+        // Per-account keys are isolated, so the previously-active account's secret
+        // was never touched by the failed connect — re-read it honestly.
+        let previousEmail = settings.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previousPassword = storedMailPassword(forEmail: previousEmail) ?? ""
+        mailAppPassword = previousPassword
+        isAccountConnected = !previousEmail.isEmpty && !previousPassword.isEmpty
         restoreMailHostGuidanceFromSettings(settings)
     }
 

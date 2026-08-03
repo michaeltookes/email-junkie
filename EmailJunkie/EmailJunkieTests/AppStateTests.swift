@@ -32,7 +32,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(appState.isAccountConnected)
         XCTAssertFalse(appState.isConnecting)
         XCTAssertNil(appState.connectionError)
-        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "app-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: "me@gmail.com")), "app-pw")
         XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
     }
 
@@ -82,14 +82,14 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(settings.mailEmail, "me@gmail.com")
         XCTAssertEqual(settings.mailHost, "imap.gmail.com")
         XCTAssertEqual(settings.mailPort, 993)
-        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "verified-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: "me@gmail.com")), "verified-pw")
         XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
         XCTAssertEqual(provider.lastCredentials?.appPassword, "verified-pw")
     }
 
     func testTestConnectionDoesNotConnectWhenPasswordSaveFails() async {
         let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "old-pw"])
-        secrets.failOnSet = .mailAppPassword
+        secrets.failOnSet = .mailAppPassword(email: "me@gmail.com")
         let provider = FakeAppMailProvider(result: .success(()))
         let appState = makeAppState(provider: provider, secrets: secrets)
         appState.mailEmail = "me@gmail.com"
@@ -99,7 +99,7 @@ final class AppStateTests: XCTestCase {
 
         XCTAssertFalse(appState.isAccountConnected)
         XCTAssertFalse(appState.isConnecting)
-        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "old-pw")
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword(email: "me@gmail.com"))) ?? nil)
         XCTAssertEqual(provider.lastCredentials?.appPassword, "new-pw")
         XCTAssertEqual(
             appState.connectionError,

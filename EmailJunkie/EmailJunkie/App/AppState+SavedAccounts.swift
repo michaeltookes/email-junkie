@@ -18,6 +18,7 @@ extension AppState {
     static func storedMailPassword(
         forEmail email: String,
         savedAccounts: [SavedMailAccount],
+        activeEmail: String? = nil,
         secrets: SecretStore
     ) -> String? {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,7 +34,11 @@ extension AppState {
         // test fixture that seeded the old shared slot. The shared slot can only
         // belong to the migrated original saved account, so do not hand it to
         // another account that happens to be missing its per-account key.
-        guard (try? legacyMailPasswordOwnerID(savedAccounts: savedAccounts, secrets: secrets)) == normalized,
+        guard (try? legacyMailPasswordOwnerID(
+            savedAccounts: savedAccounts,
+            activeEmail: activeEmail,
+            secrets: secrets
+        )) == normalized,
               let legacy = (try? secrets.value(for: .mailAppPassword)) ?? nil,
               !legacy.isEmpty else {
             return nil
@@ -42,26 +47,45 @@ extension AppState {
     }
 
     static func storedMailPassword(forEmail email: String, settings: Settings, secrets: SecretStore) -> String? {
-        storedMailPassword(forEmail: email, savedAccounts: settings.savedAccounts, secrets: secrets)
+        storedMailPassword(
+            forEmail: email,
+            savedAccounts: settings.savedAccounts,
+            activeEmail: settings.mailEmail,
+            secrets: secrets
+        )
     }
 
     private static func legacyMailPasswordOwnerID(
         savedAccounts: [SavedMailAccount],
+        activeEmail: String?,
         secrets: SecretStore
     ) throws -> String? {
         guard let legacy = try secrets.value(for: .mailAppPassword), !legacy.isEmpty else {
             return nil
         }
-        guard let migratedAccount = savedAccounts.first else { return nil }
-        let migratedPassword = try secrets.value(for: .mailAppPassword(email: migratedAccount.email))
-        if migratedPassword?.isEmpty != false {
-            return migratedAccount.id
+        if let migratedAccount = savedAccounts.first {
+            let migratedPassword = try secrets.value(for: .mailAppPassword(email: migratedAccount.email))
+            if migratedPassword?.isEmpty != false {
+                return migratedAccount.id
+            }
+            return nil
+        }
+
+        let normalizedActiveEmail = SavedMailAccount.normalizedEmail(activeEmail ?? "")
+        guard !normalizedActiveEmail.isEmpty else { return nil }
+        let activePassword = try secrets.value(for: .mailAppPassword(email: normalizedActiveEmail))
+        if activePassword?.isEmpty != false {
+            return normalizedActiveEmail
         }
         return nil
     }
 
     private func legacyMailPasswordOwnerID() throws -> String? {
-        try Self.legacyMailPasswordOwnerID(savedAccounts: savedAccounts, secrets: secrets)
+        try Self.legacyMailPasswordOwnerID(
+            savedAccounts: savedAccounts,
+            activeEmail: mailEmail,
+            secrets: secrets
+        )
     }
 
     private func legacyMailPasswordForOwnedAccount(_ email: String) throws -> String? {
@@ -75,7 +99,12 @@ extension AppState {
 
     /// Instance convenience over `storedMailPassword(forEmail:savedAccounts:secrets:)`.
     func storedMailPassword(forEmail email: String) -> String? {
-        Self.storedMailPassword(forEmail: email, savedAccounts: savedAccounts, secrets: secrets)
+        Self.storedMailPassword(
+            forEmail: email,
+            savedAccounts: savedAccounts,
+            activeEmail: mailEmail,
+            secrets: secrets
+        )
     }
 
     /// Removes the active account's password for disconnect. The legacy shared

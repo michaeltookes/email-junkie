@@ -280,7 +280,8 @@ extension AppState {
             connectionError = "Wait for the current connection test to finish before removing an account."
             return
         }
-        let wasActive = isActiveAccount(account)
+        let wasCurrentAccount = SavedMailAccount.normalizedEmail(mailEmail) == account.id
+        let shouldClearCurrentAccount = isActiveAccount(account) || wasCurrentAccount
         let accountKey = SecretKey.mailAppPassword(email: account.email)
         let previousAccountPassword: String?
         let previousLegacyPassword: String?
@@ -296,8 +297,8 @@ extension AppState {
             return
         }
 
-        var nextSettings = buildSettings(mailEmail: wasActive ? "" : nil)
-        if wasActive {
+        var nextSettings = buildSettings(mailEmail: shouldClearCurrentAccount ? "" : nil)
+        if shouldClearCurrentAccount {
             nextSettings.mailHost = Settings.default.mailHost
             nextSettings.mailPort = Settings.default.mailPort
             nextSettings.mailHostGuidanceEmail = nil
@@ -335,7 +336,7 @@ extension AppState {
 
         savedAccounts = nextSettings.savedAccounts
 
-        if wasActive {
+        if shouldClearCurrentAccount {
             goOfflineAfterRemovingActiveAccount()
         }
         logger.info("Saved account removed")

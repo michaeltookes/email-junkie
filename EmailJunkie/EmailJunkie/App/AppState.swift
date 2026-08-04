@@ -414,6 +414,10 @@ final class AppState: ObservableObject {
     /// Disconnects the mailbox by clearing the stored app password.
     func disconnectMail() {
         connectionError = nil
+        guard !isConnecting else {
+            logger.info("Disconnect skipped while a connection test is running")
+            return
+        }
         do {
             try removeLegacyOAuthCredentialsIfPresent()
         } catch {

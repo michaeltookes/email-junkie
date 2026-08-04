@@ -93,6 +93,44 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(savedSettings.mailPort, att.port)
     }
 
+    func testDisconnectDuringPendingSwitchDoesNotRemoveOutgoingAccountCredentials() async {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "gmail-pw",
+            .mailAppPassword(email: att.email): "att-pw"
+        ])
+        let provider = SuspendedAppMailProvider()
+        let (app, _) = makeAppState(settings: settings, secrets: secrets, provider: provider)
+
+        let switchTask = Task { await app.switchToSavedAccount(gmail) }
+        await fulfillment(of: [provider.didStartVerification], timeout: 1)
+
+        app.disconnectMail()
+
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, att.email)
+        XCTAssertEqual(app.mailAppPassword, "att-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: att.email)), "att-pw")
+        XCTAssertNil(app.connectionError)
+
+        provider.complete(with: .success(()))
+        await switchTask.value
+
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, gmail.email)
+        XCTAssertEqual(app.mailAppPassword, "gmail-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: att.email)), "att-pw")
+    }
+
     func testLegacyPasswordLookupNormalizesSavedAccountEmail() {
         let gmail = SavedMailAccount(email: "Me@Gmail.com", host: "imap.gmail.com", port: 993)
         let settings = Settings(
@@ -148,6 +186,42 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         app.updateMailEmailFromUser("me@yahoo.com")
 
         XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+    }
+
+    func testRemovingDisconnectedCurrentAccountClearsFormAndHostGuidance() {
+        let account = SavedMailAccount(email: "me@company.example", host: "imap.company.example", port: 1993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: account.email,
+            mailHost: account.host,
+            mailHostGuidanceEmail: account.email,
+            mailHostGuidancePendingEmail: true,
+            mailPort: account.port,
+            savedAccounts: [account]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: account.email): "company-pw"
+        ])
+        let (app, persistence) = makeAppState(settings: settings, secrets: secrets)
+        app.disconnectMail()
+
+        app.removeSavedAccount(account)
+
+        let savedSettings = persistence.loadSettings()
+        XCTAssertNil(app.connectionError)
+        XCTAssertFalse(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, "")
+        XCTAssertEqual(app.mailHost, Settings.default.mailHost)
+        XCTAssertEqual(app.mailPort, Settings.default.mailPort)
+        XCTAssertNil(app.buildSettings().mailHostGuidanceEmail)
+        XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
+        XCTAssertEqual(savedSettings.mailEmail, "")
+        XCTAssertEqual(savedSettings.mailHost, Settings.default.mailHost)
+        XCTAssertEqual(savedSettings.mailPort, Settings.default.mailPort)
+        XCTAssertNil(savedSettings.mailHostGuidanceEmail)
+        XCTAssertFalse(savedSettings.mailHostGuidancePendingEmail)
+        XCTAssertEqual(app.savedAccounts, [])
     }
 
     func testRemoveActivePerAccountKeepsInactiveLegacyPassword() {

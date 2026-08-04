@@ -125,6 +125,7 @@ struct EmailAccountSettingsView: View {
                 Button("Disconnect", role: .destructive) {
                     appState.disconnectMail()
                 }
+                .disabled(appState.isConnecting)
                 .accessibilityLabel("Disconnect \(appState.mailEmail)")
 
                 Button {

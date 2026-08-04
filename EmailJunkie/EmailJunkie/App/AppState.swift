@@ -355,6 +355,7 @@ final class AppState: ObservableObject {
 
         isConnecting = true
         defer { isConnecting = false }
+        let wasWatching = watchStatus == .watching
 
         do {
             try await mailProvider.verifyConnection(credentials)
@@ -401,6 +402,10 @@ final class AppState: ObservableObject {
             // A different account invalidates any in-flight auto-send countdowns
             // (item 23); they must not fire against the newly connected account.
             cancelAllSendCountdowns()
+            if wasWatching {
+                stopWatching()
+                startWatchingIfReady()
+            }
         }
         resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
         logger.info("Mailbox connected")
@@ -416,22 +421,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Remove the active account's secret so the app stays disconnected across
-        // relaunch. The legacy shared slot is removed first (it is the one older
-        // installs and test fixtures store under) so a failure there leaves the
-        // per-account secret untouched. Other saved accounts' secrets are never
-        // touched — only switching preserves credentials; disconnect forgets this
-        // account's password.
-        let activeEmail = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            try secrets.remove(.mailAppPassword)
-            if !activeEmail.isEmpty {
-                try secrets.remove(.mailAppPassword(email: activeEmail))
-            }
-        } catch {
-            connectionError = Self.keychainMessage(action: "remove", error: error)
-            return
-        }
+        guard removeActiveMailPasswordForDisconnect() else { return }
         mailAppPassword = ""
         markMailHostVerifiedForGuidance()
         isAccountConnected = false

@@ -146,6 +146,24 @@ final class AppStateWatcherTests: XCTestCase {
         XCTAssertEqual(appState.watchStatus, .idle)
     }
 
+    func testVerifiedAccountChangeRestartsWatcherBaseline() async {
+        let (appState, _, persistence) = makeAppState(processed: ProcessedMessages())
+        appState.watchStatus = .watching
+
+        await appState.testConnection(with: MailAccountCredentials(
+            email: "me@att.net",
+            appPassword: "att-pw",
+            host: "imap.mail.att.net",
+            port: 993
+        ))
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(appState.mailEmail, "me@att.net")
+        XCTAssertEqual(appState.watchStatus, .watching)
+        XCTAssertTrue(persistence.processedMessages.hasBaselineStart(account: "me@att.net", mailbox: .inbox))
+        appState.stopWatching()
+    }
+
     // MARK: - Poll policy
 
     func testPollDoesNothingWhenNotWatching() async {

@@ -38,6 +38,46 @@ extension AppState {
         Self.storedMailPassword(forEmail: email, secrets: secrets)
     }
 
+    /// Removes the active account's password for disconnect. The legacy shared
+    /// slot is removed only when the active account has no usable per-account key,
+    /// because it may still back an older inactive account after a failed migration.
+    func removeActiveMailPasswordForDisconnect() -> Bool {
+        let activeEmail = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activeKey = activeEmail.isEmpty ? nil : SecretKey.mailAppPassword(email: activeEmail)
+        let activeAccountPassword: String?
+        let shouldRemoveLegacyPassword: Bool
+
+        do {
+            if let activeKey {
+                activeAccountPassword = try secrets.value(for: activeKey)
+            } else {
+                activeAccountPassword = nil
+            }
+            if !activeEmail.isEmpty, activeAccountPassword?.isEmpty != false {
+                let legacyPassword = try secrets.value(for: .mailAppPassword)
+                shouldRemoveLegacyPassword = legacyPassword?.isEmpty == false
+            } else {
+                shouldRemoveLegacyPassword = false
+            }
+        } catch {
+            connectionError = Self.keychainMessage(action: "read", error: error)
+            return false
+        }
+
+        do {
+            if shouldRemoveLegacyPassword {
+                try secrets.remove(.mailAppPassword)
+            }
+            if let activeKey, activeAccountPassword != nil {
+                try secrets.remove(activeKey)
+            }
+            return true
+        } catch {
+            connectionError = Self.keychainMessage(action: "remove", error: error)
+            return false
+        }
+    }
+
     // MARK: - v10 → v11 migration
 
     /// Migrates a pre-v11 settings file to the saved-accounts model: the existing
@@ -177,13 +217,12 @@ extension AppState {
         do {
             previousAccountPassword = try secrets.value(for: accountKey)
             let hasUsableAccountPassword = previousAccountPassword?.isEmpty == false
-            if wasActive || !hasUsableAccountPassword {
+            if !hasUsableAccountPassword {
                 previousLegacyPassword = try secrets.value(for: .mailAppPassword)
             } else {
                 previousLegacyPassword = nil
             }
-            shouldRemoveLegacyPassword = wasActive
-                || (!hasUsableAccountPassword && previousLegacyPassword?.isEmpty == false)
+            shouldRemoveLegacyPassword = !hasUsableAccountPassword && previousLegacyPassword?.isEmpty == false
         } catch {
             connectionError = Self.keychainMessage(action: "read", error: error)
             return

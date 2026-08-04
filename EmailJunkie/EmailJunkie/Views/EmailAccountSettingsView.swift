@@ -174,6 +174,7 @@ struct EmailAccountSettingsView: View {
 
             if isAddingAccount {
                 Button("Cancel") { cancelAddingAccount() }
+                    .disabled(appState.isConnecting)
                     .accessibilityLabel("Cancel adding an account")
             }
         }

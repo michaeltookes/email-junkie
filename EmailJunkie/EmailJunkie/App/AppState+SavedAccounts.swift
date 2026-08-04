@@ -115,18 +115,6 @@ extension AppState {
             && SavedMailAccount.normalizedEmail(mailEmail) == account.id
     }
 
-    /// Restores the live account inputs from a saved-account identity. Used when
-    /// a temporary add-account form is cancelled after the form mutated the live
-    /// inputs away from the active account.
-    func restoreInputs(forSavedAccount account: SavedMailAccount) {
-        mailEmail = account.email
-        mailHost = account.host
-        mailPort = account.port
-        let password = storedMailPassword(forEmail: account.email) ?? ""
-        mailAppPassword = password
-        isAccountConnected = !password.isEmpty
-    }
-
     // MARK: - Switching
 
     /// Switches to a previously saved account using its stored credentials, with

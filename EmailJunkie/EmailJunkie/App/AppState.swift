@@ -335,7 +335,19 @@ final class AppState: ObservableObject {
         connectionError = nil
         commitMailEmailEditFromUser()
 
-        let credentials = mailCredentials
+        await testConnection(with: mailCredentials)
+    }
+
+    /// Tests the mailbox connection from an explicit credential snapshot and, on
+    /// success, adopts it as the active account.
+    func testConnection(with credentials: MailAccountCredentials) async {
+        connectionError = nil
+        let credentials = MailAccountCredentials(
+            email: credentials.email.trimmingCharacters(in: .whitespacesAndNewlines),
+            appPassword: credentials.appPassword.trimmingCharacters(in: .whitespacesAndNewlines),
+            host: credentials.host.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: credentials.port
+        )
         guard credentials.isComplete else {
             connectionError = "Enter your email address and app password first."
             return

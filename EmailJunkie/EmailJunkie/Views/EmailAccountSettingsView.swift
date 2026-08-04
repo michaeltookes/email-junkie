@@ -11,7 +11,7 @@ struct EmailAccountSettingsView: View {
     @State private var openedBody: MailBodyPreview?
     @State private var generatedDraft: Draft?
     @State private var accountPendingRemoval: SavedMailAccount?
-    @State private var activeAccountBeforeAdding: SavedMailAccount?
+    @State private var newAccountForm = MailAccountFormState()
     @State private var isAddingAccount = false
     @FocusState private var isMailEmailFocused: Bool
 
@@ -149,14 +149,14 @@ struct EmailAccountSettingsView: View {
         TextField("Email address", text: mailEmailBinding)
             .textContentType(.username)
             .focused($isMailEmailFocused)
-            .onSubmit { appState.commitMailEmailEditFromUser() }
+            .onSubmit { commitMailEmailEditFromUser() }
             .onChange(of: isMailEmailFocused) { _, isFocused in
                 if !isFocused {
-                    appState.commitMailEmailEditFromUser()
+                    commitMailEmailEditFromUser()
                 }
             }
             .accessibilityLabel("Email address")
-        SecureField("App password", text: $appState.mailAppPassword)
+        SecureField("App password", text: mailAppPasswordBinding)
             .accessibilityLabel("App password")
 
         HStack {
@@ -179,14 +179,14 @@ struct EmailAccountSettingsView: View {
         }
 
         AppPasswordGuidanceView(
-            email: appState.mailEmail,
-            explicitHostFallback: appState.credentialGuidanceHostFallback
+            email: guidanceEmail,
+            explicitHostFallback: guidanceHostFallback
         )
 
         DisclosureGroup("Advanced (IMAP server)") {
             TextField("IMAP host", text: mailHostBinding)
                 .accessibilityLabel("IMAP host")
-            TextField("Port", value: $appState.mailPort, format: .number)
+            TextField("Port", value: mailPortBinding, format: .number)
                 .accessibilityLabel("IMAP port")
         }
     }
@@ -284,25 +284,29 @@ struct EmailAccountSettingsView: View {
     // MARK: - Actions
 
     private func connect() async {
-        await appState.testConnection()
+        if isAddingAccount {
+            newAccountForm.commitEmailEditFromUser()
+            await appState.testConnection(with: newAccountForm.credentials)
+        } else {
+            await appState.testConnection()
+        }
         if appState.connectionError == nil && appState.isAccountConnected {
             isAddingAccount = false
-            activeAccountBeforeAdding = nil
+            newAccountForm.resetForNewAccount()
         }
     }
 
     private func switchTo(_ account: SavedMailAccount) async {
         isAddingAccount = false
-        activeAccountBeforeAdding = nil
+        newAccountForm.resetForNewAccount()
         await appState.switchToSavedAccount(account)
     }
 
-    /// Clears the inputs so the connect form starts blank for a new account,
-    /// while remembering which saved account to restore if the user cancels.
+    /// Clears only the local add-account form so the connected account remains
+    /// active while the user enters and verifies a new one.
     private func beginAddingAccount() {
-        activeAccountBeforeAdding = appState.savedAccounts.first { appState.isActiveAccount($0) }
-        appState.updateMailEmailFromUser("")
-        appState.mailAppPassword = ""
+        newAccountForm.resetForNewAccount()
+        appState.connectionError = nil
         isAddingAccount = true
         isMailEmailFocused = true
     }
@@ -310,26 +314,76 @@ struct EmailAccountSettingsView: View {
     private func cancelAddingAccount() {
         isAddingAccount = false
         appState.connectionError = nil
-        // Restore the active account's inputs so the status view is accurate again.
-        if let active = activeAccountBeforeAdding {
-            appState.restoreInputs(forSavedAccount: active)
-        }
-        activeAccountBeforeAdding = nil
+        newAccountForm.resetForNewAccount()
     }
 
     // MARK: - Bindings
 
+    private var guidanceEmail: String {
+        isAddingAccount ? newAccountForm.email : appState.mailEmail
+    }
+
+    private var guidanceHostFallback: String? {
+        isAddingAccount ? newAccountForm.credentialGuidanceHostFallback : appState.credentialGuidanceHostFallback
+    }
+
+    private func commitMailEmailEditFromUser() {
+        if isAddingAccount {
+            newAccountForm.commitEmailEditFromUser()
+        } else {
+            appState.commitMailEmailEditFromUser()
+        }
+    }
+
     private var mailHostBinding: Binding<String> {
         Binding(
-            get: { appState.mailHost },
-            set: { appState.updateMailHostFromUser($0) }
+            get: { isAddingAccount ? newAccountForm.host : appState.mailHost },
+            set: {
+                if isAddingAccount {
+                    newAccountForm.updateHostFromUser($0)
+                } else {
+                    appState.updateMailHostFromUser($0)
+                }
+            }
+        )
+    }
+
+    private var mailPortBinding: Binding<Int> {
+        Binding(
+            get: { isAddingAccount ? newAccountForm.port : appState.mailPort },
+            set: {
+                if isAddingAccount {
+                    newAccountForm.port = $0
+                } else {
+                    appState.mailPort = $0
+                }
+            }
+        )
+    }
+
+    private var mailAppPasswordBinding: Binding<String> {
+        Binding(
+            get: { isAddingAccount ? newAccountForm.appPassword : appState.mailAppPassword },
+            set: {
+                if isAddingAccount {
+                    newAccountForm.appPassword = $0
+                } else {
+                    appState.mailAppPassword = $0
+                }
+            }
         )
     }
 
     private var mailEmailBinding: Binding<String> {
         Binding(
-            get: { appState.mailEmail },
-            set: { appState.updateMailEmailFromUser($0) }
+            get: { isAddingAccount ? newAccountForm.email : appState.mailEmail },
+            set: {
+                if isAddingAccount {
+                    newAccountForm.updateEmailFromUser($0)
+                } else {
+                    appState.updateMailEmailFromUser($0)
+                }
+            }
         )
     }
 }

@@ -231,8 +231,8 @@ final class AppStateSavedAccountsTests: XCTestCase {
         XCTAssertEqual(store.loadSettings().mailEmail, att.email)
     }
 
-    func testRestoreInputsForSavedAccountUsesSavedIdentityAfterLiveEmailChanges() {
-        let active = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+    func testExplicitConnectionFailureLeavesActiveAccountUntouched() async {
+        let active = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
         let settings = Settings(
             schemaVersion: Settings.currentSchemaVersion,
             pollIntervalSeconds: 300,
@@ -242,22 +242,29 @@ final class AppStateSavedAccountsTests: XCTestCase {
             savedAccounts: [active]
         )
         let secrets = InMemorySecretStore(seed: [
-            .mailAppPassword(email: active.email): "gmail-pw"
+            .mailAppPassword(email: active.email): "att-pw"
         ])
-        let (app, _, _) = makeAppState(settings: settings, secrets: secrets)
+        let provider = FakeAppMailProvider(result: .failure(.authenticationFailed("expired password")))
+        let (app, store, _) = makeAppState(settings: settings, secrets: secrets, provider: provider)
 
-        app.mailEmail = ""
-        app.mailAppPassword = ""
-        XCTAssertFalse(app.isActiveAccount(active))
+        await app.testConnection(with: MailAccountCredentials(
+            email: "me@gmail.com",
+            appPassword: "expired-gmail-pw",
+            host: "imap.gmail.com",
+            port: 993
+        ))
 
-        app.restoreInputs(forSavedAccount: active)
-
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertEqual(provider.lastCredentials?.email, "me@gmail.com")
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "expired-gmail-pw")
         XCTAssertTrue(app.isAccountConnected)
         XCTAssertEqual(app.mailEmail, active.email)
         XCTAssertEqual(app.mailHost, active.host)
         XCTAssertEqual(app.mailPort, active.port)
-        XCTAssertEqual(app.mailAppPassword, "gmail-pw")
+        XCTAssertEqual(app.mailAppPassword, "att-pw")
         XCTAssertTrue(app.isActiveAccount(active))
+        XCTAssertEqual(store.loadSettings().mailEmail, active.email)
+        XCTAssertEqual(store.loadSettings().savedAccounts, [active])
     }
 
     // MARK: - Removal

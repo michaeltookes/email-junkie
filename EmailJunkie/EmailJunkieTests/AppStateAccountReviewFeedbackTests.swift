@@ -113,6 +113,43 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(app.storedMailPassword(forEmail: "ME@GMAIL.COM"), "legacy-gmail-pw")
     }
 
+    func testRemovingActiveCustomHostClearsHostGuidance() {
+        let account = SavedMailAccount(email: "me@company.example", host: "imap.company.example", port: 1993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: account.email,
+            mailHost: account.host,
+            mailHostGuidanceEmail: account.email,
+            mailPort: account.port,
+            savedAccounts: [account]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: account.email): "company-pw"
+        ])
+        let (app, persistence) = makeAppState(settings: settings, secrets: secrets)
+
+        app.removeSavedAccount(account)
+
+        let savedSettings = persistence.loadSettings()
+        XCTAssertNil(app.connectionError)
+        XCTAssertFalse(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, "")
+        XCTAssertEqual(app.mailHost, Settings.default.mailHost)
+        XCTAssertEqual(app.mailPort, Settings.default.mailPort)
+        XCTAssertNil(app.buildSettings().mailHostGuidanceEmail)
+        XCTAssertFalse(app.buildSettings().mailHostGuidancePendingEmail)
+        XCTAssertEqual(savedSettings.mailEmail, "")
+        XCTAssertEqual(savedSettings.mailHost, Settings.default.mailHost)
+        XCTAssertEqual(savedSettings.mailPort, Settings.default.mailPort)
+        XCTAssertNil(savedSettings.mailHostGuidanceEmail)
+        XCTAssertFalse(savedSettings.mailHostGuidancePendingEmail)
+
+        app.updateMailEmailFromUser("me@yahoo.com")
+
+        XCTAssertEqual(app.mailHost, "imap.mail.yahoo.com")
+    }
+
     func testRemoveActivePerAccountKeepsInactiveLegacyPassword() {
         let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
         let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)

@@ -297,6 +297,12 @@ extension AppState {
         }
 
         var nextSettings = buildSettings(mailEmail: wasActive ? "" : nil)
+        if wasActive {
+            nextSettings.mailHost = Settings.default.mailHost
+            nextSettings.mailPort = Settings.default.mailPort
+            nextSettings.mailHostGuidanceEmail = nil
+            nextSettings.mailHostGuidancePendingEmail = false
+        }
         nextSettings.savedAccounts.removeAll { $0.id == account.id }
 
         do {
@@ -375,6 +381,10 @@ extension AppState {
     /// Tears down the active account after it has been removed from the list.
     private func goOfflineAfterRemovingActiveAccount() {
         mailEmail = ""
+        mailHost = Settings.default.mailHost
+        mailPort = Settings.default.mailPort
+        mailHostExplicitlyEditedEmail = nil
+        mailHostExplicitlyEditedBeforeEmail = false
         mailAppPassword = ""
         isAccountConnected = false
         cancelAllSendCountdowns()

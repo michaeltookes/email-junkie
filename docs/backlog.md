@@ -142,16 +142,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **One-click hand-off:** selecting a row (a sender, or an age bucket) fills the browser's filter so item 42's preview + confirm cleanup can act on it directly.
     - Ties to reply-worthiness filtering (item 17) for what counts as "junk," and to the activity log (item 21) for an audit trail. Open question still outstanding from item 42: whether any cleanup should ever run automatically vs. manual-only.
 
-48. **Dedicated Email Account settings page with saved accounts**
-    Promote the cramped inline "Email account" section to its own Settings page, and remember multiple accounts' credentials so switching between them is a one-tap pick instead of a full re-entry.
-    *As a professional juggling more than one mailbox (e.g. a Gmail and an att.net), I want my accounts saved so I can switch between them without re-typing my email and app password every time, so that moving between inboxes is friction-free.*
-    - **Dedicated page:** the email-account controls move out of the single scrolling Settings form into their own page/tab — connect form, connection status, host/port (advanced), and the provider-specific credential guidance (item 43) — so account management is a distinct, uncluttered place.
-    - **Saved accounts ("placeholders"):** the app remembers each account that has been connected — email, host, port, and its app password in the Keychain under a **per-account key** (not the single shared `mailAppPassword` slot) — and lists them so the user picks one to make active.
-    - **One-tap switch:** selecting a saved account connects it using the stored credentials with no re-entry; the previously active account's credentials are retained, not wiped. (This fixes today's behavior where connecting a second account overwrites the first.)
-    - **Add / remove:** the user can add a new account (the current connect flow) and remove a saved account, which deletes only that account's Keychain entry and settings.
-    - **Still one active account at a time:** this is remembered-credentials + fast switching, **not** simultaneous multi-mailbox watching — that broader capability (per-account voice profiles, per-account attribution, watching several at once) remains **item 33**, which this is a stepping stone toward.
-    - **Security:** each account's secret lives in its own Keychain item; removing an account or the app leaves no orphaned secrets. Never display stored app passwords in plain text.
-
 ## Low Priority
 
 30. **Slack approval channel**

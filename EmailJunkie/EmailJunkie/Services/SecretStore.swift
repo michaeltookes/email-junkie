@@ -12,8 +12,20 @@ struct SecretKey: RawRepresentable, Hashable {
     /// The Gmail OAuth token set (access + refresh + expiry), stored as JSON.
     /// (OAuth path is parked; kept for a future bundled-client revival.)
     static let gmailToken = SecretKey(rawValue: "gmail.token")
-    /// The mailbox app password used for IMAP/SMTP authentication.
+    /// The legacy single-account mailbox app password slot. Superseded by the
+    /// per-account key below (item 48); kept only so the v10→v11 migration can
+    /// read the old secret before moving it, and as a read-fallback until every
+    /// install has migrated. New writes always use `mailAppPassword(email:)`.
     static let mailAppPassword = SecretKey(rawValue: "mail.appPassword")
+
+    /// The app password for a specific saved mail account (item 48), keyed by the
+    /// account's normalized email so each account's secret is a distinct Keychain
+    /// item. Mirrors the per-provider `llmAPIKey(provider:)` pattern, and uses the
+    /// same normalization as `SavedMailAccount.id` so keys line up with the list.
+    static func mailAppPassword(email: String) -> SecretKey {
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return SecretKey(rawValue: "mail.appPassword.\(normalized)")
+    }
     /// The user-supplied Google Cloud OAuth client ID (BYO credentials).
     static let googleClientID = SecretKey(rawValue: "google.clientID")
     /// The user-supplied Google Cloud OAuth client secret (BYO credentials).

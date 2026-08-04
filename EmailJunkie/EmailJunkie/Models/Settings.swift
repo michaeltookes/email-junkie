@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 10
+    static let currentSchemaVersion = 11
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -35,6 +35,12 @@ struct Settings: Codable, Equatable {
 
     /// Schema version that introduced the auto-send safety-net delay (item 23).
     static let sendDelaySchemaVersion = 10
+
+    /// Schema version that introduced remembered saved accounts (item 48). On
+    /// first launch at this version, the existing single account is migrated
+    /// into `savedAccounts` and its app password moves from the legacy shared
+    /// Keychain slot to a per-account key.
+    static let savedAccountsSchemaVersion = 11
 
     /// The default auto-send undo window, in seconds (item 23). Zero disables it.
     static let defaultSendDelaySeconds = 10
@@ -62,6 +68,12 @@ struct Settings: Codable, Equatable {
 
     /// The IMAP port.
     var mailPort: Int
+
+    /// Accounts the user has connected and can switch between without re-entering
+    /// credentials (item 48). Non-secret connection details only — each account's
+    /// app password lives in the Keychain under its own per-account key. The
+    /// *active* account is the one whose email matches `mailEmail`.
+    var savedAccounts: [SavedMailAccount]
 
     /// The selected LLM provider (raw value of `LLMProviderKind`). Stored as a
     /// string so an unknown/future provider decodes gracefully to the default.
@@ -101,6 +113,7 @@ struct Settings: Codable, Equatable {
         mailHostGuidanceEmail: String? = nil,
         mailHostGuidancePendingEmail: Bool = false,
         mailPort: Int = 993,
+        savedAccounts: [SavedMailAccount] = [],
         llmProvider: String = "anthropic",
         llmModel: String = "",
         llmBaseURL: String = "",
@@ -116,6 +129,7 @@ struct Settings: Codable, Equatable {
         self.mailHostGuidanceEmail = mailHostGuidanceEmail
         self.mailHostGuidancePendingEmail = mailHostGuidancePendingEmail
         self.mailPort = mailPort
+        self.savedAccounts = savedAccounts
         self.llmProvider = llmProvider
         self.llmModel = llmModel
         self.llmBaseURL = llmBaseURL
@@ -133,7 +147,7 @@ struct Settings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
-        case mailHostGuidancePendingEmail, mailPort
+        case mailHostGuidancePendingEmail, mailPort, savedAccounts
         case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
     }
 
@@ -147,6 +161,7 @@ struct Settings: Codable, Equatable {
         mailHostGuidancePendingEmail =
             try container.decodeIfPresent(Bool.self, forKey: .mailHostGuidancePendingEmail) ?? false
         mailPort = try container.decodeIfPresent(Int.self, forKey: .mailPort) ?? 993
+        savedAccounts = try container.decodeIfPresent([SavedMailAccount].self, forKey: .savedAccounts) ?? []
         llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider) ?? "anthropic"
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         llmBaseURL = try container.decodeIfPresent(String.self, forKey: .llmBaseURL) ?? ""
@@ -178,6 +193,21 @@ struct Settings: Codable, Equatable {
            !hasStoredGuidanceHost {
             copy.mailHostGuidancePendingEmail = false
         }
+        copy.savedAccounts = Self.normalizedSavedAccounts(savedAccounts)
         return copy
+    }
+
+    /// Drops entries with no usable email and collapses duplicates (by normalized
+    /// email) to a single entry, keeping the first occurrence's details.
+    static func normalizedSavedAccounts(_ accounts: [SavedMailAccount]) -> [SavedMailAccount] {
+        var seen = Set<String>()
+        var result: [SavedMailAccount] = []
+        for account in accounts {
+            let identity = SavedMailAccount.normalizedEmail(account.email)
+            guard !identity.isEmpty, !seen.contains(identity) else { continue }
+            seen.insert(identity)
+            result.append(account)
+        }
+        return result
     }
 }

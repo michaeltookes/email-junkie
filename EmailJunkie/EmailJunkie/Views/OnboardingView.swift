@@ -164,6 +164,7 @@ private struct OnboardingAccountStep: View {
             if appState.isAccountConnected {
                 ConnectedBadge(text: "Connected as \(appState.mailEmail)")
                 Button("Disconnect", role: .destructive) { appState.disconnectMail() }
+                    .disabled(appState.isConnecting)
             } else {
                 TextField("Email address", text: mailEmailBinding)
                     .textContentType(.username)

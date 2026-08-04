@@ -93,6 +93,26 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(savedSettings.mailPort, att.port)
     }
 
+    func testLegacyPasswordLookupNormalizesSavedAccountEmail() {
+        let gmail = SavedMailAccount(email: "Me@Gmail.com", host: "imap.gmail.com", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: gmail.email,
+            mailHost: gmail.host,
+            mailPort: gmail.port,
+            savedAccounts: [gmail]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "legacy-gmail-pw"
+        ])
+        let (app, _) = makeAppState(settings: settings, secrets: secrets)
+
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailAppPassword, "legacy-gmail-pw")
+        XCTAssertEqual(app.storedMailPassword(forEmail: "ME@GMAIL.COM"), "legacy-gmail-pw")
+    }
+
     func testRemoveActivePerAccountKeepsInactiveLegacyPassword() {
         let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
         let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)

@@ -21,7 +21,7 @@ extension AppState {
         activeEmail: String? = nil,
         secrets: SecretStore
     ) -> String? {
-        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = SavedMailAccount.normalizedEmail(email)
         // No active account means no password to read — never surface a stray
         // legacy secret when there is no email to attribute it to.
         guard !normalized.isEmpty else { return nil }

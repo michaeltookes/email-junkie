@@ -104,6 +104,33 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "legacy-gmail-pw")
     }
 
+    func testRemovingDisconnectedAccountWithoutPerAccountKeyPreservesLegacyOwnerPassword() {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "legacy-gmail-pw"
+        ])
+        let (app, persistence) = makeAppState(settings: settings, secrets: secrets)
+
+        app.removeSavedAccount(att)
+
+        XCTAssertNil(app.connectionError)
+        XCTAssertEqual(app.savedAccounts, [gmail])
+        XCTAssertEqual(persistence.loadSettings().savedAccounts, [gmail])
+        XCTAssertNil((try? secrets.value(for: .mailAppPassword(email: att.email))) ?? nil)
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "legacy-gmail-pw")
+        XCTAssertEqual(app.storedMailPassword(forEmail: gmail.email), "legacy-gmail-pw")
+        XCTAssertNil(app.storedMailPassword(forEmail: att.email))
+    }
+
     func testDisconnectKeepsLegacyPasswordWhenEmptyPerAccountRemovalFails() {
         let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
         let settings = Settings(

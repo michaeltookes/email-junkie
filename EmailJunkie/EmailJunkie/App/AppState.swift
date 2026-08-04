@@ -288,7 +288,7 @@ final class AppState: ObservableObject {
         self.mailHostExplicitlyEditedEmail = settings.mailHostGuidanceEmail
         self.mailHostExplicitlyEditedBeforeEmail = settings.mailHostGuidancePendingEmail
         let activeEmail = settings.mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        let activePassword = Self.storedMailPassword(forEmail: activeEmail, secrets: secrets) ?? ""
+        let activePassword = Self.storedMailPassword(forEmail: activeEmail, settings: settings, secrets: secrets) ?? ""
         self.mailAppPassword = activePassword
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 

@@ -198,6 +198,68 @@ final class AppStateSavedAccountsTests: XCTestCase {
         XCTAssertEqual(app.mailEmail, "me@gmail.com", "active account unchanged")
     }
 
+    func testSwitchFailureRestoresOutgoingAccount() async {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "expired-gmail-pw",
+            .mailAppPassword(email: att.email): "att-pw"
+        ])
+        let provider = FakeAppMailProvider(result: .failure(.authenticationFailed("expired password")))
+        let (app, store, _) = makeAppState(settings: settings, secrets: secrets, provider: provider)
+
+        await app.switchToSavedAccount(gmail)
+
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(provider.lastCredentials?.email, gmail.email)
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "expired-gmail-pw")
+        XCTAssertEqual(app.mailEmail, att.email)
+        XCTAssertEqual(app.mailHost, att.host)
+        XCTAssertEqual(app.mailPort, att.port)
+        XCTAssertEqual(app.mailAppPassword, "att-pw")
+        XCTAssertTrue(app.isActiveAccount(att))
+        XCTAssertFalse(app.isActiveAccount(gmail))
+        XCTAssertEqual(store.loadSettings().mailEmail, att.email)
+    }
+
+    func testRestoreInputsForSavedAccountUsesSavedIdentityAfterLiveEmailChanges() {
+        let active = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: active.email,
+            mailHost: active.host,
+            mailPort: active.port,
+            savedAccounts: [active]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: active.email): "gmail-pw"
+        ])
+        let (app, _, _) = makeAppState(settings: settings, secrets: secrets)
+
+        app.mailEmail = ""
+        app.mailAppPassword = ""
+        XCTAssertFalse(app.isActiveAccount(active))
+
+        app.restoreInputs(forSavedAccount: active)
+
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, active.email)
+        XCTAssertEqual(app.mailHost, active.host)
+        XCTAssertEqual(app.mailPort, active.port)
+        XCTAssertEqual(app.mailAppPassword, "gmail-pw")
+        XCTAssertTrue(app.isActiveAccount(active))
+    }
+
     // MARK: - Removal
 
     func testRemoveInactiveAccountDeletesOnlyItsSecret() async {
@@ -231,6 +293,67 @@ final class AppStateSavedAccountsTests: XCTestCase {
         XCTAssertFalse(app.isAccountConnected)
         XCTAssertEqual(app.mailEmail, "")
         XCTAssertTrue(store.loadSettings().savedAccounts.isEmpty)
+    }
+
+    func testRemoveInactiveAccountRollsBackWhenSettingsSaveFails() {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "gmail-pw",
+            .mailAppPassword(email: att.email): "att-pw"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: settings)
+        persistence.syncSaveError = AppStatePersistenceError.writeDenied
+        let (app, store, _) = makeAppState(secrets: secrets, persistence: persistence)
+
+        app.removeSavedAccount(gmail)
+
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertEqual(app.savedAccounts, [gmail, att])
+        XCTAssertEqual(app.mailEmail, att.email)
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(store.loadSettings().savedAccounts, [gmail, att])
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: gmail.email)), "gmail-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: att.email)), "att-pw")
+    }
+
+    func testRemoveActiveAccountRollsBackWhenSettingsSaveFails() {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: gmail.email,
+            mailHost: gmail.host,
+            mailPort: gmail.port,
+            savedAccounts: [gmail]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "gmail-pw"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: settings)
+        persistence.syncSaveError = AppStatePersistenceError.writeDenied
+        let (app, store, _) = makeAppState(secrets: secrets, persistence: persistence)
+
+        app.removeSavedAccount(gmail)
+
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertEqual(app.savedAccounts, [gmail])
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailEmail, gmail.email)
+        XCTAssertEqual(app.mailHost, gmail.host)
+        XCTAssertEqual(app.mailPort, gmail.port)
+        XCTAssertEqual(app.mailAppPassword, "gmail-pw")
+        XCTAssertEqual(store.loadSettings().mailEmail, gmail.email)
+        XCTAssertEqual(store.loadSettings().savedAccounts, [gmail])
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: gmail.email)), "gmail-pw")
     }
 
     // MARK: - Persistence across relaunch

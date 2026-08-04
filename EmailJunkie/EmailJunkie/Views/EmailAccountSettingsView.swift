@@ -11,6 +11,7 @@ struct EmailAccountSettingsView: View {
     @State private var openedBody: MailBodyPreview?
     @State private var generatedDraft: Draft?
     @State private var accountPendingRemoval: SavedMailAccount?
+    @State private var activeAccountBeforeAdding: SavedMailAccount?
     @State private var isAddingAccount = false
     @FocusState private var isMailEmailFocused: Bool
 
@@ -286,18 +287,20 @@ struct EmailAccountSettingsView: View {
         await appState.testConnection()
         if appState.connectionError == nil && appState.isAccountConnected {
             isAddingAccount = false
+            activeAccountBeforeAdding = nil
         }
     }
 
     private func switchTo(_ account: SavedMailAccount) async {
         isAddingAccount = false
+        activeAccountBeforeAdding = nil
         await appState.switchToSavedAccount(account)
     }
 
-    /// Clears the inputs so the connect form starts blank for a new account. The
-    /// currently-active account stays connected and saved until the new one is
-    /// verified, so its credentials are never lost.
+    /// Clears the inputs so the connect form starts blank for a new account,
+    /// while remembering which saved account to restore if the user cancels.
     private func beginAddingAccount() {
+        activeAccountBeforeAdding = appState.savedAccounts.first { appState.isActiveAccount($0) }
         appState.updateMailEmailFromUser("")
         appState.mailAppPassword = ""
         isAddingAccount = true
@@ -308,12 +311,10 @@ struct EmailAccountSettingsView: View {
         isAddingAccount = false
         appState.connectionError = nil
         // Restore the active account's inputs so the status view is accurate again.
-        if let active = appState.savedAccounts.first(where: { appState.isActiveAccount($0) }) {
-            appState.mailEmail = active.email
-            appState.mailHost = active.host
-            appState.mailPort = active.port
-            appState.mailAppPassword = appState.storedMailPassword(forEmail: active.email) ?? ""
+        if let active = activeAccountBeforeAdding {
+            appState.restoreInputs(forSavedAccount: active)
         }
+        activeAccountBeforeAdding = nil
     }
 
     // MARK: - Bindings

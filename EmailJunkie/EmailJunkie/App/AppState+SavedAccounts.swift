@@ -115,6 +115,18 @@ extension AppState {
             && SavedMailAccount.normalizedEmail(mailEmail) == account.id
     }
 
+    /// Restores the live account inputs from a saved-account identity. Used when
+    /// a temporary add-account form is cancelled after the form mutated the live
+    /// inputs away from the active account.
+    func restoreInputs(forSavedAccount account: SavedMailAccount) {
+        mailEmail = account.email
+        mailHost = account.host
+        mailPort = account.port
+        let password = storedMailPassword(forEmail: account.email) ?? ""
+        mailAppPassword = password
+        isAccountConnected = !password.isEmpty
+    }
+
     // MARK: - Switching
 
     /// Switches to a previously saved account using its stored credentials, with
@@ -132,6 +144,7 @@ extension AppState {
             return
         }
 
+        let outgoingSettings = buildSettings()
         // Clean teardown of the outgoing account before adopting the new one.
         let wasWatching = watchStatus == .watching
         stopWatching()
@@ -141,11 +154,20 @@ extension AppState {
         mailHost = account.host
         mailPort = account.port
         mailAppPassword = password
+        isAccountConnected = false
         markMailHostVerifiedForGuidance()
 
         await testConnection()
 
-        if isAccountConnected, wasWatching {
+        guard connectionError == nil, isAccountConnected, isActiveAccount(account) else {
+            restoreConnectionSnapshot(settings: outgoingSettings)
+            if wasWatching {
+                startWatchingIfReady()
+            }
+            return
+        }
+
+        if wasWatching {
             startWatchingIfReady()
         }
     }
@@ -159,30 +181,82 @@ extension AppState {
     func removeSavedAccount(_ account: SavedMailAccount) {
         connectionError = nil
         let wasActive = isActiveAccount(account)
+        let accountKey = SecretKey.mailAppPassword(email: account.email)
+        let previousAccountPassword: String?
+        let previousLegacyPassword: String?
 
         do {
-            try secrets.remove(.mailAppPassword(email: account.email))
+            previousAccountPassword = try secrets.value(for: accountKey)
+            previousLegacyPassword = wasActive ? try secrets.value(for: .mailAppPassword) : nil
+        } catch {
+            connectionError = Self.keychainMessage(action: "read", error: error)
+            return
+        }
+
+        var nextSettings = buildSettings(mailEmail: wasActive ? "" : nil)
+        nextSettings.savedAccounts.removeAll { $0.id == account.id }
+
+        do {
+            try secrets.remove(accountKey)
             if wasActive {
                 // Also clear any legacy shared slot so nothing is orphaned.
                 try secrets.remove(.mailAppPassword)
             }
         } catch {
-            connectionError = Self.keychainMessage(action: "remove", error: error)
+            let rollbackError = restoreRemovedAccountSecrets(
+                accountEmail: account.email,
+                accountPassword: previousAccountPassword,
+                legacyPassword: previousLegacyPassword
+            )
+            var message = Self.keychainMessage(action: "remove", error: error)
+            if let rollbackError {
+                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+            }
+            connectionError = message
             return
         }
 
-        savedAccounts.removeAll { $0.id == account.id }
+        do {
+            try persistSettingsSync(nextSettings)
+        } catch {
+            let rollbackError = restoreRemovedAccountSecrets(
+                accountEmail: account.email,
+                accountPassword: previousAccountPassword,
+                legacyPassword: previousLegacyPassword
+            )
+            var message = Self.settingsMessage(action: "save", error: error)
+            if let rollbackError {
+                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+            }
+            connectionError = message
+            return
+        }
+
+        savedAccounts = nextSettings.savedAccounts
 
         if wasActive {
             goOfflineAfterRemovingActiveAccount()
         }
-
-        do {
-            try persistSettingsSync(buildSettings())
-        } catch {
-            connectionError = Self.settingsMessage(action: "save", error: error)
-        }
         logger.info("Saved account removed")
+    }
+
+    private func restoreRemovedAccountSecrets(
+        accountEmail: String,
+        accountPassword: String?,
+        legacyPassword: String?
+    ) -> Error? {
+        do {
+            if let accountPassword {
+                try secrets.set(accountPassword, for: .mailAppPassword(email: accountEmail))
+            }
+            if let legacyPassword {
+                try secrets.set(legacyPassword, for: .mailAppPassword)
+            }
+            return nil
+        } catch {
+            logger.error("Failed to roll back removed mail secret: \(error.localizedDescription)")
+            return error
+        }
     }
 
     /// Tears down the active account after it has been removed from the list.

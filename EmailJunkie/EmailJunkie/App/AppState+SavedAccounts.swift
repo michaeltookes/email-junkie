@@ -64,11 +64,7 @@ extension AppState {
             return nil
         }
         if let migratedAccount = savedAccounts.first {
-            let migratedPassword = try secrets.value(for: .mailAppPassword(email: migratedAccount.email))
-            if migratedPassword?.isEmpty != false {
-                return migratedAccount.id
-            }
-            return nil
+            return migratedAccount.id
         }
 
         let normalizedActiveEmail = SavedMailAccount.normalizedEmail(activeEmail ?? "")
@@ -108,8 +104,8 @@ extension AppState {
     }
 
     /// Removes the active account's password for disconnect. The legacy shared
-    /// slot is removed only when the active account has no usable per-account key,
-    /// because it may still back an older inactive account after a failed migration.
+    /// slot is removed only when it belongs to the active account, because it may
+    /// still back an older inactive account after a failed migration.
     func removeActiveMailPasswordForDisconnect() -> Bool {
         let activeEmail = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeKey = activeEmail.isEmpty ? nil : SecretKey.mailAppPassword(email: activeEmail)
@@ -122,7 +118,7 @@ extension AppState {
             } else {
                 activeAccountPassword = nil
             }
-            if !activeEmail.isEmpty, activeAccountPassword?.isEmpty != false {
+            if !activeEmail.isEmpty {
                 shouldRemoveLegacyPassword = try legacyMailPasswordOwnerID()
                     == SavedMailAccount.normalizedEmail(activeEmail)
             } else {
@@ -289,9 +285,8 @@ extension AppState {
 
         do {
             previousAccountPassword = try secrets.value(for: accountKey)
-            let hasUsableAccountPassword = previousAccountPassword?.isEmpty == false
             previousLegacyPassword = try legacyMailPasswordForOwnedAccount(account.email)
-            shouldRemoveLegacyPassword = !hasUsableAccountPassword && previousLegacyPassword != nil
+            shouldRemoveLegacyPassword = previousLegacyPassword != nil
         } catch {
             connectionError = Self.keychainMessage(action: "read", error: error)
             return

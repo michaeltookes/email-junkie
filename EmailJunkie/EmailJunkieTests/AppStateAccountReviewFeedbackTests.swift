@@ -51,6 +51,48 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         app.stopWatching()
     }
 
+    func testPendingSwitchSettingsSaveKeepsOutgoingAccountUntilVerificationSucceeds() async {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "expired-gmail-pw",
+            .mailAppPassword(email: att.email): "att-pw"
+        ])
+        let provider = SuspendedAppMailProvider()
+        let (app, persistence) = makeAppState(settings: settings, secrets: secrets, provider: provider)
+
+        let switchTask = Task { await app.switchToSavedAccount(gmail) }
+        await fulfillment(of: [provider.didStartVerification], timeout: 1)
+
+        app.pollIntervalSeconds = 120
+        app.saveSettingsSync()
+
+        var savedSettings = persistence.loadSettings()
+        XCTAssertEqual(savedSettings.mailEmail, att.email)
+        XCTAssertEqual(savedSettings.mailHost, att.host)
+        XCTAssertEqual(savedSettings.mailPort, att.port)
+        XCTAssertEqual(savedSettings.pollIntervalSeconds, 120)
+
+        provider.complete(with: .failure(MailError.authenticationFailed("expired password")))
+        await switchTask.value
+
+        savedSettings = persistence.loadSettings()
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertEqual(app.mailEmail, att.email)
+        XCTAssertEqual(app.mailAppPassword, "att-pw")
+        XCTAssertEqual(savedSettings.mailEmail, att.email)
+        XCTAssertEqual(savedSettings.mailHost, att.host)
+        XCTAssertEqual(savedSettings.mailPort, att.port)
+    }
+
     func testRemoveActivePerAccountKeepsInactiveLegacyPassword() {
         let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
         let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)

@@ -247,14 +247,13 @@ extension AppState {
         stopWatching()
         cancelAllSendCountdowns()
 
-        mailEmail = account.email
-        mailHost = account.host
-        mailPort = account.port
-        mailAppPassword = password
-        isAccountConnected = false
-        markMailHostVerifiedForGuidance()
-
-        await testConnection()
+        let credentials = MailAccountCredentials(
+            email: account.email,
+            appPassword: password,
+            host: account.host,
+            port: account.port
+        )
+        await testConnection(with: credentials)
 
         guard connectionError == nil, isAccountConnected, isActiveAccount(account) else {
             restoreConnectionSnapshot(settings: outgoingSettings)

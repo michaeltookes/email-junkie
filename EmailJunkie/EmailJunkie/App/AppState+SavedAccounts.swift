@@ -172,10 +172,18 @@ extension AppState {
         let accountKey = SecretKey.mailAppPassword(email: account.email)
         let previousAccountPassword: String?
         let previousLegacyPassword: String?
+        let shouldRemoveLegacyPassword: Bool
 
         do {
             previousAccountPassword = try secrets.value(for: accountKey)
-            previousLegacyPassword = wasActive ? try secrets.value(for: .mailAppPassword) : nil
+            let hasUsableAccountPassword = previousAccountPassword?.isEmpty == false
+            if wasActive || !hasUsableAccountPassword {
+                previousLegacyPassword = try secrets.value(for: .mailAppPassword)
+            } else {
+                previousLegacyPassword = nil
+            }
+            shouldRemoveLegacyPassword = wasActive
+                || (!hasUsableAccountPassword && previousLegacyPassword?.isEmpty == false)
         } catch {
             connectionError = Self.keychainMessage(action: "read", error: error)
             return
@@ -186,7 +194,7 @@ extension AppState {
 
         do {
             try secrets.remove(accountKey)
-            if wasActive {
+            if shouldRemoveLegacyPassword {
                 // Also clear any legacy shared slot so nothing is orphaned.
                 try secrets.remove(.mailAppPassword)
             }
@@ -194,7 +202,7 @@ extension AppState {
             let rollbackError = restoreRemovedAccountSecrets(
                 accountEmail: account.email,
                 accountPassword: previousAccountPassword,
-                legacyPassword: previousLegacyPassword
+                legacyPassword: shouldRemoveLegacyPassword ? previousLegacyPassword : nil
             )
             var message = Self.keychainMessage(action: "remove", error: error)
             if let rollbackError {
@@ -210,7 +218,7 @@ extension AppState {
             let rollbackError = restoreRemovedAccountSecrets(
                 accountEmail: account.email,
                 accountPassword: previousAccountPassword,
-                legacyPassword: previousLegacyPassword
+                legacyPassword: shouldRemoveLegacyPassword ? previousLegacyPassword : nil
             )
             var message = Self.settingsMessage(action: "save", error: error)
             if let rollbackError {

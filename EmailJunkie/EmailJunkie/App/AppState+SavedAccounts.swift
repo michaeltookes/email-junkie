@@ -208,6 +208,10 @@ extension AppState {
     /// are never touched.
     func removeSavedAccount(_ account: SavedMailAccount) {
         connectionError = nil
+        guard !isConnecting else {
+            connectionError = "Wait for the current connection test to finish before removing an account."
+            return
+        }
         let wasActive = isActiveAccount(account)
         let accountKey = SecretKey.mailAppPassword(email: account.email)
         let previousAccountPassword: String?
@@ -238,32 +242,24 @@ extension AppState {
                 try secrets.remove(.mailAppPassword)
             }
         } catch {
-            let rollbackError = restoreRemovedAccountSecrets(
+            connectionError = removedAccountRollbackMessage(
+                baseMessage: Self.keychainMessage(action: "remove", error: error),
                 accountEmail: account.email,
                 accountPassword: previousAccountPassword,
                 legacyPassword: shouldRemoveLegacyPassword ? previousLegacyPassword : nil
             )
-            var message = Self.keychainMessage(action: "remove", error: error)
-            if let rollbackError {
-                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
-            }
-            connectionError = message
             return
         }
 
         do {
             try persistSettingsSync(nextSettings)
         } catch {
-            let rollbackError = restoreRemovedAccountSecrets(
+            connectionError = removedAccountRollbackMessage(
+                baseMessage: Self.settingsMessage(action: "save", error: error),
                 accountEmail: account.email,
                 accountPassword: previousAccountPassword,
                 legacyPassword: shouldRemoveLegacyPassword ? previousLegacyPassword : nil
             )
-            var message = Self.settingsMessage(action: "save", error: error)
-            if let rollbackError {
-                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
-            }
-            connectionError = message
             return
         }
 
@@ -273,6 +269,24 @@ extension AppState {
             goOfflineAfterRemovingActiveAccount()
         }
         logger.info("Saved account removed")
+    }
+
+    private func removedAccountRollbackMessage(
+        baseMessage: String,
+        accountEmail: String,
+        accountPassword: String?,
+        legacyPassword: String?
+    ) -> String {
+        var message = baseMessage
+        let rollbackError = restoreRemovedAccountSecrets(
+            accountEmail: accountEmail,
+            accountPassword: accountPassword,
+            legacyPassword: legacyPassword
+        )
+        if let rollbackError {
+            message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+        }
+        return message
     }
 
     private func restoreRemovedAccountSecrets(

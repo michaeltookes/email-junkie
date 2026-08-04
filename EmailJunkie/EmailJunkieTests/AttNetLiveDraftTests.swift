@@ -74,6 +74,29 @@ final class AttNetLiveDraftTests: XCTestCase {
         // Save through the normal save path (IMAP APPEND to Drafts with \Draft).
         try await app.performSave(draft, credentials: credentials)
 
+        do {
+            try await verifySavedDraft(
+                provider: provider,
+                credentials: credentials,
+                marker: marker,
+                recipient: recipient,
+                originalMessageID: originalMessageID
+            )
+        } catch {
+            await cleanUpAfterVerificationError(provider: provider, credentials: credentials, marker: marker)
+            throw error
+        }
+
+        try await cleanUpTestDraft(provider: provider, credentials: credentials, marker: marker)
+    }
+
+    private func verifySavedDraft(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String,
+        recipient: String,
+        originalMessageID: String
+    ) async throws {
         // Fetch it back from Drafts and assert addressing + threading.
         let found = try await provider.searchMessages(
             credentials,
@@ -82,18 +105,28 @@ final class AttNetLiveDraftTests: XCTestCase {
             offset: 0,
             limit: 10
         )
-        let saved = found.messages.first { $0.subject.contains(marker) }
-        XCTAssertNotNil(saved, "the saved reply draft should appear in att.net Drafts")
+        let saved = try XCTUnwrap(
+            found.messages.first { $0.subject.contains(marker) },
+            "the saved reply draft should appear in att.net Drafts"
+        )
 
-        if let saved {
-            XCTAssertTrue(
-                saved.to.contains { $0.email.caseInsensitiveCompare(recipient) == .orderedSame },
-                "draft should be addressed to the reply recipient"
-            )
-            XCTAssertEqual(saved.inReplyTo, originalMessageID, "draft should thread via In-Reply-To")
+        XCTAssertTrue(
+            saved.to.contains { $0.email.caseInsensitiveCompare(recipient) == .orderedSame },
+            "draft should be addressed to the reply recipient"
+        )
+        XCTAssertEqual(saved.inReplyTo, originalMessageID, "draft should thread via In-Reply-To")
+    }
+
+    private func cleanUpAfterVerificationError(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String
+    ) async {
+        do {
+            try await cleanUpTestDraft(provider: provider, credentials: credentials, marker: marker)
+        } catch {
+            XCTFail("Failed to clean up att.net live draft after verification error: \(error.localizedDescription)")
         }
-
-        try await cleanUpTestDraft(provider: provider, credentials: credentials, marker: marker)
     }
 
     /// Moves the test draft to Trash so the real Drafts folder is left clean, then

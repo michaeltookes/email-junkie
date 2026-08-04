@@ -105,6 +105,7 @@ struct EmailAccountSettingsView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
+            .disabled(appState.isConnecting)
             .accessibilityLabel("Remove \(account.email)")
         }
     }

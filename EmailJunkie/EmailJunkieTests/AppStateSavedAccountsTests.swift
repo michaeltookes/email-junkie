@@ -419,6 +419,33 @@ final class AppStateSavedAccountsTests: XCTestCase {
         XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: gmail.email)), "gmail-pw")
     }
 
+    func testRemoveSavedAccountIsBlockedWhileConnectionVerificationIsRunning() {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let att = SavedMailAccount(email: "me@att.net", host: "imap.mail.att.net", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: att.email,
+            mailHost: att.host,
+            mailPort: att.port,
+            savedAccounts: [gmail, att]
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: gmail.email): "gmail-pw",
+            .mailAppPassword(email: att.email): "att-pw"
+        ])
+        let (app, store, _) = makeAppState(settings: settings, secrets: secrets)
+        app.isConnecting = true
+
+        app.removeSavedAccount(gmail)
+
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertEqual(app.savedAccounts, [gmail, att])
+        XCTAssertEqual(store.loadSettings().savedAccounts, [gmail, att])
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: gmail.email)), "gmail-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: att.email)), "att-pw")
+    }
+
     // MARK: - Persistence across relaunch
 
     func testActiveAccountPersistsAcrossRelaunch() async {

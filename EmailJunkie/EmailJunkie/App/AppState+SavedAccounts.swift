@@ -65,11 +65,11 @@ extension AppState {
         }
 
         do {
-            if shouldRemoveLegacyPassword {
-                try secrets.remove(.mailAppPassword)
-            }
             if let activeKey, activeAccountPassword != nil {
                 try secrets.remove(activeKey)
+            }
+            if shouldRemoveLegacyPassword {
+                try secrets.remove(.mailAppPassword)
             }
             return true
         } catch {

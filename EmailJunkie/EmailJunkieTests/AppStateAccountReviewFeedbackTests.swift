@@ -103,4 +103,30 @@ final class AppStateAccountReviewFeedbackTests: XCTestCase {
         XCTAssertNil((try? secrets.value(for: .mailAppPassword(email: att.email))) ?? nil)
         XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "legacy-gmail-pw")
     }
+
+    func testDisconnectKeepsLegacyPasswordWhenEmptyPerAccountRemovalFails() {
+        let gmail = SavedMailAccount(email: "me@gmail.com", host: "imap.gmail.com", port: 993)
+        let settings = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: gmail.email,
+            mailHost: gmail.host,
+            mailPort: gmail.port,
+            savedAccounts: [gmail]
+        )
+        let secrets = AppStateFailingSecretStore(seed: [
+            .mailAppPassword: "legacy-gmail-pw",
+            .mailAppPassword(email: gmail.email): ""
+        ])
+        secrets.failOnRemove = .mailAppPassword(email: gmail.email)
+        let (app, _) = makeAppState(settings: settings, secrets: secrets)
+
+        app.disconnectMail()
+
+        XCTAssertNotNil(app.connectionError)
+        XCTAssertTrue(app.isAccountConnected)
+        XCTAssertEqual(app.mailAppPassword, "legacy-gmail-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword), "legacy-gmail-pw")
+        XCTAssertEqual(try? secrets.value(for: .mailAppPassword(email: gmail.email)), "")
+    }
 }

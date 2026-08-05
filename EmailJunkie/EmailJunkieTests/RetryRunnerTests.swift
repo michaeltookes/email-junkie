@@ -32,21 +32,27 @@ final class RetryRunnerTests: XCTestCase {
 
     func testSucceedsOnFirstTryWithoutRetrying() async throws {
         var attempts = 0
-        let value = try await runner(maxAttempts: 4).run(classify: { _ in .retry }) {
-            attempts += 1
-            return 42
-        }
+        let value = try await runner(maxAttempts: 4).run(
+            classify: { _ in .retry },
+            operation: {
+                attempts += 1
+                return 42
+            }
+        )
         XCTAssertEqual(value, 42)
         XCTAssertEqual(attempts, 1)
     }
 
     func testRetriesTransientThenSucceeds() async throws {
         var attempts = 0
-        let value = try await runner(maxAttempts: 4).run(classify: { _ in .retry }) {
-            attempts += 1
-            if attempts < 3 { throw TransientError() }
-            return "ok"
-        }
+        let value = try await runner(maxAttempts: 4).run(
+            classify: { _ in .retry },
+            operation: { () throws -> String in
+                attempts += 1
+                if attempts < 3 { throw TransientError() }
+                return "ok"
+            }
+        )
         XCTAssertEqual(value, "ok")
         XCTAssertEqual(attempts, 3)
     }
@@ -54,10 +60,13 @@ final class RetryRunnerTests: XCTestCase {
     func testExhaustsAfterMaxAttemptsAndRethrows() async {
         var attempts = 0
         do {
-            _ = try await runner(maxAttempts: 3).run(classify: { _ in .retry }) {
-                attempts += 1
-                throw TransientError()
-            }
+            _ = try await runner(maxAttempts: 3).run(
+                classify: { _ in .retry },
+                operation: { () throws -> Int in
+                    attempts += 1
+                    throw TransientError()
+                }
+            )
             XCTFail("expected the final error to rethrow")
         } catch {
             XCTAssertTrue(error is TransientError)
@@ -68,10 +77,13 @@ final class RetryRunnerTests: XCTestCase {
     func testStopDecisionShortCircuitsWithoutRetrying() async {
         var attempts = 0
         do {
-            _ = try await runner(maxAttempts: 5).run(classify: { _ in .stop }) {
-                attempts += 1
-                throw PermanentError()
-            }
+            _ = try await runner(maxAttempts: 5).run(
+                classify: { _ in .stop },
+                operation: { () throws -> Int in
+                    attempts += 1
+                    throw PermanentError()
+                }
+            )
             XCTFail("expected an immediate rethrow")
         } catch {
             XCTAssertTrue(error is PermanentError)
@@ -82,10 +94,13 @@ final class RetryRunnerTests: XCTestCase {
     func testCancellationErrorIsNeverRetried() async {
         var attempts = 0
         do {
-            _ = try await runner(maxAttempts: 5).run(classify: { _ in .retry }) {
-                attempts += 1
-                throw CancellationError()
-            }
+            _ = try await runner(maxAttempts: 5).run(
+                classify: { _ in .retry },
+                operation: { () throws -> Int in
+                    attempts += 1
+                    throw CancellationError()
+                }
+            )
             XCTFail("expected CancellationError to rethrow")
         } catch {
             XCTAssertTrue(error is CancellationError)
@@ -119,7 +134,10 @@ final class RetryRunnerTests: XCTestCase {
         let sleeps = SleepRecorder()
         let runner = runner(maxAttempts: 3, base: 1_000, max: 100_000, jitter: 0,
                             recordedSleeps: { sleeps.record($0) })
-        _ = try? await runner.run(classify: { _ in .retry }) { throw TransientError() }
+        _ = try? await runner.run(
+            classify: { _ in .retry },
+            operation: { () throws -> Int in throw TransientError() }
+        )
         // Two sleeps between three attempts: 1000, then 2000.
         XCTAssertEqual(sleeps.values, [1_000, 2_000])
     }

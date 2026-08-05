@@ -162,6 +162,11 @@ final class SMTPSendHandler: ChannelInboundHandler {
 
     private var step: Step = .greeting
     private var settled = false
+    /// Set the instant the message body is written to the wire. Once true, any
+    /// connection-level failure (drop/timeout/I-O error) before the final 250 is
+    /// *ambiguous* — the server may have accepted the message — so it surfaces as
+    /// `sendInterruptedAfterSubmission` and must not be auto-retried (item 27).
+    private var didSubmitData = false
 
     init(
         email: String,
@@ -233,13 +238,21 @@ final class SMTPSendHandler: ChannelInboundHandler {
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        settle(.failure(MailError.connectionFailed(String(describing: error))))
+        settle(.failure(connectionFailure(String(describing: error))))
         context.close(promise: nil)
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        settle(.failure(MailError.connectionFailed("The connection closed before the message was sent.")))
+        settle(.failure(connectionFailure("The connection closed before the message was sent.")))
         context.fireChannelInactive()
+    }
+
+    /// Classifies a connection-level failure by phase: ambiguous once the DATA
+    /// body has been submitted (never auto-retry), plainly transient before then.
+    private func connectionFailure(_ detail: String) -> MailError {
+        didSubmitData
+            ? .sendInterruptedAfterSubmission(detail)
+            : .connectionFailed(detail)
     }
 
     // MARK: - Sending
@@ -250,6 +263,8 @@ final class SMTPSendHandler: ChannelInboundHandler {
     }
 
     private func sendBody(context: ChannelHandlerContext) {
+        // From this write until the final 250, a connection drop is ambiguous.
+        didSubmitData = true
         var payload = Self.dotStuffed(message)
         // Terminate DATA with <CRLF>.<CRLF>; add the leading CRLF only if the
         // message doesn't already end with one.

@@ -71,6 +71,9 @@ extension AppState {
             pauseWatching()
             return
         }
+        // Offline (item 27): skip the poll rather than burn retries against an
+        // unreachable server. Reconnect triggers an immediate catch-up poll.
+        guard isOnline else { return }
         guard !isPollingInbox else { return }
         isPollingInbox = true
         defer { isPollingInbox = false }
@@ -84,8 +87,7 @@ extension AppState {
                 mailbox: mailbox
             )
         } catch {
-            watchError = Self.message(for: error)
-            logger.error("Inbox poll fetch failed: \(error.localizedDescription)")
+            handlePollFetchFailure(error)
             return
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }
@@ -132,11 +134,13 @@ extension AppState {
         mailbox: Mailbox
     ) async throws -> [MailMessage] {
         var limit = watchFetchLimit
-        var messages = try await mailProvider.fetchRecentMessages(
-            credentials,
-            mailbox: mailbox,
-            limit: limit
-        )
+        var messages = try await withResilientRetry {
+            try await self.mailProvider.fetchRecentMessages(
+                credentials,
+                mailbox: mailbox,
+                limit: limit
+            )
+        }
 
         while shouldExpandWatcherFetch(
             messages: messages,
@@ -147,14 +151,33 @@ extension AppState {
             let nextLimit = min(limit * 2, watchCatchUpFetchLimit)
             guard nextLimit > limit else { break }
             limit = nextLimit
-            messages = try await mailProvider.fetchRecentMessages(
-                credentials,
-                mailbox: mailbox,
-                limit: limit
-            )
+            let pageLimit = limit
+            messages = try await withResilientRetry {
+                try await self.mailProvider.fetchRecentMessages(
+                    credentials,
+                    mailbox: mailbox,
+                    limit: pageLimit
+                )
+            }
         }
 
         return messages
+    }
+
+    /// Handles a poll-fetch failure: transient errors just surface as `watchError`
+    /// (the next poll retries), but an auth failure won't self-heal, so we pause
+    /// watching and record it (item 27) rather than fail every poll.
+    private func handlePollFetchFailure(_ error: Error) {
+        watchError = Self.message(for: error)
+        if ResilienceClassifier.classify(error) == .authentication {
+            recordActivity(ActivityEvent(
+                kind: .authFailed,
+                account: normalizedConnectedAccountEmail,
+                detail: Self.message(for: error)
+            ))
+            pauseWatching()
+        }
+        logger.error("Inbox poll fetch failed: \(error.localizedDescription)")
     }
 
     private func shouldExpandWatcherFetch(
@@ -210,7 +233,13 @@ extension AppState {
         guard watchStatus == .watching, mailCredentials == credentials else { return }
 
         do {
-            if try await draftAndEnqueue(message, mailbox: mailbox) {
+            // Retry transient fetch/LLM hiccups within the poll (item 27). On
+            // exhaustion the message is left unprocessed, so the next poll retries
+            // it — the existing skip/pending-draft guards prevent re-notification.
+            let enqueued = try await withResilientRetry {
+                try await self.draftAndEnqueue(message, mailbox: mailbox)
+            }
+            if enqueued {
                 markProcessed(message, account: credentials.email, mailbox: mailbox)
             }
         } catch {

@@ -29,6 +29,11 @@ final class NetworkReachabilityMonitor: NetworkReachabilityMonitoring {
     private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.reachability")
     private var isStarted = false
 
+    /// Nonisolated so it can serve as a default argument for `AppState.init`
+    /// (which evaluates default args outside the main actor). No stored property
+    /// requires main-actor setup — they all use nonisolated default initializers.
+    nonisolated init() {}
+
     func start() {
         guard !isStarted else { return }
         isStarted = true

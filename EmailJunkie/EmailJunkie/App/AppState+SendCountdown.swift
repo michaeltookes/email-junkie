@@ -109,6 +109,13 @@ extension AppState {
         // Never double-dispatch if an approval is already in flight for it.
         guard !approvingDraftIDs.contains(identity) else { return }
 
+        // Went offline during the window (item 27): defer the send rather than
+        // attempt it. It re-dispatches on reconnect through the normal path.
+        if !isOnline {
+            queueDraftForNetwork(current, sendBehavior: .autoSend)
+            return
+        }
+
         approvingDraftIDs.insert(identity)
         defer { approvingDraftIDs.remove(identity) }
         do {

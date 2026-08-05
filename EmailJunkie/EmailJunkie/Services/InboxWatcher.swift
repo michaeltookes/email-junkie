@@ -59,6 +59,13 @@ final class InboxWatcher {
         schedule()
     }
 
+    /// Triggers an immediate catch-up poll (e.g. on network reconnect) if the
+    /// watcher is actively running and awake. Single-flighted like every tick.
+    func pollNow() {
+        guard isRunning, !isAsleep else { return }
+        tick(queueIfRunning: true)
+    }
+
     // MARK: - Scheduling
 
     private func schedule() {

@@ -182,6 +182,32 @@ final class AppState: ObservableObject {
 
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
+
+    // MARK: - Resilience (item 27)
+
+    /// Whether the network currently appears reachable. Drives the offline-pause
+    /// of the poll loop and the "waiting for network" draft state. Starts `true`
+    /// so headless/test construction behaves as online until told otherwise.
+    @Published var isOnline: Bool = true
+
+    /// Identities of approved drafts deferred because the network was offline at
+    /// dispatch time (item 27). They stay in `pendingDrafts` — that reuse *is* the
+    /// offline queue — and dispatch on reconnect. In-memory: the drafts survive a
+    /// restart via the pending-draft store; the auto-dispatch intent does not.
+    @Published var draftsWaitingForNetwork: Set<String> = []
+
+    /// The intended send behavior for each offline-queued draft, so reconnect
+    /// re-dispatches send-vs-save exactly as the user approved it.
+    var offlineQueuedDispatch: [String: SendBehavior] = [:]
+
+    /// The shared exponential-backoff driver for resilient operations (send,
+    /// save, poll-fetch, watcher draft). Overridable so tests drive backoff
+    /// deterministically without real waits (mirrors `sendCountdownTickNanoseconds`).
+    var retryRunner = RetryRunner()
+
+    /// Observes reachability so the app can pause while offline and resume on
+    /// reconnect. Injected for deterministic offline→online tests.
+    let reachability: NetworkReachabilityMonitoring
     /// Messages the watcher passed over instead of drafting, newest first.
     /// This rolling operational log is in-memory only.
     @Published var skippedMessages: [SkippedMessage] = []
@@ -243,13 +269,16 @@ final class AppState: ObservableObject {
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
         llm: LLMProviding = LLMService(),
-        notifier: DraftNotifying = NullDraftNotifier()
+        notifier: DraftNotifying = NullDraftNotifier(),
+        reachability: NetworkReachabilityMonitoring = NetworkReachabilityMonitor()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
         self.llm = llm
         self.notifier = notifier
+        self.reachability = reachability
+        self.isOnline = reachability.isOnline
 
         // Migrate a pre-v11 file to the saved-accounts model before anything reads
         // the mail secret, so the per-account key is populated (item 48). The
@@ -315,6 +344,13 @@ final class AppState: ObservableObject {
 
         self.notifier.onAction = { [weak self] action, identity in
             await self?.handleNotificationAction(action, identity: identity)
+        }
+
+        // Observe reachability but don't start monitoring here — the app starts it
+        // explicitly (`startReachabilityMonitoring`) so headless/test construction
+        // never spins up a real `NWPathMonitor`.
+        self.reachability.onChange = { [weak self] online in
+            self?.handleReachabilityChange(online)
         }
     }
 
@@ -400,8 +436,10 @@ final class AppState: ObservableObject {
         isAccountConnected = true
         if accountChanged {
             // A different account invalidates any in-flight auto-send countdowns
-            // (item 23); they must not fire against the newly connected account.
+            // (item 23) and offline-queued dispatches (item 27); neither must fire
+            // against the newly connected account.
             cancelAllSendCountdowns()
+            clearAllOfflineQueueEntries()
             if wasWatching {
                 stopWatching()
                 startWatchingIfReady()
@@ -430,6 +468,7 @@ final class AppState: ObservableObject {
         markMailHostVerifiedForGuidance()
         isAccountConnected = false
         cancelAllSendCountdowns()
+        clearAllOfflineQueueEntries()
         stopWatching()
         resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")

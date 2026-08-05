@@ -378,21 +378,28 @@ extension AppState {
     /// Sends `draft` over SMTP. Shared by the Settings preview and the approval
     /// queue. Throws `DraftDispatchError.noRecipient` when there is no address.
     func performSend(_ draft: Draft, credentials: MailAccountCredentials) async throws {
+        // Build the message once — including its Message-ID — and reuse it across
+        // retries, so a transient pre-DATA retry can't produce two distinct
+        // messages. The SMTP layer only reports pre-DATA drops as retryable, so
+        // this loop never re-sends after a message may have been accepted (item 27).
+        let outgoing = Self.outgoingMessage(
+            for: draft,
+            from: credentials.email,
+            date: Date(),
+            messageID: Self.generateMessageID(forEmail: credentials.email)
+        )
+        let rfc822 = outgoing.rfc822()
         do {
-            let outgoing = Self.outgoingMessage(
-                for: draft,
-                from: credentials.email,
-                date: Date(),
-                messageID: Self.generateMessageID(forEmail: credentials.email)
-            )
             guard !outgoing.to.isEmpty else { throw DraftDispatchError.noRecipient }
-            try await mailProvider.sendMessage(
-                credentials,
-                rfc822: outgoing.rfc822(),
-                envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
-            )
+            try await withResilientRetry {
+                try await self.mailProvider.sendMessage(
+                    credentials,
+                    rfc822: rfc822,
+                    envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
+                )
+            }
         } catch {
-            recordDraftActivity(.sendFailed, for: draft, detail: Self.draftMessage(for: error))
+            recordDispatchFailureActivity(error, for: draft, failureKind: .sendFailed)
             throw error
         }
         recordDraftActivity(.approvedSent, for: draft, detail: Self.editedBeforeSendDetail(for: draft))
@@ -407,15 +414,18 @@ extension AppState {
             date: Date(),
             messageID: Self.generateMessageID(forEmail: credentials.email)
         )
+        let rfc822 = outgoing.rfc822()
         do {
-            try await mailProvider.appendMessage(
-                credentials,
-                mailbox: .drafts,
-                rfc822: outgoing.rfc822(),
-                flags: [.draft]
-            )
+            try await withResilientRetry {
+                try await self.mailProvider.appendMessage(
+                    credentials,
+                    mailbox: .drafts,
+                    rfc822: rfc822,
+                    flags: [.draft]
+                )
+            }
         } catch {
-            recordDraftActivity(.saveFailed, for: draft, detail: Self.draftMessage(for: error))
+            recordDispatchFailureActivity(error, for: draft, failureKind: .saveFailed)
             throw error
         }
         recordDraftActivity(.approvedSaved, for: draft, detail: Self.editedBeforeSendDetail(for: draft))

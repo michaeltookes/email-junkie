@@ -107,6 +107,12 @@ extension AppState {
             )
             return
         }
+        // Offline (item 27): defer rather than attempt, so we never make a futile
+        // connection or risk a partial send. Re-dispatches on reconnect.
+        if !isOnline {
+            queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior)
+            return
+        }
         try await dispatchApprovedDraft(
             draft,
             sendBehavior: effectiveSendBehavior,
@@ -135,6 +141,7 @@ extension AppState {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
         approvalError = nil
         pendingStaleWarnings.removeValue(forKey: draft.identity)
+        clearOfflineQueueEntry(draft.identity)
         do {
             try removePendingDraft(draft)
             recordDraftActivity(.denied, for: draft)
@@ -256,6 +263,7 @@ extension AppState {
     }
 
     func finalizeApprovedDraft(_ draft: Draft) throws {
+        clearOfflineQueueEntry(draft.identity)
         do {
             try recordApprovedDraftIdentity(draft.identity)
             removePendingDraftAfterApproval(draft)

@@ -41,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ask for notification permission so ready drafts can surface natively.
         appState.notifier.requestAuthorization()
 
+        // Begin watching reachability so work pauses offline and resumes on
+        // reconnect (item 27).
+        appState.startReachabilityMonitoring()
+
         // First-run onboarding: show the setup assistant until it's completed
         // once. An already-configured install is reconciled to "complete" so
         // existing users are never sent back through the flow.
@@ -60,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Outstanding auto-send countdowns (item 23) must not fire during teardown;
         // their drafts remain pending in the persisted queue.
         appState.cancelAllSendCountdowns()
+        appState.stopReachabilityMonitoring()
         appState.saveSettingsSync()
         logger.info("Email Junkie terminating")
     }

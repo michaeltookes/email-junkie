@@ -244,6 +244,23 @@ final class AppState: ObservableObject {
 
     // MARK: - Initialization
 
+    /// Loads persisted pending drafts, dropping any already approved (and rewriting
+    /// the store when that filtering changed it). Static so `init` can call it
+    /// before all stored properties are initialized.
+    private static func loadCleanedPendingDrafts(_ persistence: PersistenceProvider) -> [Draft] {
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
+        return pendingDrafts
+    }
+
     init(
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
@@ -276,16 +293,7 @@ final class AppState: ObservableObject {
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
-        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
-        let loadedPendingDrafts = persistence.loadPendingDrafts()
-        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
-        if pendingDrafts.count != loadedPendingDrafts.count {
-            do {
-                try persistence.savePendingDraftsSync(pendingDrafts)
-            } catch {
-                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
-            }
-        }
+        let pendingDrafts = Self.loadCleanedPendingDrafts(persistence)
         self.pendingDrafts = pendingDrafts
         self.pendingDraftCount = pendingDrafts.count
         self.activityEvents = persistence.loadActivityEvents()

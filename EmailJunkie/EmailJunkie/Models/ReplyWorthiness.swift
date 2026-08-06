@@ -17,6 +17,9 @@ enum ReplyWorthinessReason: String, Equatable, Codable, CaseIterable {
     /// A calendar invite (`Content-Type: text/calendar`) — handled by the
     /// calendar client, not a written reply.
     case calendarInvite
+    /// The sender matches an entry on the user's blocklist (item 18) — the user
+    /// asked the watcher never to draft replies to this sender or domain.
+    case senderBlocklisted
 
     /// A short headline for skip-log / activity UI.
     var headline: String {
@@ -25,6 +28,7 @@ enum ReplyWorthinessReason: String, Equatable, Codable, CaseIterable {
         case .bulkOrListMail: return "Bulk or list mail"
         case .automatedNotification: return "Automated notification"
         case .calendarInvite: return "Calendar invite"
+        case .senderBlocklisted: return "Blocked sender"
         }
     }
 
@@ -39,6 +43,8 @@ enum ReplyWorthinessReason: String, Equatable, Codable, CaseIterable {
             return "This is a machine-generated notification, so there's likely nothing to reply to."
         case .calendarInvite:
             return "This is a calendar invite — it's handled in your calendar, not with a written reply."
+        case .senderBlocklisted:
+            return "You added this sender to your blocklist, so the watcher skipped it."
         }
     }
 }

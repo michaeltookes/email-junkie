@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 11
+    static let currentSchemaVersion = 12
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -41,6 +41,10 @@ struct Settings: Codable, Equatable {
     /// into `savedAccounts` and its app password moves from the legacy shared
     /// Keychain slot to a per-account key.
     static let savedAccountsSchemaVersion = 11
+
+    /// Schema version that introduced the sender allow/blocklist rules (item 18).
+    /// Purely additive: older files decode the two lists as empty.
+    static let senderRulesSchemaVersion = 12
 
     /// The default auto-send undo window, in seconds (item 23). Zero disables it.
     static let defaultSendDelaySeconds = 10
@@ -105,6 +109,14 @@ struct Settings: Codable, Equatable {
     /// already-configured install is treated as complete at launch.
     var onboardingCompleted: Bool
 
+    /// Senders the watcher should always draft, bypassing the reply-worthiness
+    /// heuristics (item 18). Each entry is a full address or a whole domain.
+    var senderAllowlist: [SenderRule]
+
+    /// Senders the watcher should never draft; matches are skipped with a visible
+    /// reason (item 18). Each entry is a full address or a whole domain.
+    var senderBlocklist: [SenderRule]
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -120,7 +132,9 @@ struct Settings: Codable, Equatable {
         llmVerifiedModel: String = "",
         sendBehavior: String = SendBehavior.default.rawValue,
         sendDelaySeconds: Int = Settings.defaultSendDelaySeconds,
-        onboardingCompleted: Bool = false
+        onboardingCompleted: Bool = false,
+        senderAllowlist: [SenderRule] = [],
+        senderBlocklist: [SenderRule] = []
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -137,6 +151,8 @@ struct Settings: Codable, Equatable {
         self.sendBehavior = sendBehavior
         self.sendDelaySeconds = sendDelaySeconds
         self.onboardingCompleted = onboardingCompleted
+        self.senderAllowlist = senderAllowlist
+        self.senderBlocklist = senderBlocklist
     }
 
     /// Default settings for a fresh install.
@@ -149,6 +165,7 @@ struct Settings: Codable, Equatable {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
         case mailHostGuidancePendingEmail, mailPort, savedAccounts
         case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
+        case senderAllowlist, senderBlocklist
     }
 
     init(from decoder: Decoder) throws {
@@ -170,6 +187,8 @@ struct Settings: Codable, Equatable {
         sendDelaySeconds =
             try container.decodeIfPresent(Int.self, forKey: .sendDelaySeconds) ?? Settings.defaultSendDelaySeconds
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
+        senderAllowlist = try container.decodeIfPresent([SenderRule].self, forKey: .senderAllowlist) ?? []
+        senderBlocklist = try container.decodeIfPresent([SenderRule].self, forKey: .senderBlocklist) ?? []
     }
 
     /// Returns a copy with values clamped to sane ranges.
@@ -194,7 +213,16 @@ struct Settings: Codable, Equatable {
             copy.mailHostGuidancePendingEmail = false
         }
         copy.savedAccounts = Self.normalizedSavedAccounts(savedAccounts)
+        copy.senderAllowlist = Self.dedupedRules(senderAllowlist)
+        copy.senderBlocklist = Self.dedupedRules(senderBlocklist)
         return copy
+    }
+
+    /// Collapses duplicate rules (by normalized pattern) to a single entry,
+    /// keeping the first occurrence's order.
+    static func dedupedRules(_ rules: [SenderRule]) -> [SenderRule] {
+        var seen = Set<String>()
+        return rules.filter { seen.insert($0.pattern).inserted }
     }
 
     /// Drops entries with no usable email and collapses duplicates (by normalized

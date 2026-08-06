@@ -31,7 +31,9 @@ extension AppState {
             llmVerifiedModel: verifiedLLMModel,
             sendBehavior: sendBehavior.rawValue,
             sendDelaySeconds: sendDelaySeconds,
-            onboardingCompleted: onboardingCompleted
+            onboardingCompleted: onboardingCompleted,
+            senderAllowlist: senderAllowlist,
+            senderBlocklist: senderBlocklist
         )
     }
 

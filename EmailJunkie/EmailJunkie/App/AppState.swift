@@ -134,6 +134,12 @@ final class AppState: ObservableObject {
     /// Whether first-run onboarding has been completed or dismissed.
     @Published var onboardingCompleted: Bool
 
+    /// Senders to always draft, bypassing the reply-worthiness heuristics (item 18).
+    @Published var senderAllowlist: [SenderRule]
+
+    /// Senders to never draft; matches are skipped with a visible reason (item 18).
+    @Published var senderBlocklist: [SenderRule]
+
     /// Whether the loaded settings file predates the onboarding completion flag.
     /// Used only to keep already-configured installs out of first-run setup.
     let loadedSettingsPredateOnboardingCompletion: Bool
@@ -265,6 +271,8 @@ final class AppState: ObservableObject {
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.sendDelaySeconds = settings.sendDelaySeconds
         self.onboardingCompleted = settings.onboardingCompleted
+        self.senderAllowlist = settings.senderAllowlist
+        self.senderBlocklist = settings.senderBlocklist
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()

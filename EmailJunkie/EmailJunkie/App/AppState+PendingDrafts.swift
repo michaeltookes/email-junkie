@@ -116,7 +116,7 @@ extension AppState {
                 clearOfflineQueueEntry(draft.identity)
             }
         } catch {
-            if offlineQueuedDispatch[draft.identity] != nil, isOnline {
+            if offlineQueuedDispatch[draft.identity] != nil, isOnline || effectiveSendBehavior == .saveAsDraft {
                 clearOfflineQueueEntry(draft.identity)
             }
             throw error

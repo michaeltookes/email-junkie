@@ -375,9 +375,11 @@ private struct PendingDraftCard: View {
             Button("Discard", role: .destructive) {
                 appState.denyDraft(draft)
             }
+            .disabled(isBusy)
             Button(cancelQueuedDispatchLabel) {
                 appState.cancelQueuedDraftDispatch(draft.identity)
             }
+            .disabled(isBusy)
             .accessibilityLabel(cancelQueuedDispatchLabel)
         }
         .padding(8)

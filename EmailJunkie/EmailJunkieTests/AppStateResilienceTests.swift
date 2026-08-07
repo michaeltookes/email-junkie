@@ -337,7 +337,7 @@ final class AppStateResilienceTests: XCTestCase {
         XCTAssertNil(appState.approvalError)
     }
 
-    func testTransientSaveFailureQueuesWithoutRetryWhenReachabilityDrops() async {
+    func testTransientSaveFailureDoesNotQueueWhenReachabilityDropsAfterAppendAttempt() async {
         let draft = pendingDraft()
         let (appState, provider, reachability, persistence) = makeAppState(
             sendBehavior: .saveAsDraft,
@@ -351,15 +351,13 @@ final class AppStateResilienceTests: XCTestCase {
         await appState.approveDraft(draft)
 
         XCTAssertEqual(provider.appendCallCount, 1, "IMAP APPEND is not retried because success can be ambiguous")
-        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
-        XCTAssertEqual(
-            persistence.loadPendingDrafts().first?.offlineQueuedDispatch,
-            OfflineQueuedDraftDispatch(sendBehavior: .saveAsDraft)
-        )
+        XCTAssertFalse(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
         XCTAssertTrue(appState.activityEvents.contains { $0.kind == .saveFailed })
-        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .queuedOffline })
+        XCTAssertFalse(appState.activityEvents.contains { $0.kind == .queuedOffline })
         XCTAssertFalse(appState.activityEvents.contains { $0.kind == .retryExhausted })
-        XCTAssertNil(appState.approvalError)
+        XCTAssertNotNil(appState.approvalError)
     }
 
     func testAmbiguousSendIsNotRetriedAndDraftStaysPending() async {

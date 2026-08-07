@@ -193,8 +193,15 @@ extension AppState {
         clearOfflineQueueEntry(identity)
     }
 
-    func shouldQueueDispatchAfterOfflineFailure(_ error: Error) -> Bool {
-        !isOnline && ResilienceClassifier.classify(error) == .transient
+    func shouldQueueDispatchAfterOfflineFailure(
+        _ error: Error,
+        sendBehavior: SendBehavior
+    ) -> Bool {
+        guard !isOnline, ResilienceClassifier.classify(error) == .transient else { return false }
+        // Without IMAP APPEND phase metadata, a connection failure after a save
+        // attempt may already have created the draft. Leave it for manual review.
+        guard sendBehavior != .saveAsDraft else { return false }
+        return true
     }
 
     @discardableResult
@@ -212,7 +219,10 @@ extension AppState {
                 credentials: credentials
             )
         } catch {
-            guard shouldQueueDispatchAfterOfflineFailure(error) else { throw error }
+            guard shouldQueueDispatchAfterOfflineFailure(
+                error,
+                sendBehavior: effectiveSendBehavior
+            ) else { throw error }
             try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
             return true
         }

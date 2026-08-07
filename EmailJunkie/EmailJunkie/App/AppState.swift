@@ -193,7 +193,7 @@ final class AppState: ObservableObject {
     /// Identities of approved drafts deferred because the network was offline at
     /// dispatch time (item 27). They stay in `pendingDrafts` — that reuse *is* the
     /// offline queue — and dispatch on reconnect. Hydrated from each draft's
-    /// persisted `offlineQueuedDispatch` intent at launch.
+    /// persisted, still-waiting `offlineQueuedDispatch` intent at launch.
     @Published var draftsWaitingForNetwork: Set<String> = []
 
     /// The intended dispatch for each offline-queued draft, so reconnect

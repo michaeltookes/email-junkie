@@ -305,7 +305,7 @@ final class SMTPSendHandler: ChannelInboundHandler {
     }
 
     private func failCommand(_ response: SMTPResponse, context: ChannelHandlerContext) {
-        settle(.failure(MailError.commandFailed(replyText(response))))
+        settle(.failure(MailError.smtpCommandFailed(code: response.code, message: replyText(response))))
         context.close(promise: nil)
     }
 

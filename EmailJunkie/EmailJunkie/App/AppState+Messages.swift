@@ -16,6 +16,8 @@ extension AppState {
             return "Couldn't reach the mail server. (\(detail))"
         case MailError.commandFailed(let detail):
             return "The mail server rejected a request. (\(detail))"
+        case MailError.smtpCommandFailed(_, let message):
+            return "The mail server rejected a send request. (\(message))"
         case MailError.sendInterruptedAfterSubmission(let detail):
             return "The connection dropped while sending — the message may already have gone out. "
                 + "Check your Sent mail before resending. (\(detail))"

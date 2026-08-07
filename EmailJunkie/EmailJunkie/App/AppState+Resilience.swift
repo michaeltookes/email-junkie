@@ -67,6 +67,7 @@ extension AppState {
         var dispatches: [String: OfflineQueuedDraftDispatch] = [:]
         for draft in drafts {
             guard let intent = draft.offlineQueuedDispatch else { continue }
+            guard !intent.isDispatchInFlight else { continue }
             dispatches[draft.identity] = intent
         }
         return dispatches
@@ -135,6 +136,22 @@ extension AppState {
         return hadPersistedIntent || hadMemoryIntent || hadWaitingState
     }
 
+    func markOfflineQueueEntryDispatchInFlight(_ identity: String) throws {
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == identity }),
+              var intent = pendingDrafts[index].offlineQueuedDispatch,
+              !intent.isDispatchInFlight
+        else { return }
+
+        intent.isDispatchInFlight = true
+        var nextDrafts = pendingDrafts
+        nextDrafts[index].offlineQueuedDispatch = intent
+        try persistence.savePendingDraftsSync(nextDrafts)
+        pendingDrafts = nextDrafts
+        pendingDraftCount = nextDrafts.count
+        offlineQueuedDispatch.removeValue(forKey: identity)
+        draftsWaitingForNetwork.remove(identity)
+    }
+
     /// Clears every offline-queue entry (account switch, disconnect). The drafts
     /// themselves remain pending; they simply won't auto-dispatch.
     func clearAllOfflineQueueEntries() {
@@ -160,9 +177,9 @@ extension AppState {
     }
 
     /// Re-dispatches every offline-queued draft through the normal approval path
-    /// on reconnect. The intent stays durable while a delayed auto-send countdown,
-    /// stale check, or network operation is still in progress; it is cleared only
-    /// after dispatch succeeds or the draft falls back to manual review.
+    /// on reconnect. Waiting intents stay durable through countdowns and stale
+    /// checks; once a network dispatch starts, the persisted marker becomes
+    /// terminal so relaunch cannot repeat a send after post-send persistence fails.
     func resumeQueuedDraftsAfterReconnect() async {
         guard !isResumingQueuedDrafts else { return }
         guard !offlineQueuedDispatch.isEmpty else { return }

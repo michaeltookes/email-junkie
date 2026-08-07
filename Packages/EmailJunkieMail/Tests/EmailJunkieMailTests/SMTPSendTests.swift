@@ -130,9 +130,26 @@ final class SMTPSendTests: XCTestCase {
         try feed(channel, "550 No such user\r\n") // RCPT TO rejected
 
         XCTAssertThrowsError(try future.wait()) { error in
-            guard case .commandFailed = error as? MailError else {
-                return XCTFail("expected commandFailed, got \(error)")
+            guard case .smtpCommandFailed(let code, _) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
             }
+            XCTAssertEqual(code, 550)
+        }
+        _ = try? channel.finish()
+    }
+
+    func testTemporarySMTPReplyPreservesStatusCode() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "421 Service not available\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .smtpCommandFailed(let code, let message) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
+            }
+            XCTAssertEqual(code, 421)
+            XCTAssertTrue(message.contains("Service not available"))
         }
         _ = try? channel.finish()
     }
@@ -200,9 +217,10 @@ final class SMTPSendTests: XCTestCase {
         try feed(channel, "552 5.3.4 Message too big\r\n")
 
         XCTAssertThrowsError(try future.wait()) { error in
-            guard case .commandFailed = error as? MailError else {
-                return XCTFail("expected commandFailed, got \(error)")
+            guard case .smtpCommandFailed(let code, _) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
             }
+            XCTAssertEqual(code, 552)
         }
         _ = try? channel.finish()
     }

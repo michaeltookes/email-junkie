@@ -16,21 +16,23 @@ struct DraftNeedsInfo: Codable, Equatable {
     }
 }
 
-/// A user's already-approved dispatch that is waiting for network reachability.
-/// Stored on the pending draft so offline approvals survive relaunch with the
-/// exact approval mode the user chose.
+/// A user's already-approved dispatch. Stored on the pending draft so offline
+/// approvals survive relaunch with the exact approval mode the user chose.
 struct OfflineQueuedDraftDispatch: Codable, Equatable {
     var sendBehavior: SendBehavior
     var force: Bool
+    var isDispatchInFlight: Bool
 
-    init(sendBehavior: SendBehavior, force: Bool = false) {
+    init(sendBehavior: SendBehavior, force: Bool = false, isDispatchInFlight: Bool = false) {
         self.sendBehavior = sendBehavior
         self.force = force
+        self.isDispatchInFlight = isDispatchInFlight
     }
 
     private enum CodingKeys: String, CodingKey {
         case sendBehavior
         case force
+        case isDispatchInFlight
     }
 
     init(from decoder: Decoder) throws {
@@ -38,12 +40,14 @@ struct OfflineQueuedDraftDispatch: Codable, Equatable {
         let rawBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior)
         sendBehavior = rawBehavior.flatMap(SendBehavior.init(rawValue:)) ?? .default
         force = try container.decodeIfPresent(Bool.self, forKey: .force) ?? false
+        isDispatchInFlight = try container.decodeIfPresent(Bool.self, forKey: .isDispatchInFlight) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(sendBehavior.rawValue, forKey: .sendBehavior)
         try container.encode(force, forKey: .force)
+        try container.encode(isDispatchInFlight, forKey: .isDispatchInFlight)
     }
 }
 
@@ -94,7 +98,8 @@ struct Draft: Codable, Identifiable, Equatable {
     /// saved until the user resolves it.
     var needsInfo: DraftNeedsInfo?
     /// An approved dispatch that could not run because the network was offline.
-    /// The draft remains pending, and reconnect resumes this exact intent.
+    /// Once dispatch starts, the intent is marked terminal so relaunch cannot
+    /// automatically repeat a send whose post-send persistence failed.
     var offlineQueuedDispatch: OfflineQueuedDraftDispatch?
 
     /// Whether this draft is flagged as needing the user's input rather than

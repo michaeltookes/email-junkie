@@ -93,6 +93,39 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         return (appState, provider, reachability, persistence)
     }
 
+    private func makeSuspendedQueuedSendAppState(
+        seed queuedDraft: Draft
+    ) -> (AppState, SuspendedSendMailProvider, AppStateMemoryPersistence, InMemorySecretStore) {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(
+            settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                mailEmail: "me@gmail.com",
+                llmProvider: "anthropic",
+                llmVerifiedModel: "claude-sonnet-4-6",
+                sendBehavior: SendBehavior.autoSend.rawValue
+            ),
+            pendingDrafts: [queuedDraft]
+        )
+        let provider = SuspendedSendMailProvider()
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(())),
+            notifier: FakeDraftNotifier(),
+            reachability: FakeReachabilityMonitor()
+        )
+        appState.pendingDrafts = [queuedDraft]
+        appState.pendingDraftCount = 1
+        appState.retryRunner = .immediate
+        return (appState, provider, persistence, secrets)
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 3,
         file: StaticString = #filePath,
@@ -181,37 +214,11 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, intent)
     }
 
-    func testOverlappingReconnectDrainKeepsIntentWhileApprovalInFlight() async {
+    func testOverlappingReconnectDrainMarksIntentInFlightBeforeSending() async {
         var queuedDraft = pendingDraft()
         let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend, force: true)
         queuedDraft.offlineQueuedDispatch = intent
-        let secrets = InMemorySecretStore(seed: [
-            .mailAppPassword: "app-pw",
-            .llmAPIKey(provider: "anthropic"): "sk-live"
-        ])
-        let persistence = AppStateMemoryPersistence(
-            settings: Settings(
-                schemaVersion: Settings.currentSchemaVersion,
-                pollIntervalSeconds: 300,
-                mailEmail: "me@gmail.com",
-                llmProvider: "anthropic",
-                llmVerifiedModel: "claude-sonnet-4-6",
-                sendBehavior: SendBehavior.autoSend.rawValue
-            ),
-            pendingDrafts: [queuedDraft]
-        )
-        let provider = SuspendedSendMailProvider()
-        let appState = AppState(
-            persistence: persistence,
-            secrets: secrets,
-            mailProvider: provider,
-            llm: FakeLLMProvider(result: .success(())),
-            notifier: FakeDraftNotifier(),
-            reachability: FakeReachabilityMonitor()
-        )
-        appState.pendingDrafts = [queuedDraft]
-        appState.pendingDraftCount = 1
-        appState.retryRunner = .immediate
+        let (appState, provider, persistence, _) = makeSuspendedQueuedSendAppState(seed: queuedDraft)
 
         let firstDrain = Task { await appState.resumeQueuedDraftsAfterReconnect() }
         await fulfillment(of: [provider.didStartSend], timeout: 1)
@@ -219,20 +226,74 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         XCTAssertTrue(appState.approvingDraftIDs.contains(queuedDraft.identity))
         await appState.resumeQueuedDraftsAfterReconnect()
 
-        XCTAssertEqual(appState.offlineQueuedDispatch[queuedDraft.identity], intent)
-        XCTAssertTrue(appState.isWaitingForNetwork(queuedDraft.identity))
-        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, intent)
+        let inFlightIntent = OfflineQueuedDraftDispatch(
+            sendBehavior: .autoSend,
+            force: true,
+            isDispatchInFlight: true
+        )
+        XCTAssertEqual(provider.sentMessageCount, 1)
+        XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertFalse(appState.isWaitingForNetwork(queuedDraft.identity))
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, inFlightIntent)
 
         provider.completeSend(with: .success(()))
         await firstDrain.value
         await waitUntil { appState.pendingDrafts.isEmpty }
 
+        XCTAssertEqual(provider.sentMessageCount, 1)
         XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
         XCTAssertFalse(appState.isWaitingForNetwork(queuedDraft.identity))
         XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
     }
 
-    func testReconnectSaveFailureClearsQueuedIntentWhenReachabilityDropsAfterAppendAttempt() async {
+    func testSuccessfulQueuedSendPersistenceFailureDoesNotAutoSendOnRelaunch() async {
+        var queuedDraft = pendingDraft()
+        let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend, force: true)
+        queuedDraft.offlineQueuedDispatch = intent
+        let (appState, provider, persistence, secrets) = makeSuspendedQueuedSendAppState(seed: queuedDraft)
+
+        let drain = Task { await appState.resumeQueuedDraftsAfterReconnect() }
+        await fulfillment(of: [provider.didStartSend], timeout: 1)
+
+        let inFlightIntent = OfflineQueuedDraftDispatch(
+            sendBehavior: .autoSend,
+            force: true,
+            isDispatchInFlight: true
+        )
+        XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertFalse(appState.isWaitingForNetwork(queuedDraft.identity))
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, inFlightIntent)
+
+        persistence.approvedDraftSaveError = AppStatePersistenceError.writeDenied
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+        provider.completeSend(with: .success(()))
+        await drain.value
+
+        XCTAssertEqual(provider.sentMessageCount, 1)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [queuedDraft.identity])
+        XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, inFlightIntent)
+        XCTAssertNotNil(appState.approvalError)
+
+        let relaunchProvider = ResilienceMailProvider(sendResults: [.success(())])
+        let relaunch = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: relaunchProvider,
+            llm: FakeLLMProvider(result: .success(())),
+            notifier: FakeDraftNotifier(),
+            reachability: FakeReachabilityMonitor(isOnline: true)
+        )
+        relaunch.startReachabilityMonitoring()
+        await Task.yield()
+
+        XCTAssertEqual(relaunch.pendingDrafts.map(\.identity), [queuedDraft.identity])
+        XCTAssertTrue(relaunch.offlineQueuedDispatch.isEmpty)
+        XCTAssertFalse(relaunch.isWaitingForNetwork(queuedDraft.identity))
+        XCTAssertEqual(relaunchProvider.sendCallCount, 0)
+    }
+
+    func testReconnectSaveFailureLeavesTerminalIntentWhenReachabilityDropsAfterAppendAttempt() async {
         var draft = pendingDraft()
         let intent = OfflineQueuedDraftDispatch(sendBehavior: .saveAsDraft)
         draft.offlineQueuedDispatch = intent
@@ -252,7 +313,11 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(provider.appendCallCount, 1, "IMAP APPEND is not retried because success can be ambiguous")
         XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
         XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
-        XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
+        XCTAssertFalse(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(
+            persistence.loadPendingDrafts().first?.offlineQueuedDispatch,
+            OfflineQueuedDraftDispatch(sendBehavior: .saveAsDraft, isDispatchInFlight: true)
+        )
         XCTAssertTrue(appState.activityEvents.contains { $0.kind == .saveFailed })
         XCTAssertFalse(appState.activityEvents.contains { $0.kind == .queuedOffline })
         XCTAssertNotNil(appState.approvalError)

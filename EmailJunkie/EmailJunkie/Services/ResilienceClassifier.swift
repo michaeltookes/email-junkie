@@ -58,6 +58,8 @@ enum ResilienceClassifier {
             return .ambiguousSend
         case .authenticationFailed:
             return .authentication
+        case .smtpCommandFailed(let code, _):
+            return (400...499).contains(code) ? .transient : .permanent
         case .incompleteCredentials, .commandFailed, .resultTooLarge:
             return .permanent
         }

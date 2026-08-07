@@ -29,6 +29,23 @@ final class ResilienceClassifierTests: XCTestCase {
         XCTAssertEqual(ResilienceClassifier.classify(MailError.resultTooLarge), .permanent)
     }
 
+    func testSMTPTemporaryCommandFailuresAreTransient() {
+        for code in [421, 450, 451, 452] {
+            XCTAssertEqual(
+                ResilienceClassifier.classify(MailError.smtpCommandFailed(code: code, message: "")),
+                .transient,
+                "SMTP \(code) should be transient"
+            )
+        }
+    }
+
+    func testSMTPPermanentCommandFailuresStayPermanent() {
+        XCTAssertEqual(
+            ResilienceClassifier.classify(MailError.smtpCommandFailed(code: 550, message: "No such user")),
+            .permanent
+        )
+    }
+
     // MARK: - LLM
 
     func testLLMTransportIsTransient() {

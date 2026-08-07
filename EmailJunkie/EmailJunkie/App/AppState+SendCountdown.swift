@@ -40,6 +40,7 @@ extension AppState {
             }
         }
         pendingStaleWarnings.removeValue(forKey: draft.identity)
+        try markOfflineQueueEntryDispatchInFlight(draft.identity)
 
         switch effectiveSendBehavior {
         case .autoSend:

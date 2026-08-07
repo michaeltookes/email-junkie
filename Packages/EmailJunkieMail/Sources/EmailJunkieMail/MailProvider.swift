@@ -10,6 +10,8 @@ public enum MailError: Error, Equatable, Sendable {
     case authenticationFailed(String)
     /// An IMAP command (e.g. SELECT/FETCH) failed.
     case commandFailed(String)
+    /// An SMTP command failed with a status code from the server.
+    case smtpCommandFailed(code: Int, message: String)
     /// The search matched too many messages to return in one response — the
     /// server's reply exceeded the IMAP frame limit. The caller should narrow
     /// the filter (or use the bounded bulk-selection path). See item 45.

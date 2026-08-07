@@ -204,6 +204,10 @@ final class AppState: ObservableObject {
     /// save, poll-fetch, watcher draft). Overridable so tests drive backoff
     /// deterministically without real waits (mirrors `sendCountdownTickNanoseconds`).
     var retryRunner = RetryRunner()
+    /// Set after the reachability monitor delivers its first concrete path.
+    var hasConfirmedReachability = false
+    /// Prevents overlapping reconnect drains from racing each other.
+    var isResumingQueuedDrafts = false
 
     /// Observes reachability so the app can pause while offline and resume on
     /// reconnect. Injected for deterministic offline→online tests.
@@ -279,6 +283,7 @@ final class AppState: ObservableObject {
         self.notifier = notifier
         self.reachability = reachability
         self.isOnline = reachability.isOnline
+        self.hasConfirmedReachability = reachability.hasCurrentPath
 
         // Migrate a pre-v11 file to the saved-accounts model before anything reads
         // the mail secret, so the per-account key is populated (item 48). The

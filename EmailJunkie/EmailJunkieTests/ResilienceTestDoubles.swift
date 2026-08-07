@@ -6,20 +6,24 @@ import Foundation
 @MainActor
 final class FakeReachabilityMonitor: NetworkReachabilityMonitoring {
     private(set) var isOnline: Bool
+    private(set) var hasCurrentPath: Bool
     var onChange: ((Bool) -> Void)?
     private(set) var didStart = false
 
-    init(isOnline: Bool = true) {
+    init(isOnline: Bool = true, hasCurrentPath: Bool = true) {
         self.isOnline = isOnline
+        self.hasCurrentPath = hasCurrentPath
     }
 
     func start() { didStart = true }
     func stop() { didStart = false }
 
     /// Flips reachability and notifies the observer, mirroring the production
-    /// monitor's change-only semantics.
+    /// monitor's change-or-initial-path semantics.
     func setOnline(_ online: Bool) {
-        guard online != isOnline else { return }
+        let isInitialPath = !hasCurrentPath
+        hasCurrentPath = true
+        guard isInitialPath || online != isOnline else { return }
         isOnline = online
         onChange?(online)
     }

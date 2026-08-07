@@ -19,6 +19,8 @@ extension AppState {
     /// `init`) so tests never spin up a real `NWPathMonitor`.
     func startReachabilityMonitoring() {
         reachability.start()
+        guard reachability.hasCurrentPath else { return }
+        hasConfirmedReachability = true
         isOnline = reachability.isOnline
         guard isOnline else { return }
         Task { await resumeQueuedDraftsAfterReconnect() }
@@ -33,16 +35,23 @@ extension AppState {
     /// `pollInboxOnce`); on reconnect it polls immediately and drains any drafts
     /// that were queued while offline.
     func handleReachabilityChange(_ online: Bool) {
-        guard online != isOnline else { return }
+        let wasOnline = isOnline
+        let hadConfirmedReachability = hasConfirmedReachability
+        guard online != wasOnline || !hadConfirmedReachability else { return }
+        hasConfirmedReachability = true
         isOnline = online
         guard online else {
             logger.info("Network offline — pausing polls and queueing dispatches")
             return
         }
-        logger.info("Network online — resuming polls and draining offline queue")
-        recordActivity(ActivityEvent(kind: .resumedOnline, account: normalizedConnectedAccountEmail))
-        if watchStatus == .watching {
-            inboxWatcher.pollNow()
+        if hadConfirmedReachability, !wasOnline {
+            logger.info("Network online — resuming polls and draining offline queue")
+            recordActivity(ActivityEvent(kind: .resumedOnline, account: normalizedConnectedAccountEmail))
+            if watchStatus == .watching {
+                inboxWatcher.pollNow()
+            }
+        } else {
+            logger.info("Network online — draining restored offline queue")
         }
         Task { await resumeQueuedDraftsAfterReconnect() }
     }
@@ -155,7 +164,10 @@ extension AppState {
     /// stale check, or network operation is still in progress; it is cleared only
     /// after dispatch succeeds or the draft falls back to manual review.
     func resumeQueuedDraftsAfterReconnect() async {
+        guard !isResumingQueuedDrafts else { return }
         guard !offlineQueuedDispatch.isEmpty else { return }
+        isResumingQueuedDrafts = true
+        defer { isResumingQueuedDrafts = false }
         // Snapshot: approveDraft may re-queue entries, mutating the map mid-drain.
         let queued = offlineQueuedDispatch
         for (identity, intent) in queued {
@@ -171,6 +183,7 @@ extension AppState {
 
     private func clearQueuedDispatchIfManualReviewNeeded(_ identity: String) {
         guard offlineQueuedDispatch[identity] != nil else { return }
+        guard !approvingDraftIDs.contains(identity) else { return }
         guard pendingDrafts.contains(where: { $0.identity == identity }) else {
             clearOfflineQueueEntry(identity)
             return

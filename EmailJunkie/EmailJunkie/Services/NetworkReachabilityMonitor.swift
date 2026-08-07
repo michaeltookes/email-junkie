@@ -8,6 +8,8 @@ import Network
 protocol NetworkReachabilityMonitoring: AnyObject {
     /// Whether the network currently appears usable.
     var isOnline: Bool { get }
+    /// Whether the monitor has delivered at least one concrete path value.
+    var hasCurrentPath: Bool { get }
     /// Invoked on the main actor whenever reachability changes. Set by `AppState`.
     var onChange: ((Bool) -> Void)? { get set }
     /// Begins monitoring. Idempotent.
@@ -23,6 +25,7 @@ protocol NetworkReachabilityMonitoring: AnyObject {
 final class NetworkReachabilityMonitor: NetworkReachabilityMonitoring {
 
     private(set) var isOnline: Bool = true
+    private(set) var hasCurrentPath = false
     var onChange: ((Bool) -> Void)?
 
     private let monitor = NWPathMonitor()
@@ -53,7 +56,9 @@ final class NetworkReachabilityMonitor: NetworkReachabilityMonitoring {
     }
 
     private func apply(online: Bool) {
-        guard online != isOnline else { return }
+        let isInitialPath = !hasCurrentPath
+        hasCurrentPath = true
+        guard isInitialPath || online != isOnline else { return }
         isOnline = online
         onChange?(online)
     }

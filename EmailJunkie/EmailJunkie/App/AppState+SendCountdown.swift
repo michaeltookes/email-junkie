@@ -112,7 +112,12 @@ extension AppState {
         // Went offline during the window (item 27): defer the send rather than
         // attempt it. It re-dispatches on reconnect through the normal path.
         if !isOnline {
-            queueDraftForNetwork(current, sendBehavior: .autoSend)
+            do {
+                try queueDraftForNetwork(current, sendBehavior: .autoSend)
+            } catch {
+                approvalError = Self.draftMessage(for: error)
+                logger.error("Failed to queue auto-send after countdown: \(error.localizedDescription)")
+            }
             return
         }
 

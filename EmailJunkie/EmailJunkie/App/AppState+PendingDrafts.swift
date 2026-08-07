@@ -110,10 +110,10 @@ extension AppState {
         // Offline (item 27): defer rather than attempt, so we never make a futile
         // connection or risk a partial send. Re-dispatches on reconnect.
         if !isOnline {
-            queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior)
+            try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
             return
         }
-        try await dispatchApprovedDraft(
+        try await dispatchApprovedDraftOrQueueOnOfflineFailure(
             draft,
             sendBehavior: effectiveSendBehavior,
             force: force,

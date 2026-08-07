@@ -27,12 +27,36 @@ final class AppStateResilienceTests: XCTestCase {
         )
     }
 
+    private func message(
+        id: UInt32,
+        subject: String,
+        inReplyTo: String? = nil,
+        messageID: String? = nil
+    ) -> MailMessage {
+        MailMessage(
+            id: id,
+            uidValidity: 10,
+            from: MailAddress(email: "alice@example.com"),
+            to: [],
+            subject: subject,
+            date: "",
+            inReplyTo: inReplyTo,
+            messageID: messageID
+        )
+    }
+
+    private func searchResult(_ messages: [MailMessage]) -> MailSearchResult {
+        MailSearchResult(messages: messages, totalMatches: messages.count, offset: 0, hasMore: false)
+    }
+
     private func makeAppState(
         online: Bool = true,
         sendBehavior: SendBehavior = .autoSend,
         sendDelaySeconds: Int = 0,
         sendResults: [Result<Void, MailError>] = [.success(())],
+        appendResults: [Result<Void, MailError>] = [.success(())],
         fetchResult: Result<[MailMessage], MailError> = .success([]),
+        searchResult: Result<MailSearchResult, MailError> = .failure(.commandFailed("search unsupported")),
         seed drafts: [Draft] = []
     ) -> (AppState, ResilienceMailProvider, FakeReachabilityMonitor, AppStateMemoryPersistence) {
         let secrets = InMemorySecretStore(seed: [
@@ -51,7 +75,12 @@ final class AppStateResilienceTests: XCTestCase {
             ),
             pendingDrafts: drafts
         )
-        let provider = ResilienceMailProvider(sendResults: sendResults, fetchResult: fetchResult)
+        let provider = ResilienceMailProvider(
+            sendResults: sendResults,
+            appendResults: appendResults,
+            fetchResult: fetchResult,
+            searchResult: searchResult
+        )
         let reachability = FakeReachabilityMonitor(isOnline: online)
         let appState = AppState(
             persistence: persistence,
@@ -92,12 +121,65 @@ final class AppStateResilienceTests: XCTestCase {
 
         await appState.approveDraft(draft)
 
+        let expectedIntent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
         XCTAssertEqual(provider.sendCallCount, 0, "no send should be attempted while offline")
         XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(appState.offlineQueuedDispatch[draft.identity], expectedIntent)
         XCTAssertEqual(appState.pendingDrafts.map(\.id), [1], "draft stays queued")
         XCTAssertEqual(persistence.loadPendingDrafts().map(\.id), [1], "and remains persisted for restart survival")
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, expectedIntent)
         XCTAssertEqual(appState.activityEvents.map(\.kind), [.queuedOffline])
         XCTAssertFalse(persistence.loadApprovedDraftIdentities().contains(draft.identity), "not finalized")
+    }
+
+    func testRelaunchRestoresQueuedDispatchAndDrainsOnReconnect() async {
+        let draft = pendingDraft()
+        let (initialAppState, _, _, initialPersistence) = makeAppState(online: false, seed: [draft])
+
+        await initialAppState.approveDraft(draft)
+        let restoredDrafts = initialPersistence.loadPendingDrafts()
+        let (restartedAppState, provider, reachability, persistence) = makeAppState(
+            online: false,
+            seed: restoredDrafts
+        )
+
+        XCTAssertTrue(restartedAppState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(
+            restartedAppState.offlineQueuedDispatch[draft.identity],
+            OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        )
+
+        reachability.setOnline(true)
+        await waitUntil { restartedAppState.pendingDrafts.isEmpty }
+
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertTrue(restartedAppState.offlineQueuedDispatch.isEmpty)
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(draft.identity))
+    }
+
+    func testRelaunchRestoresForcedQueuedDispatchWithoutRepeatingStaleCheck() async {
+        let draft = pendingDraft(id: 5)
+        var queuedDraft = draft
+        queuedDraft.offlineQueuedDispatch = OfflineQueuedDraftDispatch(sendBehavior: .autoSend, force: true)
+        let staleThread = searchResult([
+            message(id: 5, subject: "Lunch?", messageID: "<orig@example.com>"),
+            message(id: 9, subject: "Re: Lunch?", inReplyTo: "<orig@example.com>", messageID: "<new@example.com>")
+        ])
+        let (appState, provider, reachability, _) = makeAppState(
+            online: false,
+            searchResult: .success(staleThread),
+            seed: [queuedDraft]
+        )
+
+        reachability.setOnline(true)
+        await waitUntil {
+            provider.sendCallCount == 1 || appState.pendingStaleWarnings[draft.identity] != nil
+        }
+
+        XCTAssertEqual(provider.searchCallCount, 0, "force should skip the stale re-check on reconnect")
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertNil(appState.pendingStaleWarnings[draft.identity])
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
     func testReconnectDrainsQueuedDraftExactlyOnce() async {
@@ -137,14 +219,16 @@ final class AppStateResilienceTests: XCTestCase {
 
     func testAccountSwitchClearsOfflineQueue() async {
         let draft = pendingDraft()
-        let (appState, _, _, _) = makeAppState(online: false, seed: [draft])
+        let (appState, _, _, persistence) = makeAppState(online: false, seed: [draft])
         await appState.approveDraft(draft)
         XCTAssertFalse(appState.draftsWaitingForNetwork.isEmpty)
+        XCTAssertNotNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
 
         appState.clearAllOfflineQueueEntries()
 
         XCTAssertTrue(appState.draftsWaitingForNetwork.isEmpty)
         XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
     }
 
     // MARK: - Reachability drives the poll loop
@@ -189,6 +273,67 @@ final class AppStateResilienceTests: XCTestCase {
         XCTAssertEqual(appState.activityEvents.map(\.kind), [.approvedSent])
     }
 
+    func testTransientSendFailureQueuesWhenReachabilityDropsDuringRetries() async {
+        let draft = pendingDraft()
+        let failures = Array(
+            repeating: Result<Void, MailError>.failure(.connectionFailed("offline")),
+            count: RetryPolicy.default.maxAttempts
+        )
+        let (appState, provider, reachability, persistence) = makeAppState(
+            sendResults: failures,
+            seed: [draft]
+        )
+        appState.retryRunner = RetryRunner(
+            sleep: { _ in
+                await MainActor.run { reachability.setOnline(false) }
+            },
+            randomUnitInterval: { 0.5 }
+        )
+
+        await appState.approveDraft(draft)
+
+        XCTAssertEqual(provider.sendCallCount, RetryPolicy.default.maxAttempts)
+        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(
+            persistence.loadPendingDrafts().first?.offlineQueuedDispatch,
+            OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        )
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .retryExhausted })
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .queuedOffline })
+        XCTAssertNil(appState.approvalError)
+    }
+
+    func testTransientSaveFailureQueuesWhenReachabilityDropsDuringRetries() async {
+        let draft = pendingDraft()
+        let failures = Array(
+            repeating: Result<Void, MailError>.failure(.connectionFailed("offline")),
+            count: RetryPolicy.default.maxAttempts
+        )
+        let (appState, provider, reachability, persistence) = makeAppState(
+            sendBehavior: .saveAsDraft,
+            appendResults: failures,
+            seed: [draft]
+        )
+        appState.retryRunner = RetryRunner(
+            sleep: { _ in
+                await MainActor.run { reachability.setOnline(false) }
+            },
+            randomUnitInterval: { 0.5 }
+        )
+
+        await appState.approveDraft(draft)
+
+        XCTAssertEqual(provider.appendCallCount, RetryPolicy.default.maxAttempts)
+        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(
+            persistence.loadPendingDrafts().first?.offlineQueuedDispatch,
+            OfflineQueuedDraftDispatch(sendBehavior: .saveAsDraft)
+        )
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .retryExhausted })
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .queuedOffline })
+        XCTAssertNil(appState.approvalError)
+    }
+
     func testAmbiguousSendIsNotRetriedAndDraftStaysPending() async {
         let draft = pendingDraft()
         let (appState, provider, _, persistence) = makeAppState(
@@ -231,14 +376,25 @@ final class AppStateResilienceTests: XCTestCase {
 final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
     private let lock = NSLock()
     private var sendResults: [Result<Void, MailError>]
+    private var appendResults: [Result<Void, MailError>]
     private let fetchResult: Result<[MailMessage], MailError>
+    private let searchResult: Result<MailSearchResult, MailError>
     private var seenRFC822: [Data] = []
     private(set) var sendCallCount = 0
+    private(set) var appendCallCount = 0
     private(set) var fetchCallCount = 0
+    private(set) var searchCallCount = 0
 
-    init(sendResults: [Result<Void, MailError>], fetchResult: Result<[MailMessage], MailError> = .success([])) {
+    init(
+        sendResults: [Result<Void, MailError>],
+        appendResults: [Result<Void, MailError>] = [.success(())],
+        fetchResult: Result<[MailMessage], MailError> = .success([]),
+        searchResult: Result<MailSearchResult, MailError> = .failure(.commandFailed("search unsupported"))
+    ) {
         self.sendResults = sendResults
+        self.appendResults = appendResults
         self.fetchResult = fetchResult
+        self.searchResult = searchResult
     }
 
     var distinctRFC822Count: Int {
@@ -261,9 +417,26 @@ final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
         _ credentials: MailAccountCredentials, mailbox: Mailbox, uid: UInt32, expectedUIDValidity: UInt32?
     ) async throws -> Data { Data("Please advise.".utf8) }
 
+    func searchMessages(
+        _ credentials: MailAccountCredentials,
+        mailbox: Mailbox,
+        criteria: MailSearchCriteria,
+        offset: Int,
+        limit: Int
+    ) async throws -> MailSearchResult {
+        lock.lock(); searchCallCount += 1; lock.unlock()
+        return try searchResult.get()
+    }
+
     func appendMessage(
         _ credentials: MailAccountCredentials, mailbox: Mailbox, rfc822: Data, flags: [MailFlag]
-    ) async throws {}
+    ) async throws {
+        lock.lock()
+        appendCallCount += 1
+        let result = appendResults.count > 1 ? appendResults.removeFirst() : (appendResults.first ?? .success(()))
+        lock.unlock()
+        try result.get()
+    }
 
     func sendMessage(
         _ credentials: MailAccountCredentials, rfc822: Data, envelope: SMTPEnvelope

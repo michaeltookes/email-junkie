@@ -192,13 +192,13 @@ final class AppState: ObservableObject {
 
     /// Identities of approved drafts deferred because the network was offline at
     /// dispatch time (item 27). They stay in `pendingDrafts` — that reuse *is* the
-    /// offline queue — and dispatch on reconnect. In-memory: the drafts survive a
-    /// restart via the pending-draft store; the auto-dispatch intent does not.
+    /// offline queue — and dispatch on reconnect. Hydrated from each draft's
+    /// persisted `offlineQueuedDispatch` intent at launch.
     @Published var draftsWaitingForNetwork: Set<String> = []
 
-    /// The intended send behavior for each offline-queued draft, so reconnect
-    /// re-dispatches send-vs-save exactly as the user approved it.
-    var offlineQueuedDispatch: [String: SendBehavior] = [:]
+    /// The intended dispatch for each offline-queued draft, so reconnect
+    /// re-dispatches send-vs-save and force overrides exactly as approved.
+    var offlineQueuedDispatch: [String: OfflineQueuedDraftDispatch] = [:]
 
     /// The shared exponential-backoff driver for resilient operations (send,
     /// save, poll-fetch, watcher draft). Overridable so tests drive backoff
@@ -297,18 +297,11 @@ final class AppState: ObservableObject {
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
-        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
-        let loadedPendingDrafts = persistence.loadPendingDrafts()
-        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
-        if pendingDrafts.count != loadedPendingDrafts.count {
-            do {
-                try persistence.savePendingDraftsSync(pendingDrafts)
-            } catch {
-                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
-            }
-        }
-        self.pendingDrafts = pendingDrafts
-        self.pendingDraftCount = pendingDrafts.count
+        let pendingState = Self.restoredPendingDraftState(persistence: persistence)
+        self.pendingDrafts = pendingState.drafts
+        self.pendingDraftCount = pendingState.drafts.count
+        self.offlineQueuedDispatch = pendingState.offlineQueuedDispatch
+        self.draftsWaitingForNetwork = pendingState.waitingForNetwork
         self.activityEvents = persistence.loadActivityEvents()
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
@@ -343,6 +336,27 @@ final class AppState: ObservableObject {
         )
 
         installExternalActionHandlers()
+    }
+
+    private static func restoredPendingDraftState(
+        persistence: PersistenceProvider
+    ) -> (
+        drafts: [Draft],
+        offlineQueuedDispatch: [String: OfflineQueuedDraftDispatch],
+        waitingForNetwork: Set<String>
+    ) {
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
+        let offlineQueuedDispatch = offlineQueuedDispatches(from: pendingDrafts)
+        return (pendingDrafts, offlineQueuedDispatch, Set(offlineQueuedDispatch.keys))
     }
 
     /// Wires the notification-action and reachability-change callbacks. Called

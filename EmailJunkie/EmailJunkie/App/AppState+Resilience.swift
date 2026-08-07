@@ -52,21 +52,54 @@ extension AppState {
         draftsWaitingForNetwork.contains(identity)
     }
 
+    static func offlineQueuedDispatches(from drafts: [Draft]) -> [String: OfflineQueuedDraftDispatch] {
+        var dispatches: [String: OfflineQueuedDraftDispatch] = [:]
+        for draft in drafts {
+            guard let intent = draft.offlineQueuedDispatch else { continue }
+            dispatches[draft.identity] = intent
+        }
+        return dispatches
+    }
+
     /// Defers an approved draft because we're offline: it stays pending, gains a
     /// "waiting for network" flag, and will dispatch on reconnect with the same
     /// send behavior. No send is attempted, so there's no risk of a partial send.
-    func queueDraftForNetwork(_ draft: Draft, sendBehavior behavior: SendBehavior) {
-        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
-        offlineQueuedDispatch[draft.identity] = behavior
+    func queueDraftForNetwork(
+        _ draft: Draft,
+        sendBehavior behavior: SendBehavior,
+        force: Bool = false
+    ) throws {
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return }
+        let intent = OfflineQueuedDraftDispatch(sendBehavior: behavior, force: force)
+        let previous = pendingDrafts[index]
+        pendingDrafts[index].offlineQueuedDispatch = intent
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            pendingDrafts[index] = previous
+            logger.error("Failed to persist offline dispatch intent: \(error.localizedDescription)")
+            throw error
+        }
+        offlineQueuedDispatch[draft.identity] = intent
         draftsWaitingForNetwork.insert(draft.identity)
-        recordDraftActivity(.queuedOffline, for: draft)
-        logger.info("Queued draft for network (\(behavior.rawValue, privacy: .public))")
+        recordDraftActivity(.queuedOffline, for: pendingDrafts[index])
+        logger.info("Queued draft for network (\(behavior.rawValue, privacy: .public), force: \(force, privacy: .public))")
     }
 
     /// Clears a single draft's offline-queue state (on deny, dispatch, or drain).
     func clearOfflineQueueEntry(_ identity: String) {
         offlineQueuedDispatch.removeValue(forKey: identity)
         draftsWaitingForNetwork.remove(identity)
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == identity }),
+              pendingDrafts[index].offlineQueuedDispatch != nil else {
+            return
+        }
+        pendingDrafts[index].offlineQueuedDispatch = nil
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            logger.error("Failed to clear offline dispatch intent: \(error.localizedDescription)")
+        }
     }
 
     /// Clears every offline-queue entry (account switch, disconnect). The drafts
@@ -75,6 +108,17 @@ extension AppState {
         guard !offlineQueuedDispatch.isEmpty || !draftsWaitingForNetwork.isEmpty else { return }
         offlineQueuedDispatch.removeAll()
         draftsWaitingForNetwork.removeAll()
+        var didClearPersistedIntent = false
+        for index in pendingDrafts.indices where pendingDrafts[index].offlineQueuedDispatch != nil {
+            pendingDrafts[index].offlineQueuedDispatch = nil
+            didClearPersistedIntent = true
+        }
+        guard didClearPersistedIntent else { return }
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            logger.error("Failed to clear offline dispatch intents: \(error.localizedDescription)")
+        }
     }
 
     /// Re-dispatches every offline-queued draft through the normal approval path
@@ -84,10 +128,33 @@ extension AppState {
         guard !offlineQueuedDispatch.isEmpty else { return }
         // Snapshot: approveDraft may re-queue entries, mutating the map mid-drain.
         let queued = offlineQueuedDispatch
-        for (identity, behavior) in queued {
+        for (identity, intent) in queued {
             clearOfflineQueueEntry(identity)
             guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { continue }
-            await approveDraft(draft, sendBehavior: behavior)
+            await approveDraft(draft, sendBehavior: intent.sendBehavior, force: intent.force)
+        }
+    }
+
+    func shouldQueueDispatchAfterOfflineFailure(_ error: Error) -> Bool {
+        !isOnline && ResilienceClassifier.classify(error) == .transient
+    }
+
+    func dispatchApprovedDraftOrQueueOnOfflineFailure(
+        _ draft: Draft,
+        sendBehavior effectiveSendBehavior: SendBehavior,
+        force: Bool,
+        credentials: MailAccountCredentials
+    ) async throws {
+        do {
+            try await dispatchApprovedDraft(
+                draft,
+                sendBehavior: effectiveSendBehavior,
+                force: force,
+                credentials: credentials
+            )
+        } catch {
+            guard shouldQueueDispatchAfterOfflineFailure(error) else { throw error }
+            try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
         }
     }
 

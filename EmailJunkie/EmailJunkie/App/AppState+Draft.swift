@@ -416,16 +416,16 @@ extension AppState {
         )
         let rfc822 = outgoing.rfc822()
         do {
-            try await withResilientRetry {
-                try await self.mailProvider.appendMessage(
-                    credentials,
-                    mailbox: .drafts,
-                    rfc822: rfc822,
-                    flags: [.draft]
-                )
-            }
+            try await mailProvider.appendMessage(
+                credentials,
+                mailbox: .drafts,
+                rfc822: rfc822,
+                flags: [.draft]
+            )
         } catch {
-            recordDispatchFailureActivity(error, for: draft, failureKind: .saveFailed)
+            let kind: ActivityEventKind =
+                ResilienceClassifier.classify(error) == .authentication ? .authFailed : .saveFailed
+            recordDraftActivity(kind, for: draft, detail: Self.draftMessage(for: error))
             throw error
         }
         recordDraftActivity(.approvedSaved, for: draft, detail: Self.editedBeforeSendDetail(for: draft))

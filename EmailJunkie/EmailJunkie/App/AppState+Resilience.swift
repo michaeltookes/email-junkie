@@ -20,6 +20,8 @@ extension AppState {
     func startReachabilityMonitoring() {
         reachability.start()
         isOnline = reachability.isOnline
+        guard isOnline else { return }
+        Task { await resumeQueuedDraftsAfterReconnect() }
     }
 
     /// Stops reachability monitoring (app teardown).
@@ -139,14 +141,15 @@ extension AppState {
         !isOnline && ResilienceClassifier.classify(error) == .transient
     }
 
+    @discardableResult
     func dispatchApprovedDraftOrQueueOnOfflineFailure(
         _ draft: Draft,
         sendBehavior effectiveSendBehavior: SendBehavior,
         force: Bool,
         credentials: MailAccountCredentials
-    ) async throws {
+    ) async throws -> Bool {
         do {
-            try await dispatchApprovedDraft(
+            return try await dispatchApprovedDraft(
                 draft,
                 sendBehavior: effectiveSendBehavior,
                 force: force,
@@ -155,6 +158,7 @@ extension AppState {
         } catch {
             guard shouldQueueDispatchAfterOfflineFailure(error) else { throw error }
             try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
+            return true
         }
     }
 

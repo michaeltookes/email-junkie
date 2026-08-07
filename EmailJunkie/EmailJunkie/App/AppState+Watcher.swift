@@ -244,6 +244,14 @@ extension AppState {
             }
         } catch {
             watchError = Self.draftMessage(for: error)
+            if ResilienceClassifier.classify(error) == .authentication {
+                recordActivity(ActivityEvent(
+                    kind: .authFailed,
+                    account: normalizedConnectedAccountEmail,
+                    detail: Self.draftMessage(for: error)
+                ))
+                pauseWatching()
+            }
             logger.error("Watcher draft failed: \(error.localizedDescription)")
         }
     }

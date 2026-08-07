@@ -157,6 +157,23 @@ final class AppStateResilienceTests: XCTestCase {
         XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(draft.identity))
     }
 
+    func testStartReachabilityMonitoringDrainsRestoredQueueWhenAlreadyOnline() async {
+        var queuedDraft = pendingDraft()
+        queuedDraft.offlineQueuedDispatch = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        let (appState, provider, reachability, persistence) = makeAppState(
+            online: true,
+            seed: [queuedDraft]
+        )
+
+        appState.startReachabilityMonitoring()
+        await waitUntil { appState.pendingDrafts.isEmpty }
+
+        XCTAssertTrue(reachability.didStart)
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertTrue(persistence.loadApprovedDraftIdentities().contains(queuedDraft.identity))
+    }
+
     func testRelaunchRestoresForcedQueuedDispatchWithoutRepeatingStaleCheck() async {
         let draft = pendingDraft(id: 5)
         var queuedDraft = draft
@@ -303,34 +320,28 @@ final class AppStateResilienceTests: XCTestCase {
         XCTAssertNil(appState.approvalError)
     }
 
-    func testTransientSaveFailureQueuesWhenReachabilityDropsDuringRetries() async {
+    func testTransientSaveFailureQueuesWithoutRetryWhenReachabilityDrops() async {
         let draft = pendingDraft()
-        let failures = Array(
-            repeating: Result<Void, MailError>.failure(.connectionFailed("offline")),
-            count: RetryPolicy.default.maxAttempts
-        )
         let (appState, provider, reachability, persistence) = makeAppState(
             sendBehavior: .saveAsDraft,
-            appendResults: failures,
+            appendResults: [.failure(.connectionFailed("offline"))],
             seed: [draft]
         )
-        appState.retryRunner = RetryRunner(
-            sleep: { _ in
-                await MainActor.run { reachability.setOnline(false) }
-            },
-            randomUnitInterval: { 0.5 }
-        )
+        provider.beforeAppendResult = {
+            await MainActor.run { reachability.setOnline(false) }
+        }
 
         await appState.approveDraft(draft)
 
-        XCTAssertEqual(provider.appendCallCount, RetryPolicy.default.maxAttempts)
+        XCTAssertEqual(provider.appendCallCount, 1, "IMAP APPEND is not retried because success can be ambiguous")
         XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
         XCTAssertEqual(
             persistence.loadPendingDrafts().first?.offlineQueuedDispatch,
             OfflineQueuedDraftDispatch(sendBehavior: .saveAsDraft)
         )
-        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .retryExhausted })
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .saveFailed })
         XCTAssertTrue(appState.activityEvents.contains { $0.kind == .queuedOffline })
+        XCTAssertFalse(appState.activityEvents.contains { $0.kind == .retryExhausted })
         XCTAssertNil(appState.approvalError)
     }
 
@@ -384,6 +395,7 @@ final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
     private(set) var appendCallCount = 0
     private(set) var fetchCallCount = 0
     private(set) var searchCallCount = 0
+    var beforeAppendResult: (@Sendable () async -> Void)?
 
     init(
         sendResults: [Result<Void, MailError>],
@@ -435,6 +447,7 @@ final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
         appendCallCount += 1
         let result = appendResults.count > 1 ? appendResults.removeFirst() : (appendResults.first ?? .success(()))
         lock.unlock()
+        await beforeAppendResult?()
         try result.get()
     }
 

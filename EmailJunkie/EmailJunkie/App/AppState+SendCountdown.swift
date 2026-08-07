@@ -125,7 +125,7 @@ extension AppState {
         defer { approvingDraftIDs.remove(identity) }
         do {
             // `current` carries any inline edit (item 19) made during the window.
-            let didDispatch = try await dispatchApprovedDraft(
+            let didDispatch = try await dispatchApprovedDraftOrQueueOnOfflineFailure(
                 current,
                 sendBehavior: .autoSend,
                 force: false,

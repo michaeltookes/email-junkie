@@ -47,6 +47,7 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
 
     private func makeAppState(
         online: Bool = true,
+        sendBehavior: SendBehavior = .autoSend,
         sendDelaySeconds: Int = 0,
         searchResult: Result<MailSearchResult, MailError> = .failure(.commandFailed("search unsupported")),
         seed drafts: [Draft] = []
@@ -62,6 +63,7 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
                 mailEmail: "me@gmail.com",
                 llmProvider: "anthropic",
                 llmVerifiedModel: "claude-sonnet-4-6",
+                sendBehavior: sendBehavior.rawValue,
                 sendDelaySeconds: sendDelaySeconds
             ),
             pendingDrafts: drafts
@@ -102,6 +104,25 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         }
     }
 
+    func testOfflineApprovalQueuesBeforeStartingCountdown() async {
+        let draft = pendingDraft()
+        let (appState, provider, _, persistence) = makeAppState(
+            online: false,
+            sendDelaySeconds: 10,
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+
+        let expectedIntent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        XCTAssertTrue(appState.pendingSendCountdowns.isEmpty)
+        XCTAssertTrue(appState.sendCountdownTasks.isEmpty)
+        XCTAssertEqual(provider.sendCallCount, 0)
+        XCTAssertEqual(appState.offlineQueuedDispatch[draft.identity], expectedIntent)
+        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, expectedIntent)
+    }
+
     func testReconnectKeepsQueuedDispatchDurableDuringAutoSendCountdown() async {
         var queuedDraft = pendingDraft()
         let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
@@ -120,6 +141,58 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         XCTAssertEqual(appState.offlineQueuedDispatch[queuedDraft.identity], intent)
         XCTAssertTrue(appState.isWaitingForNetwork(queuedDraft.identity))
         XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, intent)
+    }
+
+    func testCancelReconnectCountdownClearsQueuedIntent() async {
+        var draft = pendingDraft()
+        let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        draft.offlineQueuedDispatch = intent
+        let (appState, provider, _, persistence) = makeAppState(
+            online: true,
+            sendDelaySeconds: 10,
+            seed: [draft]
+        )
+        appState.sendCountdownTickNanoseconds = 60_000_000_000
+
+        await appState.resumeQueuedDraftsAfterReconnect()
+        XCTAssertEqual(appState.pendingSendCountdowns[draft.identity], 10)
+        XCTAssertEqual(appState.offlineQueuedDispatch[draft.identity], intent)
+
+        appState.cancelSendCountdown(draft)
+
+        XCTAssertEqual(provider.sendCallCount, 0)
+        XCTAssertTrue(appState.pendingSendCountdowns.isEmpty)
+        XCTAssertTrue(appState.sendCountdownTasks.isEmpty)
+        XCTAssertNil(appState.offlineQueuedDispatch[draft.identity])
+        XCTAssertFalse(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertNil(appState.approvalError)
+        XCTAssertEqual(appState.activityEvents.first?.kind, .sendCanceled)
+    }
+
+    func testCancelReconnectCountdownKeepsQueuedIntentWhenPersistenceFails() async {
+        var draft = pendingDraft()
+        let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        draft.offlineQueuedDispatch = intent
+        let (appState, provider, _, persistence) = makeAppState(
+            online: true,
+            sendDelaySeconds: 10,
+            seed: [draft]
+        )
+        appState.sendCountdownTickNanoseconds = 60_000_000_000
+
+        await appState.resumeQueuedDraftsAfterReconnect()
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+        appState.cancelSendCountdown(draft)
+
+        XCTAssertEqual(provider.sendCallCount, 0)
+        XCTAssertTrue(appState.pendingSendCountdowns.isEmpty)
+        XCTAssertEqual(appState.offlineQueuedDispatch[draft.identity], intent)
+        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.offlineQueuedDispatch, intent)
+        XCTAssertTrue(appState.approvalError?.contains("settings write denied") ?? false)
+        XCTAssertFalse(appState.activityEvents.contains { $0.kind == .sendCanceled })
     }
 
     func testQueuedDispatchClearsAfterReconnectCountdownDispatchSucceeds() async {

@@ -170,7 +170,8 @@ extension AppState {
 
     /// User-initiated cancel during the window (item 23): stops the countdown and
     /// leaves the draft in the pending queue untouched, with any inline edits
-    /// (item 19) preserved. Records a `.sendCanceled` activity entry.
+    /// (item 19) preserved. If the countdown came from a reconnect drain, its
+    /// durable offline dispatch intent is cleared too. Records `.sendCanceled`.
     func cancelSendCountdown(_ draft: Draft) {
         let identity = draft.identity
         guard let task = sendCountdownTasks.removeValue(forKey: identity) else { return }
@@ -178,6 +179,17 @@ extension AppState {
         sendCountdownNotificationApprovalIDs.remove(identity)
         pendingSendCountdowns.removeValue(forKey: identity)
         approvalError = nil
+        do {
+            if offlineQueuedDispatch[identity] != nil || isWaitingForNetwork(identity) {
+                _ = try clearOfflineQueueEntryDurably(identity)
+            }
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+            logger.error(
+                "Failed to clear queued dispatch after canceling send countdown: \(error.localizedDescription)"
+            )
+            return
+        }
         recordDraftActivity(.sendCanceled, for: draft)
     }
 

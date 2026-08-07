@@ -109,7 +109,7 @@ extension AppState {
         }
     }
 
-    private func clearOfflineQueueEntryDurably(_ identity: String) throws -> Bool {
+    func clearOfflineQueueEntryDurably(_ identity: String) throws -> Bool {
         var nextDrafts = pendingDrafts
         let index = nextDrafts.firstIndex(where: { $0.identity == identity })
         let hadPersistedIntent = index.map { nextDrafts[$0].offlineQueuedDispatch != nil } ?? false

@@ -85,6 +85,12 @@ extension AppState {
         credentials: MailAccountCredentials
     ) async throws {
         let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
+        // Offline (item 27): defer before starting any auto-send countdown, so
+        // the approved intent is durable even if the app quits during the delay.
+        if !isOnline {
+            try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
+            return
+        }
         // Auto-send safety net (item 23): unless disabled (delay 0), or the user
         // is forcing a stale "send anyway", an auto-send approval starts a
         // cancellable countdown instead of dispatching now. The draft stays in the
@@ -97,12 +103,6 @@ extension AppState {
                 credentials: credentials,
                 surfaceBlockedDispatch: surfaceDelayedBlocks
             )
-            return
-        }
-        // Offline (item 27): defer rather than attempt, so we never make a futile
-        // connection or risk a partial send. Re-dispatches on reconnect.
-        if !isOnline {
-            try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
             return
         }
         do {

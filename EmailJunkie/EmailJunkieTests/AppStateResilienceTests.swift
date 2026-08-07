@@ -190,7 +190,7 @@ final class AppStateResilienceTests: XCTestCase {
 
         reachability.setOnline(true)
         await waitUntil {
-            provider.sendCallCount == 1 || appState.pendingStaleWarnings[draft.identity] != nil
+            appState.pendingDrafts.isEmpty || appState.pendingStaleWarnings[draft.identity] != nil
         }
 
         XCTAssertEqual(provider.searchCallCount, 0, "force should skip the stale re-check on reconnect")

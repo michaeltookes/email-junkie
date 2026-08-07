@@ -132,9 +132,13 @@ extension AppState {
                 credentials: credentials
             )
             if !didDispatch {
+                clearOfflineQueueEntry(identity)
                 surfaceBlockedSendCountdown(for: current, notifyUser: shouldSurfaceBlockedDispatch)
             }
         } catch {
+            if offlineQueuedDispatch[identity] != nil, isOnline {
+                clearOfflineQueueEntry(identity)
+            }
             approvalError = Self.draftMessage(for: error)
             logger.error("Auto-send after countdown failed: \(error.localizedDescription)")
         }

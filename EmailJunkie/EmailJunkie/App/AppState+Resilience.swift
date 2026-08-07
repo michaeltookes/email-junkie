@@ -89,52 +89,95 @@ extension AppState {
     }
 
     /// Clears a single draft's offline-queue state (on deny, dispatch, or drain).
-    func clearOfflineQueueEntry(_ identity: String) {
-        offlineQueuedDispatch.removeValue(forKey: identity)
-        draftsWaitingForNetwork.remove(identity)
-        guard let index = pendingDrafts.firstIndex(where: { $0.identity == identity }),
-              pendingDrafts[index].offlineQueuedDispatch != nil else {
-            return
-        }
-        pendingDrafts[index].offlineQueuedDispatch = nil
+    @discardableResult
+    func clearOfflineQueueEntry(_ identity: String) -> Bool {
         do {
-            try persistence.savePendingDraftsSync(pendingDrafts)
+            return try clearOfflineQueueEntryDurably(identity)
         } catch {
             logger.error("Failed to clear offline dispatch intent: \(error.localizedDescription)")
+            return false
         }
+    }
+
+    func cancelQueuedDraftDispatch(_ identity: String) {
+        approvalError = nil
+        do {
+            _ = try clearOfflineQueueEntryDurably(identity)
+        } catch {
+            approvalError = Self.draftMessage(for: error)
+            logger.error("Failed to cancel offline dispatch intent: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearOfflineQueueEntryDurably(_ identity: String) throws -> Bool {
+        var nextDrafts = pendingDrafts
+        let index = nextDrafts.firstIndex(where: { $0.identity == identity })
+        let hadPersistedIntent = index.map { nextDrafts[$0].offlineQueuedDispatch != nil } ?? false
+
+        if let index, hadPersistedIntent {
+            nextDrafts[index].offlineQueuedDispatch = nil
+            try persistence.savePendingDraftsSync(nextDrafts)
+            pendingDrafts = nextDrafts
+            pendingDraftCount = nextDrafts.count
+        }
+
+        let hadMemoryIntent = offlineQueuedDispatch.removeValue(forKey: identity) != nil
+        let hadWaitingState = draftsWaitingForNetwork.remove(identity) != nil
+        return hadPersistedIntent || hadMemoryIntent || hadWaitingState
     }
 
     /// Clears every offline-queue entry (account switch, disconnect). The drafts
     /// themselves remain pending; they simply won't auto-dispatch.
     func clearAllOfflineQueueEntries() {
         guard !offlineQueuedDispatch.isEmpty || !draftsWaitingForNetwork.isEmpty else { return }
-        offlineQueuedDispatch.removeAll()
-        draftsWaitingForNetwork.removeAll()
+        var nextDrafts = pendingDrafts
         var didClearPersistedIntent = false
-        for index in pendingDrafts.indices where pendingDrafts[index].offlineQueuedDispatch != nil {
-            pendingDrafts[index].offlineQueuedDispatch = nil
+        for index in nextDrafts.indices where nextDrafts[index].offlineQueuedDispatch != nil {
+            nextDrafts[index].offlineQueuedDispatch = nil
             didClearPersistedIntent = true
         }
-        guard didClearPersistedIntent else { return }
-        do {
-            try persistence.savePendingDraftsSync(pendingDrafts)
-        } catch {
-            logger.error("Failed to clear offline dispatch intents: \(error.localizedDescription)")
+        if didClearPersistedIntent {
+            do {
+                try persistence.savePendingDraftsSync(nextDrafts)
+                pendingDrafts = nextDrafts
+                pendingDraftCount = nextDrafts.count
+            } catch {
+                logger.error("Failed to clear offline dispatch intents: \(error.localizedDescription)")
+                return
+            }
         }
+        offlineQueuedDispatch.removeAll()
+        draftsWaitingForNetwork.removeAll()
     }
 
     /// Re-dispatches every offline-queued draft through the normal approval path
-    /// on reconnect. If the network is still flapping, `approveDraft` re-queues it,
-    /// so this is self-correcting; a draft denied while offline is simply skipped.
+    /// on reconnect. The intent stays durable while a delayed auto-send countdown,
+    /// stale check, or network operation is still in progress; it is cleared only
+    /// after dispatch succeeds or the draft falls back to manual review.
     func resumeQueuedDraftsAfterReconnect() async {
         guard !offlineQueuedDispatch.isEmpty else { return }
         // Snapshot: approveDraft may re-queue entries, mutating the map mid-drain.
         let queued = offlineQueuedDispatch
         for (identity, intent) in queued {
-            clearOfflineQueueEntry(identity)
-            guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else { continue }
+            guard offlineQueuedDispatch[identity] == intent else { continue }
+            guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else {
+                clearOfflineQueueEntry(identity)
+                continue
+            }
             await approveDraft(draft, sendBehavior: intent.sendBehavior, force: intent.force)
+            clearQueuedDispatchIfManualReviewNeeded(identity)
         }
+    }
+
+    private func clearQueuedDispatchIfManualReviewNeeded(_ identity: String) {
+        guard offlineQueuedDispatch[identity] != nil else { return }
+        guard pendingDrafts.contains(where: { $0.identity == identity }) else {
+            clearOfflineQueueEntry(identity)
+            return
+        }
+        guard pendingSendCountdowns[identity] == nil else { return }
+        guard pendingStaleWarnings[identity] != nil || isOnline else { return }
+        clearOfflineQueueEntry(identity)
     }
 
     func shouldQueueDispatchAfterOfflineFailure(_ error: Error) -> Bool {

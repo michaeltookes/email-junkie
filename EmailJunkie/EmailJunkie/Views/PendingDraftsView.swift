@@ -376,7 +376,7 @@ private struct PendingDraftCard: View {
                 appState.denyDraft(draft)
             }
             Button(cancelQueuedDispatchLabel) {
-                appState.clearOfflineQueueEntry(draft.identity)
+                appState.cancelQueuedDraftDispatch(draft.identity)
             }
             .accessibilityLabel(cancelQueuedDispatchLabel)
         }

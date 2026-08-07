@@ -308,7 +308,12 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         }
 
         reachability.setOnline(true)
-        await waitUntil { provider.appendCallCount == 1 && !appState.isWaitingForNetwork(draft.identity) }
+        await waitUntil {
+            provider.appendCallCount == 1
+                && !appState.isWaitingForNetwork(draft.identity)
+                && appState.activityEvents.contains { $0.kind == .saveFailed }
+                && appState.approvalError != nil
+        }
 
         XCTAssertEqual(provider.appendCallCount, 1, "IMAP APPEND is not retried because success can be ambiguous")
         XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])

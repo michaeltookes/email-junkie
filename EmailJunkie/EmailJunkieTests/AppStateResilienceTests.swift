@@ -248,6 +248,23 @@ final class AppStateResilienceTests: XCTestCase {
         XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
     }
 
+    func testClearingOfflineQueueEntryKeepsDraftPendingForReapproval() async {
+        let draft = pendingDraft()
+        let (appState, provider, reachability, persistence) = makeAppState(online: false, seed: [draft])
+        await appState.approveDraft(draft)
+
+        appState.clearOfflineQueueEntry(draft.identity)
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertFalse(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertTrue(appState.offlineQueuedDispatch.isEmpty)
+        XCTAssertNil(persistence.loadPendingDrafts().first?.offlineQueuedDispatch)
+
+        reachability.setOnline(true)
+        await waitUntil { appState.activityEvents.contains { $0.kind == .resumedOnline } }
+        XCTAssertEqual(provider.sendCallCount, 0)
+    }
+
     // MARK: - Reachability drives the poll loop
 
     func testPollIsSkippedWhileOffline() async {

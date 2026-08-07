@@ -155,7 +155,19 @@ extension AppState {
     /// Clears every offline-queue entry (account switch, disconnect). The drafts
     /// themselves remain pending; they simply won't auto-dispatch.
     func clearAllOfflineQueueEntries() {
-        guard !offlineQueuedDispatch.isEmpty || !draftsWaitingForNetwork.isEmpty else { return }
+        do {
+            _ = try clearAllOfflineQueueEntriesDurably()
+        } catch {
+            logger.error("Failed to clear offline dispatch intents: \(error.localizedDescription)")
+        }
+    }
+
+    @discardableResult
+    func clearAllOfflineQueueEntriesDurably() throws -> Bool {
+        let hasPersistedIntent = pendingDrafts.contains { $0.offlineQueuedDispatch != nil }
+        guard hasPersistedIntent || !offlineQueuedDispatch.isEmpty || !draftsWaitingForNetwork.isEmpty else {
+            return false
+        }
         var nextDrafts = pendingDrafts
         var didClearPersistedIntent = false
         for index in nextDrafts.indices where nextDrafts[index].offlineQueuedDispatch != nil {
@@ -163,17 +175,13 @@ extension AppState {
             didClearPersistedIntent = true
         }
         if didClearPersistedIntent {
-            do {
-                try persistence.savePendingDraftsSync(nextDrafts)
-                pendingDrafts = nextDrafts
-                pendingDraftCount = nextDrafts.count
-            } catch {
-                logger.error("Failed to clear offline dispatch intents: \(error.localizedDescription)")
-                return
-            }
+            try persistence.savePendingDraftsSync(nextDrafts)
+            pendingDrafts = nextDrafts
+            pendingDraftCount = nextDrafts.count
         }
         offlineQueuedDispatch.removeAll()
         draftsWaitingForNetwork.removeAll()
+        return true
     }
 
     /// Re-dispatches every offline-queued draft through the normal approval path

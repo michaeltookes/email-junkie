@@ -392,8 +392,9 @@ extension AppState {
         do {
             guard !outgoing.to.isEmpty else { throw DraftDispatchError.noRecipient }
             try await withResilientRetry {
+                let currentCredentials = try self.draftDispatchCredentialsStillCurrent(credentials, for: draft)
                 try await self.mailProvider.sendMessage(
-                    credentials,
+                    currentCredentials,
                     rfc822: rfc822,
                     envelope: SMTPEnvelope(sender: credentials.email, recipients: outgoing.to)
                 )
@@ -416,8 +417,9 @@ extension AppState {
         )
         let rfc822 = outgoing.rfc822()
         do {
+            let currentCredentials = try draftDispatchCredentialsStillCurrent(credentials, for: draft)
             try await mailProvider.appendMessage(
-                credentials,
+                currentCredentials,
                 mailbox: .drafts,
                 rfc822: rfc822,
                 flags: [.draft]

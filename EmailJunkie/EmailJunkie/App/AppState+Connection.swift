@@ -67,6 +67,8 @@ extension AppState {
             return
         }
 
+        if accountChanged, !clearQueuedDispatchesBeforeAccountTransition("changing accounts") { return }
+
         do {
             try secrets.set(credentials.appPassword, for: accountKey)
         } catch {
@@ -92,7 +94,6 @@ extension AppState {
             // (item 23) and offline-queued dispatches (item 27); neither must fire
             // against the newly connected account.
             cancelAllSendCountdowns()
-            clearAllOfflineQueueEntries()
             if wasWatching {
                 stopWatching()
                 startWatchingIfReady()
@@ -116,14 +117,25 @@ extension AppState {
             return
         }
 
+        guard clearQueuedDispatchesBeforeAccountTransition("disconnecting") else { return }
         guard removeActiveMailPasswordForDisconnect() else { return }
         mailAppPassword = ""
         markMailHostVerifiedForGuidance()
         isAccountConnected = false
         cancelAllSendCountdowns()
-        clearAllOfflineQueueEntries()
         stopWatching()
         resetMessagePreviewForAccountChange()
         logger.info("Mailbox disconnected")
+    }
+
+    private func clearQueuedDispatchesBeforeAccountTransition(_ action: String) -> Bool {
+        do {
+            try clearAllOfflineQueueEntriesDurably()
+            return true
+        } catch {
+            connectionError = "Couldn't clear queued drafts before \(action). \(Self.message(for: error))"
+            logger.error("Failed to clear queued drafts before \(action, privacy: .public): \(error.localizedDescription)")
+            return false
+        }
     }
 }

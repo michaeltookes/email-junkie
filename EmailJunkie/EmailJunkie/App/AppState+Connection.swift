@@ -56,38 +56,11 @@ extension AppState {
         let previousSettings = persistence.loadSettings()
         let accountChanged = !isAccountConnected
             || previousSettings.mailEmail.caseInsensitiveCompare(credentials.email) != .orderedSame
-        // Per-account key (item 48): writing a second account never overwrites the
-        // first account's secret, so switching back to it later needs no re-entry.
-        let accountKey = SecretKey.mailAppPassword(email: credentials.email)
-        let previousAppPassword: String?
-        do {
-            previousAppPassword = try secrets.value(for: accountKey)
-        } catch {
-            connectionError = Self.keychainMessage(action: "read", error: error)
-            return
-        }
-
-        if accountChanged, !clearQueuedDispatchesBeforeAccountTransition("changing accounts") { return }
-
-        do {
-            try secrets.set(credentials.appPassword, for: accountKey)
-        } catch {
-            connectionError = Self.keychainMessage(action: "save", error: error)
-            return
-        }
-
-        do {
-            try persistVerifiedConnection(credentials)
-        } catch {
-            let rollbackError = rollbackMailAppPassword(to: previousAppPassword, for: accountKey)
-            restoreConnectionSnapshot(settings: previousSettings)
-            var message = Self.settingsMessage(action: "save", error: error)
-            if let rollbackError {
-                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
-            }
-            connectionError = message
-            return
-        }
+        guard persistVerifiedConnectionTransition(
+            credentials,
+            previousSettings: previousSettings,
+            accountChanged: accountChanged
+        ) else { return }
         isAccountConnected = true
         if accountChanged {
             // A different account invalidates any in-flight auto-send countdowns
@@ -117,8 +90,11 @@ extension AppState {
             return
         }
 
-        guard clearQueuedDispatchesBeforeAccountTransition("disconnecting") else { return }
-        guard removeActiveMailPasswordForDisconnect() else { return }
+        guard let removedPassword = removeActiveMailPasswordForDisconnect() else { return }
+        guard clearQueuedDispatchesBeforeAccountTransition("disconnecting") else {
+            appendConnectionRollbackMessage(restoreActiveMailPasswordRemovalMessage(removedPassword))
+            return
+        }
         mailAppPassword = ""
         markMailHostVerifiedForGuidance()
         isAccountConnected = false
@@ -136,6 +112,99 @@ extension AppState {
             connectionError = "Couldn't clear queued drafts before \(action). \(Self.message(for: error))"
             logger.error("Failed to clear queued drafts before \(action, privacy: .public): \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private func persistVerifiedConnectionTransition(
+        _ credentials: MailAccountCredentials,
+        previousSettings: Settings,
+        accountChanged: Bool
+    ) -> Bool {
+        // Per-account key (item 48): writing a second account never overwrites the
+        // first account's secret, so switching back to it later needs no re-entry.
+        let accountKey = SecretKey.mailAppPassword(email: credentials.email)
+        let previousAppPassword: String?
+        do {
+            previousAppPassword = try secrets.value(for: accountKey)
+        } catch {
+            connectionError = Self.keychainMessage(action: "read", error: error)
+            return false
+        }
+
+        do {
+            try secrets.set(credentials.appPassword, for: accountKey)
+        } catch {
+            connectionError = Self.keychainMessage(action: "save", error: error)
+            return false
+        }
+
+        do {
+            try persistVerifiedConnection(credentials)
+        } catch {
+            connectionError = failedConnectionPersistMessage(
+                error,
+                previousSettings: previousSettings,
+                previousAppPassword: previousAppPassword,
+                accountKey: accountKey
+            )
+            return false
+        }
+
+        guard !accountChanged || clearQueuedDispatchesBeforeAccountTransition("changing accounts") else {
+            appendConnectionRollbackMessage(rollbackVerifiedConnectionTransition(
+                to: previousSettings,
+                previousAppPassword: previousAppPassword,
+                for: accountKey
+            ))
+            return false
+        }
+        return true
+    }
+
+    private func failedConnectionPersistMessage(
+        _ error: Error,
+        previousSettings: Settings,
+        previousAppPassword: String?,
+        accountKey: SecretKey
+    ) -> String {
+        let rollbackError = rollbackMailAppPassword(to: previousAppPassword, for: accountKey)
+        restoreConnectionSnapshot(settings: previousSettings)
+        var message = Self.settingsMessage(action: "save", error: error)
+        if let rollbackError {
+            message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
+        }
+        return message
+    }
+
+    private func rollbackVerifiedConnectionTransition(
+        to previousSettings: Settings,
+        previousAppPassword: String?,
+        for accountKey: SecretKey
+    ) -> String? {
+        var messages: [String] = []
+        if let rollbackError = rollbackMailAppPassword(to: previousAppPassword, for: accountKey) {
+            messages.append(Self.keychainMessage(action: "restore", error: rollbackError))
+        }
+        do {
+            try persistSettingsSync(previousSettings)
+        } catch {
+            messages.append(Self.settingsMessage(action: "restore", error: error))
+        }
+        restoreConnectionSnapshot(settings: previousSettings)
+        return messages.isEmpty ? nil : messages.joined(separator: " ")
+    }
+
+    private func restoreActiveMailPasswordRemovalMessage(_ removal: ActiveMailPasswordRemoval) -> String? {
+        guard let rollbackError = restoreActiveMailPasswordRemoval(removal) else { return nil }
+        return Self.keychainMessage(action: "restore", error: rollbackError)
+    }
+
+    private func appendConnectionRollbackMessage(_ message: String?) {
+        guard let message, !message.isEmpty else { return }
+        if let connectionError, !connectionError.isEmpty {
+            self.connectionError = connectionError + " " + message
+        } else {
+            connectionError = message
         }
     }
 }

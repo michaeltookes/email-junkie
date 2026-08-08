@@ -85,6 +85,9 @@ final class AppStateWatcherTests: XCTestCase {
         let provider = FakeAppMailProvider(result: .success(()), fetchResult: fetch, bodyResult: body)
         let llm = FakeLLMProvider(result: .success(()), completion: completion)
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
+        // Retry transient failures instantly so poll-fetch/draft retries (item 27)
+        // don't add real backoff waits to the watcher tests.
+        appState.retryRunner = .immediate
         return (appState, provider, persistence)
     }
 

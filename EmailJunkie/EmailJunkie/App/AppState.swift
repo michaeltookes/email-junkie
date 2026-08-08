@@ -188,6 +188,39 @@ final class AppState: ObservableObject {
 
     /// A user-facing message describing the last inbox-poll error, if any.
     @Published var watchError: String?
+
+    // MARK: - Resilience (item 27)
+
+    /// Whether the network currently appears reachable. Drives the offline-pause
+    /// of the poll loop and the "waiting for network" draft state. Starts `true`
+    /// so headless/test construction behaves as online until told otherwise.
+    @Published var isOnline: Bool = true
+
+    /// Identities of approved drafts deferred because the network was offline at
+    /// dispatch time (item 27). They stay in `pendingDrafts` — that reuse *is* the
+    /// offline queue — and dispatch on reconnect. Hydrated from each draft's
+    /// persisted, still-waiting `offlineQueuedDispatch` intent at launch.
+    @Published var draftsWaitingForNetwork: Set<String> = []
+
+    /// The intended dispatch for each offline-queued draft, so reconnect
+    /// re-dispatches send-vs-save and force overrides exactly as approved.
+    var offlineQueuedDispatch: [String: OfflineQueuedDraftDispatch] = [:]
+
+    /// The shared exponential-backoff driver for resilient operations (send,
+    /// save, poll-fetch, watcher draft). Overridable so tests drive backoff
+    /// deterministically without real waits (mirrors `sendCountdownTickNanoseconds`).
+    var retryRunner = RetryRunner()
+    /// Set after the reachability monitor delivers its first concrete path.
+    var hasConfirmedReachability = false
+    /// Prevents overlapping reconnect drains from racing each other.
+    var isResumingQueuedDrafts = false
+    /// Records a reconnect callback that arrived while the current queue drain
+    /// was already running, so the drain can replay missed queued work once.
+    var needsQueuedDraftDrainAfterCurrent = false
+
+    /// Observes reachability so the app can pause while offline and resume on
+    /// reconnect. Injected for deterministic offline→online tests.
+    let reachability: NetworkReachabilityMonitoring
     /// Messages the watcher passed over instead of drafting, newest first.
     /// This rolling operational log is in-memory only.
     @Published var skippedMessages: [SkippedMessage] = []
@@ -267,13 +300,17 @@ final class AppState: ObservableObject {
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
         llm: LLMProviding = LLMService(),
-        notifier: DraftNotifying = NullDraftNotifier()
+        notifier: DraftNotifying = NullDraftNotifier(),
+        reachability: NetworkReachabilityMonitoring = NetworkReachabilityMonitor()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
         self.llm = llm
         self.notifier = notifier
+        self.reachability = reachability
+        self.isOnline = reachability.isOnline
+        self.hasConfirmedReachability = reachability.hasCurrentPath
 
         // Migrate a pre-v11 file to the saved-accounts model before anything reads
         // the mail secret, so the per-account key is populated (item 48). The
@@ -294,9 +331,11 @@ final class AppState: ObservableObject {
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()
-        let pendingDrafts = Self.loadCleanedPendingDrafts(persistence)
-        self.pendingDrafts = pendingDrafts
-        self.pendingDraftCount = pendingDrafts.count
+        let pendingState = Self.restoredPendingDraftState(persistence: persistence)
+        self.pendingDrafts = pendingState.drafts
+        self.pendingDraftCount = pendingState.drafts.count
+        self.offlineQueuedDispatch = pendingState.offlineQueuedDispatch
+        self.draftsWaitingForNetwork = pendingState.waitingForNetwork
         self.activityEvents = persistence.loadActivityEvents()
         self.mailEmail = settings.mailEmail
         self.mailHost = settings.mailHost
@@ -330,126 +369,41 @@ final class AppState: ObservableObject {
             onTick: { [weak self] in await self?.pollInboxOnce() }
         )
 
-        self.notifier.onAction = { [weak self] action, identity in
+        installExternalActionHandlers()
+    }
+
+    private static func restoredPendingDraftState(
+        persistence: PersistenceProvider
+    ) -> (
+        drafts: [Draft],
+        offlineQueuedDispatch: [String: OfflineQueuedDraftDispatch],
+        waitingForNetwork: Set<String>
+    ) {
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
+        let offlineQueuedDispatch = offlineQueuedDispatches(from: pendingDrafts)
+        return (pendingDrafts, offlineQueuedDispatch, Set(offlineQueuedDispatch.keys))
+    }
+
+    /// Wires the notification-action and reachability-change callbacks. Called
+    /// once from `init`; reachability monitoring itself is started later by the
+    /// app (not here) so headless/test construction never spins up a real
+    /// `NWPathMonitor`.
+    private func installExternalActionHandlers() {
+        notifier.onAction = { [weak self] action, identity in
             await self?.handleNotificationAction(action, identity: identity)
         }
-    }
-
-    // MARK: - Mail Account
-
-    /// Builds credentials from the current inputs.
-    var mailCredentials: MailAccountCredentials {
-        MailAccountCredentials(
-            email: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: mailAppPassword.trimmingCharacters(in: .whitespacesAndNewlines),
-            host: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: mailPort
-        )
-    }
-
-    /// Tests the mailbox connection and, on success, saves the credentials.
-    func testConnection() async {
-        connectionError = nil
-        commitMailEmailEditFromUser()
-
-        await testConnection(with: mailCredentials)
-    }
-
-    /// Tests the mailbox connection from an explicit credential snapshot and, on
-    /// success, adopts it as the active account.
-    func testConnection(with credentials: MailAccountCredentials) async {
-        connectionError = nil
-        let credentials = MailAccountCredentials(
-            email: credentials.email.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: credentials.appPassword.trimmingCharacters(in: .whitespacesAndNewlines),
-            host: credentials.host.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: credentials.port
-        )
-        guard credentials.isComplete else {
-            connectionError = "Enter your email address and app password first."
-            return
+        reachability.onChange = { [weak self] online in
+            self?.handleReachabilityChange(online)
         }
-
-        isConnecting = true
-        defer { isConnecting = false }
-        let wasWatching = watchStatus == .watching
-
-        do {
-            try await mailProvider.verifyConnection(credentials)
-        } catch {
-            connectionError = Self.message(for: error)
-            return
-        }
-
-        let previousSettings = persistence.loadSettings()
-        let accountChanged = !isAccountConnected
-            || previousSettings.mailEmail.caseInsensitiveCompare(credentials.email) != .orderedSame
-        // Per-account key (item 48): writing a second account never overwrites the
-        // first account's secret, so switching back to it later needs no re-entry.
-        let accountKey = SecretKey.mailAppPassword(email: credentials.email)
-        let previousAppPassword: String?
-        do {
-            previousAppPassword = try secrets.value(for: accountKey)
-        } catch {
-            connectionError = Self.keychainMessage(action: "read", error: error)
-            return
-        }
-
-        do {
-            try secrets.set(credentials.appPassword, for: accountKey)
-        } catch {
-            connectionError = Self.keychainMessage(action: "save", error: error)
-            return
-        }
-
-        do {
-            try persistVerifiedConnection(credentials)
-        } catch {
-            let rollbackError = rollbackMailAppPassword(to: previousAppPassword, for: accountKey)
-            restoreConnectionSnapshot(settings: previousSettings)
-            var message = Self.settingsMessage(action: "save", error: error)
-            if let rollbackError {
-                message += " " + Self.keychainMessage(action: "restore", error: rollbackError)
-            }
-            connectionError = message
-            return
-        }
-        isAccountConnected = true
-        if accountChanged {
-            // A different account invalidates any in-flight auto-send countdowns
-            // (item 23); they must not fire against the newly connected account.
-            cancelAllSendCountdowns()
-            if wasWatching {
-                stopWatching()
-                startWatchingIfReady()
-            }
-        }
-        resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
-        logger.info("Mailbox connected")
-    }
-
-    /// Disconnects the mailbox by clearing the stored app password.
-    func disconnectMail() {
-        connectionError = nil
-        guard !isConnecting else {
-            logger.info("Disconnect skipped while a connection test is running")
-            return
-        }
-        do {
-            try removeLegacyOAuthCredentialsIfPresent()
-        } catch {
-            connectionError = Self.legacyOAuthCleanupMessage(error: error)
-            return
-        }
-
-        guard removeActiveMailPasswordForDisconnect() else { return }
-        mailAppPassword = ""
-        markMailHostVerifiedForGuidance()
-        isAccountConnected = false
-        cancelAllSendCountdowns()
-        stopWatching()
-        resetMessagePreviewForAccountChange()
-        logger.info("Mailbox disconnected")
     }
 
     /// Persists settings automatically when a tracked preference changes.

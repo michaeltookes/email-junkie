@@ -28,8 +28,22 @@ extension AppState {
         watchError = nil
         recordWatcherBaselineStartIfNeeded(account: mailCredentials.email, mailbox: .inbox)
         watchStatus = .watching
-        inboxWatcher.start()
+        if canStartInboxWatcherImmediately {
+            inboxWatcher.start()
+        }
         logger.info("Inbox watching started")
+    }
+
+    private var canStartInboxWatcherImmediately: Bool {
+        hasConfirmedReachability || (!reachability.isStarted && reachability.hasCurrentPath)
+    }
+
+    func resumeInboxWatcherAfterReachabilityConfirmed() {
+        if inboxWatcher.isActive {
+            inboxWatcher.pollNow()
+        } else {
+            inboxWatcher.start()
+        }
     }
 
     /// Pauses watching; the queue and processed history are kept.
@@ -71,6 +85,10 @@ extension AppState {
             pauseWatching()
             return
         }
+        // Offline (item 27): skip the poll rather than burn retries against an
+        // unreachable server. Reconnect triggers an immediate catch-up poll.
+        guard hasConfirmedReachability || !reachability.isStarted else { return }
+        guard isOnline else { return }
         guard !isPollingInbox else { return }
         isPollingInbox = true
         defer { isPollingInbox = false }
@@ -84,8 +102,7 @@ extension AppState {
                 mailbox: mailbox
             )
         } catch {
-            watchError = Self.message(for: error)
-            logger.error("Inbox poll fetch failed: \(error.localizedDescription)")
+            handlePollFetchFailure(error)
             return
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }
@@ -132,11 +149,13 @@ extension AppState {
         mailbox: Mailbox
     ) async throws -> [MailMessage] {
         var limit = watchFetchLimit
-        var messages = try await mailProvider.fetchRecentMessages(
-            credentials,
-            mailbox: mailbox,
-            limit: limit
-        )
+        var messages = try await withResilientRetry {
+            try await self.mailProvider.fetchRecentMessages(
+                credentials,
+                mailbox: mailbox,
+                limit: limit
+            )
+        }
 
         while shouldExpandWatcherFetch(
             messages: messages,
@@ -147,14 +166,33 @@ extension AppState {
             let nextLimit = min(limit * 2, watchCatchUpFetchLimit)
             guard nextLimit > limit else { break }
             limit = nextLimit
-            messages = try await mailProvider.fetchRecentMessages(
-                credentials,
-                mailbox: mailbox,
-                limit: limit
-            )
+            let pageLimit = limit
+            messages = try await withResilientRetry {
+                try await self.mailProvider.fetchRecentMessages(
+                    credentials,
+                    mailbox: mailbox,
+                    limit: pageLimit
+                )
+            }
         }
 
         return messages
+    }
+
+    /// Handles a poll-fetch failure: transient errors just surface as `watchError`
+    /// (the next poll retries), but an auth failure won't self-heal, so we pause
+    /// watching and record it (item 27) rather than fail every poll.
+    private func handlePollFetchFailure(_ error: Error) {
+        watchError = Self.message(for: error)
+        if ResilienceClassifier.classify(error) == .authentication {
+            recordActivity(ActivityEvent(
+                kind: .authFailed,
+                account: normalizedConnectedAccountEmail,
+                detail: Self.message(for: error)
+            ))
+            pauseWatching()
+        }
+        logger.error("Inbox poll fetch failed: \(error.localizedDescription)")
     }
 
     private func shouldExpandWatcherFetch(
@@ -202,49 +240,38 @@ extension AppState {
         guard watchStatus == .watching, mailCredentials == credentials else { return }
 
         do {
-            if try await draftAndEnqueue(message, mailbox: mailbox) {
+            // Retry transient fetch/LLM hiccups within the poll (item 27). On
+            // exhaustion the message is left unprocessed, so the next poll retries
+            // it — the existing skip/pending-draft guards prevent re-notification.
+            let enqueued = try await withResilientRetry {
+                try self.validateWatcherDraftContext(credentials)
+                return try await self.draftAndEnqueue(
+                    message,
+                    mailbox: mailbox,
+                    credentials: credentials
+                )
+            }
+            guard watchStatus == .watching, mailCredentials == credentials else { return }
+            if enqueued {
                 markProcessed(message, account: credentials.email, mailbox: mailbox)
             }
         } catch {
             watchError = Self.draftMessage(for: error)
+            if ResilienceClassifier.classify(error) == .authentication {
+                recordActivity(ActivityEvent(
+                    kind: .authFailed,
+                    account: normalizedConnectedAccountEmail,
+                    detail: Self.draftMessage(for: error)
+                ))
+                pauseWatching()
+            }
             logger.error("Watcher draft failed: \(error.localizedDescription)")
         }
     }
 
-    private func canDraftAfterSenderRulesAndWorthiness(
-        _ message: MailMessage,
-        credentials: MailAccountCredentials,
-        mailbox: Mailbox
-    ) async -> Bool {
-        let skippedReason = skippedMessageReason(message, account: credentials.email, mailbox: mailbox)
-        // Sender rules (item 18) layer over the reply-worthiness gate (item 17):
-        // an allowlisted sender is force-drafted regardless of the heuristics; a
-        // blocklisted sender is skipped with a visible reason. Only when the rules
-        // have no opinion does the worthiness gate run. Precedence and the
-        // allow-vs-block tie-break live in the pure `SenderRules` evaluator.
-        switch senderRuleDecision(for: message) {
-        case .block:
-            guard watchStatus == .watching, mailCredentials == credentials else { return false }
-            recordSkip(message, reason: .senderBlocklisted, account: credentials.email, mailbox: mailbox)
-            return false
-        case .forceDraft:
-            removeSkippedMessage(message, account: credentials.email, mailbox: mailbox)
-            return true
-        case .noOpinion:
-            if let skippedReason {
-                guard skippedReason == .senderBlocklisted else { return false }
-                removeSkippedMessage(message, account: credentials.email, mailbox: mailbox)
-            }
-            // Reply-worthiness gate (item 17): skip obvious non-replyable mail
-            // before the costly LLM draft call. A skip is recorded in memory but
-            // not marked durably processed, so a false skip can be recovered after
-            // log loss or app restart.
-            if let reason = await replyWorthinessSkipReason(message, credentials: credentials, mailbox: mailbox) {
-                guard watchStatus == .watching, mailCredentials == credentials else { return false }
-                recordSkip(message, reason: reason, account: credentials.email, mailbox: mailbox)
-                return false
-            }
-            return true
+    private func validateWatcherDraftContext(_ credentials: MailAccountCredentials) throws {
+        guard watchStatus == .watching, mailCredentials == credentials else {
+            throw DraftDispatchError.accountChanged
         }
     }
 

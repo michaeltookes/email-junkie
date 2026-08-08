@@ -102,14 +102,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Optional batching so multiple ready drafts surface together rather than individually.
     - Queued drafts are delivered when quiet hours end.
 
-27. **Resilience: offline queue + retry**
-    Handle network/API/token failures as a system, not just per draft.
-    *As Priya, I want the app to recover from dropped connections and transient API errors, so that it keeps working without my intervention.*
-    - Operations (fetch, draft, send) retry with backoff on transient failures.
-    - Work is queued while offline and resumes on reconnect.
-    - Token-expiry and auth failures are recovered or surfaced clearly (ties to item 3).
-    - No duplicate sends result from retries.
-
 28. **Accessibility of the approval UI**
     Make the core loop usable for everyone.
     *As a keyboard/VoiceOver user, I want to review and approve drafts without a mouse, so that the app is usable for me.*

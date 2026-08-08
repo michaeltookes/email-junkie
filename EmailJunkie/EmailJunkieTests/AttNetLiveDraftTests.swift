@@ -70,6 +70,10 @@ final class AttNetLiveDraftTests: XCTestCase {
             mailProvider: provider,
             llm: FakeLLMProvider(result: .success(()))
         )
+        app.mailEmail = credentials.email
+        app.mailAppPassword = credentials.appPassword
+        app.mailHost = credentials.host
+        app.mailPort = credentials.port
 
         // Save through the normal save path (IMAP APPEND to Drafts with \Draft).
         try await app.performSave(draft, credentials: credentials)

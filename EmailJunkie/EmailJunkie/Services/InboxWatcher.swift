@@ -23,6 +23,8 @@ final class InboxWatcher {
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
+    var isActive: Bool { isRunning }
+
     /// - Parameters:
     ///   - interval: Poll interval in seconds, read at each (re)schedule so a
     ///     settings change takes effect on the next `reschedule()`.
@@ -57,6 +59,13 @@ final class InboxWatcher {
     func reschedule() {
         guard isRunning, !isAsleep else { return }
         schedule()
+    }
+
+    /// Triggers an immediate catch-up poll (e.g. on network reconnect) if the
+    /// watcher is actively running and awake. Single-flighted like every tick.
+    func pollNow() {
+        guard isRunning, !isAsleep else { return }
+        tick(queueIfRunning: true)
     }
 
     // MARK: - Scheduling

@@ -152,6 +152,38 @@ final class AppStateSendCountdownTests: XCTestCase {
         XCTAssertEqual(appState.activityEvents.first?.kind, .approvedSent)
     }
 
+    func testCountdownQueuesWhenConnectivityDropsDuringDispatchRetries() async {
+        let draft = pendingDraft()
+        let provider = FakeAppMailProvider(
+            result: .success(()),
+            sendResult: .failure(.connectionFailed("offline"))
+        )
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 1,
+            tickNanoseconds: 1,
+            seed: [draft]
+        )
+        appState.retryRunner = RetryRunner(
+            sleep: { _ in
+                await MainActor.run { appState.isOnline = false }
+            },
+            randomUnitInterval: { 0.5 }
+        )
+
+        await appState.approveDraft(draft)
+        await waitUntil { appState.isWaitingForNetwork(draft.identity) || appState.approvalError != nil }
+
+        XCTAssertEqual(provider.sendCallCount, RetryPolicy.default.maxAttempts)
+        XCTAssertTrue(appState.isWaitingForNetwork(draft.identity))
+        XCTAssertEqual(
+            appState.offlineQueuedDispatch[draft.identity],
+            OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        )
+        XCTAssertNil(appState.approvalError)
+        XCTAssertTrue(appState.activityEvents.contains { $0.kind == .queuedOffline })
+    }
+
     // MARK: - Cancel returns the draft to pending with edits intact
 
     func testCancelDuringWindowKeepsDraftPendingWithEdits() async {

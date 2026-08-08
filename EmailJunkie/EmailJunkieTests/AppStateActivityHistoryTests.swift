@@ -81,6 +81,9 @@ final class AppStateActivityHistoryTests: XCTestCase {
         let appState = AppState(persistence: persistence, secrets: secrets, mailProvider: provider, llm: llm)
         appState.pendingDrafts = drafts
         appState.pendingDraftCount = drafts.count
+        // Item 27: retry instantly so any transient-failure test doesn't wait on
+        // real backoff.
+        appState.retryRunner = .immediate
         return (appState, provider, persistence)
     }
 
@@ -263,9 +266,10 @@ final class AppStateActivityHistoryTests: XCTestCase {
 
     func testSendFailureRecordsSendFailedEvent() async {
         let draft = pendingDraft()
+        // A permanent rejection (not a transient network error) records .sendFailed.
         let (appState, _, _) = makeAppState(
             sendBehavior: .autoSend,
-            sendResult: .failure(.connectionFailed("smtp down")),
+            sendResult: .failure(.commandFailed("mailbox unavailable")),
             seed: [draft]
         )
 
@@ -274,6 +278,25 @@ final class AppStateActivityHistoryTests: XCTestCase {
         XCTAssertEqual(appState.activityEvents.map(\.kind), [.sendFailed])
         XCTAssertNotNil(appState.activityEvents.first?.detail)
         // The draft stays queued after a send failure.
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+    }
+
+    func testTransientSendFailureRecordsRetryExhaustedEvent() async {
+        let draft = pendingDraft()
+        // A transient network failure that survives every retry records
+        // .retryExhausted rather than .sendFailed (item 27).
+        let (appState, provider, _) = makeAppState(
+            sendBehavior: .autoSend,
+            sendResult: .failure(.connectionFailed("smtp down")),
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+
+        XCTAssertEqual(appState.activityEvents.map(\.kind), [.retryExhausted])
+        // The transient send was retried up to the attempt budget.
+        XCTAssertEqual(provider.sendCallCount, RetryPolicy.default.maxAttempts)
+        // The draft stays queued so the user can retry.
         XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
     }
 

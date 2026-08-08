@@ -4,6 +4,12 @@ import os
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "SavedAccounts")
 
+struct ActiveMailPasswordRemoval {
+    let accountEmail: String
+    let accountPassword: String?
+    let legacyPassword: String?
+}
+
 /// Saved-accounts management (item 48): remembering multiple accounts, switching
 /// between them without re-entry, and per-account Keychain secrets. Kept in its
 /// own file so `AppState` stays within the file/type length limits.
@@ -106,11 +112,11 @@ extension AppState {
     /// Removes the active account's password for disconnect. The legacy shared
     /// slot is removed only when it belongs to the active account, because it may
     /// still back an older inactive account after a failed migration.
-    func removeActiveMailPasswordForDisconnect() -> Bool {
+    func removeActiveMailPasswordForDisconnect() -> ActiveMailPasswordRemoval? {
         let activeEmail = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeKey = activeEmail.isEmpty ? nil : SecretKey.mailAppPassword(email: activeEmail)
         let activeAccountPassword: String?
-        let shouldRemoveLegacyPassword: Bool
+        let activeLegacyPassword: String?
 
         do {
             if let activeKey {
@@ -119,28 +125,39 @@ extension AppState {
                 activeAccountPassword = nil
             }
             if !activeEmail.isEmpty {
-                shouldRemoveLegacyPassword = try legacyMailPasswordOwnerID()
-                    == SavedMailAccount.normalizedEmail(activeEmail)
+                activeLegacyPassword = try legacyMailPasswordForOwnedAccount(activeEmail)
             } else {
-                shouldRemoveLegacyPassword = false
+                activeLegacyPassword = nil
             }
         } catch {
             connectionError = Self.keychainMessage(action: "read", error: error)
-            return false
+            return nil
         }
 
         do {
             if let activeKey, activeAccountPassword != nil {
                 try secrets.remove(activeKey)
             }
-            if shouldRemoveLegacyPassword {
+            if activeLegacyPassword != nil {
                 try secrets.remove(.mailAppPassword)
             }
-            return true
+            return ActiveMailPasswordRemoval(
+                accountEmail: activeEmail,
+                accountPassword: activeAccountPassword,
+                legacyPassword: activeLegacyPassword
+            )
         } catch {
             connectionError = Self.keychainMessage(action: "remove", error: error)
-            return false
+            return nil
         }
+    }
+
+    func restoreActiveMailPasswordRemoval(_ removal: ActiveMailPasswordRemoval) -> Error? {
+        restoreRemovedAccountSecrets(
+            accountEmail: removal.accountEmail,
+            accountPassword: removal.accountPassword,
+            legacyPassword: removal.legacyPassword
+        )
     }
 
     // MARK: - v10 → v11 migration

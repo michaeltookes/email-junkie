@@ -9,6 +9,7 @@ final class AppStateSaveDraftTests: XCTestCase {
         Draft(
             id: 5,
             sourceUIDValidity: 1,
+            sourceAccountEmail: "me@gmail.com",
             sourceSubject: "Lunch?",
             sourceFrom: MailAddress(name: "Alice", email: "alice@example.com"),
             sourceReplyTo: nil,

@@ -118,6 +118,23 @@ final class SMTPSendTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testTemporaryAuthFailurePreservesStatusCode() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "454 4.7.0 Temporary authentication failure\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .smtpCommandFailed(let code, let message) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
+            }
+            XCTAssertEqual(code, 454)
+            XCTAssertTrue(message.contains("Temporary authentication failure"))
+        }
+        _ = try? channel.finish()
+    }
+
     func testRejectedRecipientSurfacesCommandError() throws {
         let (channel, future) = try makeChannel()
 
@@ -130,9 +147,97 @@ final class SMTPSendTests: XCTestCase {
         try feed(channel, "550 No such user\r\n") // RCPT TO rejected
 
         XCTAssertThrowsError(try future.wait()) { error in
-            guard case .commandFailed = error as? MailError else {
-                return XCTFail("expected commandFailed, got \(error)")
+            guard case .smtpCommandFailed(let code, _) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
             }
+            XCTAssertEqual(code, 550)
+        }
+        _ = try? channel.finish()
+    }
+
+    func testTemporarySMTPReplyPreservesStatusCode() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "421 Service not available\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .smtpCommandFailed(let code, let message) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
+            }
+            XCTAssertEqual(code, 421)
+            XCTAssertTrue(message.contains("Service not available"))
+        }
+        _ = try? channel.finish()
+    }
+
+    // MARK: - Send-failure phase classification (item 27 no-duplicate-sends)
+
+    /// A connection drop *before* the DATA body is written is safe to retry: the
+    /// server never received the message, so it surfaces as `connectionFailed`.
+    func testConnectionDropBeforeDataIsRetryableConnectionFailure() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "334 VXNlcm5hbWU6\r\n")
+        // Drop the connection mid-AUTH, before any DATA submission.
+        _ = try channel.finish() // fires channelInactive
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .connectionFailed = error as? MailError else {
+                return XCTFail("expected connectionFailed (retryable), got \(error)")
+            }
+        }
+    }
+
+    /// A connection drop *after* the DATA body is submitted is ambiguous — the
+    /// server may have queued the message — so it surfaces as
+    /// `sendInterruptedAfterSubmission` and must never be auto-retried.
+    func testConnectionDropAfterDataIsAmbiguousAndNotRetryable() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "334 VXNlcm5hbWU6\r\n")
+        try feed(channel, "334 UGFzc3dvcmQ6\r\n")
+        try feed(channel, "235 accepted\r\n")
+        try feed(channel, "250 ok\r\n") // MAIL FROM
+        try feed(channel, "250 ok\r\n") // RCPT TO
+        let body = try feed(channel, "354 go ahead\r\n")
+        XCTAssertTrue(body.contains("Hello there."), "message body not sent: \(body)")
+
+        // The connection closes before the final 250 acknowledging the message.
+        _ = try channel.finish() // fires channelInactive after DATA submission
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .sendInterruptedAfterSubmission = error as? MailError else {
+                return XCTFail("expected sendInterruptedAfterSubmission (ambiguous), got \(error)")
+            }
+        }
+    }
+
+    /// An explicit non-250 reply *after* DATA is a definitive server rejection
+    /// (the message was not queued), so it stays a `commandFailed`, distinct from
+    /// the ambiguous connection-drop case.
+    func testExplicitRejectionAfterDataStaysCommandFailure() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "334 VXNlcm5hbWU6\r\n")
+        try feed(channel, "334 UGFzc3dvcmQ6\r\n")
+        try feed(channel, "235 accepted\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "354 go ahead\r\n")
+        try feed(channel, "552 5.3.4 Message too big\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .smtpCommandFailed(let code, _) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
+            }
+            XCTAssertEqual(code, 552)
         }
         _ = try? channel.finish()
     }

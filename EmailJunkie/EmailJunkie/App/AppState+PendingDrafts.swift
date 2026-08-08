@@ -3,7 +3,6 @@ import Foundation
 import os
 
 private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "PendingDrafts")
-
 private enum RegenerationReplacementError: LocalizedError {
     case alreadyApproved
 
@@ -17,24 +16,17 @@ private struct RegenerationSourceMessage {
     var mailbox: Mailbox
 }
 
-/// Approval-queue actions on `AppState`: approve (send/save per the send-behavior
-/// setting) or deny (discard) a watcher-produced draft, plus routing of the
-/// native-notification actions. Kept separate so `AppState` stays within limits.
+/// Approval-queue actions on `AppState`.
 extension AppState {
 
-    /// What "Approve" will do for the current send-behavior setting, as a short
-    /// label for the review UI (also satisfies item 9's approval indicator).
+    /// What "Approve" will do for the current send-behavior setting.
     var approveActionLabel: String {
         sendBehavior == .autoSend ? "Send" : "Save to Drafts"
     }
 
-    /// Approves a pending draft: sends it or saves it as a Gmail draft per the
-    /// supplied send behavior (defaulting to the current setting), then removes
-    /// it from the queue on success.
-    ///
-    /// Unless `force` is set, the draft's thread is re-checked first (item 12);
-    /// if it changed, the send is blocked and a `pendingStaleWarnings` entry is
-    /// raised so the review card can warn with send-anyway / regenerate / discard.
+    /// Approves a pending draft and removes it from the queue on success.
+    /// Unless `force` is set, the draft's thread is re-checked first; if it
+    /// changed, the review card gets a stale warning instead of dispatching.
     /// Passing `force: true` is the user's "send anyway" override.
     func approveDraft(
         _ draft: Draft,
@@ -93,6 +85,12 @@ extension AppState {
         credentials: MailAccountCredentials
     ) async throws {
         let effectiveSendBehavior = approvalSendBehavior ?? sendBehavior
+        // Offline (item 27): defer before starting any auto-send countdown, so
+        // the approved intent is durable even if the app quits during the delay.
+        if !isOnline {
+            try queueDraftForNetwork(draft, sendBehavior: effectiveSendBehavior, force: force)
+            return
+        }
         // Auto-send safety net (item 23): unless disabled (delay 0), or the user
         // is forcing a stale "send anyway", an auto-send approval starts a
         // cancellable countdown instead of dispatching now. The draft stays in the
@@ -107,12 +105,22 @@ extension AppState {
             )
             return
         }
-        try await dispatchApprovedDraft(
-            draft,
-            sendBehavior: effectiveSendBehavior,
-            force: force,
-            credentials: credentials
-        )
+        do {
+            let didDispatch = try await dispatchApprovedDraftOrQueueOnOfflineFailure(
+                draft,
+                sendBehavior: effectiveSendBehavior,
+                force: force,
+                credentials: credentials
+            )
+            if !didDispatch {
+                clearOfflineQueueEntry(draft.identity)
+            }
+        } catch {
+            if offlineQueuedDispatch[draft.identity] != nil, isOnline || effectiveSendBehavior == .saveAsDraft {
+                clearOfflineQueueEntry(draft.identity)
+            }
+            throw error
+        }
     }
 
     func currentFreshnessCheck(
@@ -135,6 +143,7 @@ extension AppState {
         guard !approvingDraftIDs.contains(draft.identity) else { return }
         approvalError = nil
         pendingStaleWarnings.removeValue(forKey: draft.identity)
+        clearOfflineQueueEntry(draft.identity)
         do {
             try removePendingDraft(draft)
             recordDraftActivity(.denied, for: draft)
@@ -263,6 +272,7 @@ extension AppState {
             logger.error("Failed to persist approved draft tombstone: \(error.localizedDescription)")
             try removePendingDraft(draft, removeNotification: false)
         }
+        clearOfflineQueueEntry(draft.identity)
         notifier.removeNotification(identity: draft.identity)
     }
 

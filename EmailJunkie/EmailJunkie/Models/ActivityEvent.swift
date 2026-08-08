@@ -133,6 +133,17 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
     case sendFailed
     /// Saving an approved draft to the Drafts mailbox failed (IMAP APPEND).
     case saveFailed
+    /// An approved draft's dispatch was deferred because the network is offline
+    /// (item 27). It stays pending and dispatches automatically on reconnect.
+    case queuedOffline
+    /// The network came back and queued work resumed (item 27).
+    case resumedOnline
+    /// A resilient operation exhausted its transient-retry budget and gave up
+    /// while online (item 27).
+    case retryExhausted
+    /// A mail or LLM authentication failure that won't be retried and needs the
+    /// user to re-enter their credentials (item 27).
+    case authFailed
 
     /// A short label for the event row.
     var headline: String {
@@ -146,6 +157,10 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .sendCanceled: return "Send canceled"
         case .sendFailed: return "Send failed"
         case .saveFailed: return "Save failed"
+        case .queuedOffline: return "Waiting for network"
+        case .resumedOnline: return "Back online"
+        case .retryExhausted: return "Gave up after retries"
+        case .authFailed: return "Sign-in failed"
         }
     }
 
@@ -161,13 +176,17 @@ enum ActivityEventKind: String, Codable, Equatable, CaseIterable {
         case .sendCanceled: return "arrow.uturn.backward.circle"
         case .sendFailed: return "exclamationmark.octagon"
         case .saveFailed: return "exclamationmark.octagon"
+        case .queuedOffline: return "wifi.slash"
+        case .resumedOnline: return "wifi"
+        case .retryExhausted: return "arrow.clockwise.circle"
+        case .authFailed: return "person.crop.circle.badge.exclamationmark"
         }
     }
 
     /// Whether rows should render the free-form failure diagnostic.
     var showsFailureDetail: Bool {
         switch self {
-        case .sendFailed, .saveFailed: return true
+        case .sendFailed, .saveFailed, .retryExhausted, .authFailed: return true
         default: return false
         }
     }

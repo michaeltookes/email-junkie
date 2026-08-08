@@ -10,10 +10,20 @@ public enum MailError: Error, Equatable, Sendable {
     case authenticationFailed(String)
     /// An IMAP command (e.g. SELECT/FETCH) failed.
     case commandFailed(String)
+    /// An SMTP command failed with a status code from the server.
+    case smtpCommandFailed(code: Int, message: String)
     /// The search matched too many messages to return in one response — the
     /// server's reply exceeded the IMAP frame limit. The caller should narrow
     /// the filter (or use the bounded bulk-selection path). See item 45.
     case resultTooLarge
+    /// An SMTP send failed *after* the message body (DATA) was submitted but
+    /// before the server confirmed acceptance (a connection drop, timeout, or
+    /// I/O error in that window). The outcome is **ambiguous** — the server may
+    /// already have queued the message — so this must never be auto-retried
+    /// (item 27's no-duplicate-sends invariant). Callers surface it to the user
+    /// and leave the draft pending for a manual decision. Failures *before* DATA
+    /// submission surface as `connectionFailed` instead and are safe to retry.
+    case sendInterruptedAfterSubmission(String)
 }
 
 /// A mailbox backend. Exposes a connection check plus recent-message fetch;

@@ -16,6 +16,41 @@ struct DraftNeedsInfo: Codable, Equatable {
     }
 }
 
+/// A user's already-approved dispatch. Stored on the pending draft so offline
+/// approvals survive relaunch with the exact approval mode the user chose.
+struct OfflineQueuedDraftDispatch: Codable, Equatable {
+    var sendBehavior: SendBehavior
+    var force: Bool
+    var isDispatchInFlight: Bool
+
+    init(sendBehavior: SendBehavior, force: Bool = false, isDispatchInFlight: Bool = false) {
+        self.sendBehavior = sendBehavior
+        self.force = force
+        self.isDispatchInFlight = isDispatchInFlight
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sendBehavior
+        case force
+        case isDispatchInFlight
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rawBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior)
+        sendBehavior = rawBehavior.flatMap(SendBehavior.init(rawValue:)) ?? .default
+        force = try container.decodeIfPresent(Bool.self, forKey: .force) ?? false
+        isDispatchInFlight = try container.decodeIfPresent(Bool.self, forKey: .isDispatchInFlight) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sendBehavior.rawValue, forKey: .sendBehavior)
+        try container.encode(force, forKey: .force)
+        try container.encode(isDispatchInFlight, forKey: .isDispatchInFlight)
+    }
+}
+
 /// A generated reply draft, associated with the message it replies to so it can
 /// be threaded and sent correctly later (items 9 & 12).
 struct Draft: Codable, Identifiable, Equatable {
@@ -62,6 +97,10 @@ struct Draft: Codable, Identifiable, Equatable {
     /// information only the user has (item 13). A flagged draft is never sent or
     /// saved until the user resolves it.
     var needsInfo: DraftNeedsInfo?
+    /// An approved dispatch that could not run because the network was offline.
+    /// Once dispatch starts, the intent is marked terminal so relaunch cannot
+    /// automatically repeat a send whose post-send persistence failed.
+    var offlineQueuedDispatch: OfflineQueuedDraftDispatch?
 
     /// Whether this draft is flagged as needing the user's input rather than
     /// carrying a ready-to-send reply.
@@ -105,7 +144,8 @@ struct Draft: Codable, Identifiable, Equatable {
         originalBody: String? = nil,
         model: String,
         generatedAt: Date,
-        needsInfo: DraftNeedsInfo? = nil
+        needsInfo: DraftNeedsInfo? = nil,
+        offlineQueuedDispatch: OfflineQueuedDraftDispatch? = nil
     ) {
         self.id = id
         self.sourceUIDValidity = sourceUIDValidity
@@ -124,6 +164,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.model = model
         self.generatedAt = generatedAt
         self.needsInfo = needsInfo
+        self.offlineQueuedDispatch = offlineQueuedDispatch
     }
 
     /// A stable identity across the pending queue and notifications, scoped by

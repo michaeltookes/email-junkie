@@ -181,6 +181,14 @@ private struct PendingDraftCard: View {
     /// Remaining seconds on this draft's auto-send countdown (item 23), if any.
     private var countdownRemaining: Int? { appState.sendCountdownRemaining(for: draft.identity) }
 
+    private var queuedDispatchIntent: OfflineQueuedDraftDispatch? {
+        appState.offlineQueuedDispatch[draft.identity]
+    }
+
+    private var isQueuedForNetwork: Bool {
+        appState.isWaitingForNetwork(draft.identity) || queuedDispatchIntent != nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.isFlagged {
@@ -196,6 +204,8 @@ private struct PendingDraftCard: View {
             Divider()
             if let countdownRemaining {
                 countdownRow(countdownRemaining)
+            } else if isQueuedForNetwork {
+                waitingForNetworkRow()
             } else if let staleReason {
                 staleWarning(staleReason)
             } else {
@@ -266,7 +276,7 @@ private struct PendingDraftCard: View {
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor)))
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.2)))
                     .focused($isBodyFocused)
-                    .disabled(isBusy)
+                    .disabled(isBusy || isQueuedForNetwork)
                     .accessibilityLabel("Reply body")
                     // Keep notification approval from racing focused edits, but
                     // coalesce disk writes while the user is typing.
@@ -329,6 +339,51 @@ private struct PendingDraftCard: View {
             .keyboardShortcut(.cancelAction)
             .accessibilityLabel("Cancel send")
         }
+    }
+
+    private var queuedDispatchDescription: String {
+        switch queuedDispatchIntent?.sendBehavior {
+        case .autoSend:
+            return "Will send when online."
+        case .saveAsDraft:
+            return "Will save to Drafts when online."
+        case nil:
+            return "Will dispatch when online."
+        }
+    }
+
+    private var cancelQueuedDispatchLabel: String {
+        switch queuedDispatchIntent?.sendBehavior {
+        case .autoSend:
+            return "Cancel queued send"
+        case .saveAsDraft:
+            return "Cancel queued save"
+        case nil:
+            return "Cancel queued action"
+        }
+    }
+
+    private func waitingForNetworkRow() -> some View {
+        HStack(spacing: 8) {
+            Label("Waiting for network", systemImage: "wifi.slash")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(queuedDispatchDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Discard", role: .destructive) {
+                appState.denyDraft(draft)
+            }
+            .disabled(isBusy)
+            Button(cancelQueuedDispatchLabel) {
+                appState.cancelQueuedDraftDispatch(draft.identity)
+            }
+            .disabled(isBusy)
+            .accessibilityLabel(cancelQueuedDispatchLabel)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.08)))
     }
 
     private func queueEditedBodyPersist(_ newValue: String) {

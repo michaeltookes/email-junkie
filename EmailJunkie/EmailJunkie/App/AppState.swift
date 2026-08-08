@@ -193,6 +193,7 @@ final class AppState: ObservableObject {
     @Published var skippedMessages: [SkippedMessage] = []
 
     var skippedMessageIDs: Set<String> = []
+    var skippedMessageReasonsByID: [String: ReplyWorthinessReason] = [:]
 
     /// Maximum number of skip-log entries kept in memory.
     let skippedMessageLogLimit = 100

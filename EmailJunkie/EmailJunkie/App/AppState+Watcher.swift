@@ -193,33 +193,11 @@ extension AppState {
     ) async {
         guard isReplyable(message),
               !processedMessages.contains(message, account: credentials.email, mailbox: mailbox),
-              !hasSkippedMessage(message, account: credentials.email, mailbox: mailbox),
               !hasPendingDraft(for: message, account: credentials.email, mailbox: mailbox) else {
             return
         }
-
-        // Sender rules (item 18) layer over the reply-worthiness gate (item 17):
-        // an allowlisted sender is force-drafted regardless of the heuristics; a
-        // blocklisted sender is skipped with a visible reason. Only when the rules
-        // have no opinion does the worthiness gate run. Precedence and the
-        // allow-vs-block tie-break live in the pure `SenderRules` evaluator.
-        switch senderRuleDecision(for: message) {
-        case .block:
-            guard watchStatus == .watching, mailCredentials == credentials else { return }
-            recordSkip(message, reason: .senderBlocklisted, account: credentials.email, mailbox: mailbox)
+        guard await canDraftAfterSenderRulesAndWorthiness(message, credentials: credentials, mailbox: mailbox) else {
             return
-        case .forceDraft:
-            break
-        case .noOpinion:
-            // Reply-worthiness gate (item 17): skip obvious non-replyable mail
-            // before the costly LLM draft call. A skip is recorded in memory but
-            // not marked durably processed, so a false skip can be recovered after
-            // log loss or app restart.
-            if let reason = await replyWorthinessSkipReason(message, credentials: credentials, mailbox: mailbox) {
-                guard watchStatus == .watching, mailCredentials == credentials else { return }
-                recordSkip(message, reason: reason, account: credentials.email, mailbox: mailbox)
-                return
-            }
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }
 
@@ -230,6 +208,43 @@ extension AppState {
         } catch {
             watchError = Self.draftMessage(for: error)
             logger.error("Watcher draft failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func canDraftAfterSenderRulesAndWorthiness(
+        _ message: MailMessage,
+        credentials: MailAccountCredentials,
+        mailbox: Mailbox
+    ) async -> Bool {
+        let skippedReason = skippedMessageReason(message, account: credentials.email, mailbox: mailbox)
+        // Sender rules (item 18) layer over the reply-worthiness gate (item 17):
+        // an allowlisted sender is force-drafted regardless of the heuristics; a
+        // blocklisted sender is skipped with a visible reason. Only when the rules
+        // have no opinion does the worthiness gate run. Precedence and the
+        // allow-vs-block tie-break live in the pure `SenderRules` evaluator.
+        switch senderRuleDecision(for: message) {
+        case .block:
+            guard watchStatus == .watching, mailCredentials == credentials else { return false }
+            recordSkip(message, reason: .senderBlocklisted, account: credentials.email, mailbox: mailbox)
+            return false
+        case .forceDraft:
+            removeSkippedMessage(message, account: credentials.email, mailbox: mailbox)
+            return true
+        case .noOpinion:
+            if let skippedReason {
+                guard skippedReason == .senderBlocklisted else { return false }
+                removeSkippedMessage(message, account: credentials.email, mailbox: mailbox)
+            }
+            // Reply-worthiness gate (item 17): skip obvious non-replyable mail
+            // before the costly LLM draft call. A skip is recorded in memory but
+            // not marked durably processed, so a false skip can be recovered after
+            // log loss or app restart.
+            if let reason = await replyWorthinessSkipReason(message, credentials: credentials, mailbox: mailbox) {
+                guard watchStatus == .watching, mailCredentials == credentials else { return false }
+                recordSkip(message, reason: reason, account: credentials.email, mailbox: mailbox)
+                return false
+            }
+            return true
         }
     }
 

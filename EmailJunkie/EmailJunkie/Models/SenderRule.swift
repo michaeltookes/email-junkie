@@ -31,7 +31,7 @@ struct SenderRule: Codable, Equatable, Hashable, Identifiable {
         if value.hasPrefix("@") { value.removeFirst() }
         guard !value.isEmpty, !value.contains(where: \.isWhitespace) else { return nil }
         if value.contains("@") {
-            let parts = value.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+            let parts = value.split(separator: "@", omittingEmptySubsequences: false)
             guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
         }
         self.pattern = value

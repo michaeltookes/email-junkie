@@ -157,6 +157,39 @@ final class AppStateSenderRulesTests: XCTestCase {
         XCTAssertEqual(appState.skippedMessages.map(\.reason), [.senderBlocklisted])
     }
 
+    func testAllowlistReconsidersAlreadySkippedMessageOnNextPoll() async {
+        let skipped = message(id: 1, from: "no-reply@x.com")
+        let (appState, _, persistence) = makeAppState(fetch: .success([skipped]))
+        appState.watchStatus = .watching
+        await appState.pollInboxOnce()
+        XCTAssertEqual(appState.skippedMessages.map(\.reason), [.noReplySender])
+
+        XCTAssertTrue(appState.addAllowedSender("no-reply@x.com"))
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+        XCTAssertTrue(appState.skippedMessages.isEmpty)
+        XCTAssertFalse(appState.hasSkippedMessage(skipped, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(skipped, account: "me@gmail.com", mailbox: .inbox))
+    }
+
+    func testRemovingBlockRuleReconsidersSkippedMessageOnNextPoll() async {
+        let blocked = message(id: 1, from: "friend@spam.net")
+        let (appState, _, persistence) = makeAppState(fetch: .success([blocked]))
+        appState.senderBlocklist = [SenderRule(normalized: "spam.net")]
+        appState.watchStatus = .watching
+        await appState.pollInboxOnce()
+        XCTAssertEqual(appState.skippedMessages.map(\.reason), [.senderBlocklisted])
+
+        appState.removeBlockedSenders([SenderRule(normalized: "spam.net")])
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.pendingDrafts.map(\.id), [1])
+        XCTAssertTrue(appState.skippedMessages.isEmpty)
+        XCTAssertFalse(appState.hasSkippedMessage(blocked, account: "me@gmail.com", mailbox: .inbox))
+        XCTAssertTrue(persistence.processedMessages.contains(blocked, account: "me@gmail.com", mailbox: .inbox))
+    }
+
     // MARK: - Mutations
 
     func testAddingToOneListRemovesIdenticalPatternFromTheOther() {

@@ -67,6 +67,7 @@ extension AppState {
             reason: reason
         )
         skippedMessageIDs.insert(entry.id)
+        skippedMessageReasonsByID[entry.id] = reason
         skippedMessages.removeAll { $0.id == entry.id }
         skippedMessages.insert(entry, at: 0)
         if skippedMessages.count > skippedMessageLogLimit {
@@ -84,12 +85,14 @@ extension AppState {
     func removeSkippedMessage(_ entry: SkippedMessage) {
         skippedMessages.removeAll { $0.id == entry.id }
         skippedMessageIDs.remove(entry.id)
+        skippedMessageReasonsByID.removeValue(forKey: entry.id)
     }
 
     /// Clears the whole skip log.
     func clearSkippedMessages() {
         skippedMessages.removeAll()
         skippedMessageIDs.removeAll()
+        skippedMessageReasonsByID.removeAll()
     }
 
     /// Dismisses a skipped entry and durably suppresses future watcher handling.
@@ -108,6 +111,20 @@ extension AppState {
         return skippedMessageIDs.contains(entry.id)
     }
 
+    /// The retained reason for a skipped message identity, including entries that
+    /// have rolled out of the visible skip log but still suppress repeat work.
+    func skippedMessageReason(_ message: MailMessage, account: String, mailbox: Mailbox) -> ReplyWorthinessReason? {
+        let entry = SkippedMessage(message: message, mailbox: mailbox, account: account, reason: .noReplySender)
+        return skippedMessageReasonsByID[entry.id]
+    }
+
+    /// Removes a skipped identity for a message that is being reconsidered by a
+    /// sender-rule edit.
+    func removeSkippedMessage(_ message: MailMessage, account: String, mailbox: Mailbox) {
+        let entry = SkippedMessage(message: message, mailbox: mailbox, account: account, reason: .noReplySender)
+        removeSkippedMessage(entry)
+    }
+
     private func dismissSkippedMessages(_ entries: [SkippedMessage]) {
         guard !entries.isEmpty else { return }
         let entryIDs = Set(entries.map(\.id))
@@ -117,6 +134,9 @@ extension AppState {
         persistence.saveProcessedMessages(processedMessages)
         skippedMessages.removeAll { entryIDs.contains($0.id) }
         skippedMessageIDs.subtract(entryIDs)
+        for entryID in entryIDs {
+            skippedMessageReasonsByID.removeValue(forKey: entryID)
+        }
     }
 
     // MARK: - Override

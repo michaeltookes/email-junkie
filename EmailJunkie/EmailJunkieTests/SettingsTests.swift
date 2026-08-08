@@ -128,12 +128,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsEleven() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 11)
+    func testCurrentSchemaVersionIsTwelve() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 12)
     }
 
     func testSavedAccountsSchemaVersionIsEleven() {
         XCTAssertEqual(Settings.savedAccountsSchemaVersion, 11)
+    }
+
+    func testSenderRulesSchemaVersionIsTwelve() {
+        XCTAssertEqual(Settings.senderRulesSchemaVersion, 12)
+    }
+
+    func testLegacyFileWithoutSenderRulesDecodesToEmpty() throws {
+        // A pre-v12 file has no sender-rule keys; both lists must decode to empty.
+        let legacy = #"{"schemaVersion":11,"pollIntervalSeconds":300,"mailEmail":"me@x.com"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertTrue(decoded.senderAllowlist.isEmpty)
+        XCTAssertTrue(decoded.senderBlocklist.isEmpty)
+    }
+
+    func testSenderRulesRoundTripThroughCodable() throws {
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            senderAllowlist: [SenderRule(normalized: "vip@example.com")],
+            senderBlocklist: [SenderRule(normalized: "spam.net")]
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertEqual(decoded.senderAllowlist, original.senderAllowlist)
+        XCTAssertEqual(decoded.senderBlocklist, original.senderBlocklist)
     }
 
     func testLegacyFileWithoutSavedAccountsDecodesToEmpty() throws {

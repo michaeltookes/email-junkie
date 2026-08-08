@@ -92,6 +92,25 @@ final class AppStateSenderRulesTests: XCTestCase {
         XCTAssertEqual(appState.skippedMessages.map(\.reason), [.senderBlocklisted])
     }
 
+    func testExistingBlocklistSkipDoesNotRefreshActivityEveryPoll() async throws {
+        let blocked = message(id: 1, from: "friend@spam.net")
+        let (appState, _, persistence) = makeAppState(fetch: .success([blocked]))
+        appState.senderBlocklist = [SenderRule(normalized: "spam.net")]
+        appState.watchStatus = .watching
+
+        await appState.pollInboxOnce()
+        let originalEvent = try XCTUnwrap(appState.activityEvents.first)
+        XCTAssertEqual(originalEvent.skipReason, .senderBlocklisted)
+        XCTAssertEqual(persistence.activityEventSaveCount, 1)
+
+        await appState.pollInboxOnce()
+
+        XCTAssertEqual(appState.skippedMessages.map(\.reason), [.senderBlocklisted])
+        XCTAssertEqual(persistence.activityEventSaveCount, 1)
+        XCTAssertEqual(appState.activityEvents.first?.id, originalEvent.id)
+        XCTAssertEqual(appState.activityEvents.first?.timestamp, originalEvent.timestamp)
+    }
+
     // MARK: - Allowlist
 
     func testAllowlistForceDraftsPastWorthinessHeuristics() async {

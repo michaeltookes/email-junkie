@@ -15,6 +15,7 @@ extension AppState {
         // skipped with a visible reason. Only a no-opinion verdict falls through.
         switch senderRuleDecision(for: message) {
         case .block:
+            guard skippedReason != .senderBlocklisted else { return false }
             guard watchStatus == .watching, mailCredentials == credentials else { return false }
             recordSkip(message, reason: .senderBlocklisted, account: credentials.email, mailbox: mailbox)
             return false

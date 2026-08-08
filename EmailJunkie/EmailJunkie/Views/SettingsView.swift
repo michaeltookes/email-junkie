@@ -15,9 +15,12 @@ struct SettingsView: View {
             EmailAccountSettingsView()
                 .tabItem { Label("Email Account", systemImage: "envelope") }
 
+            SenderRulesSettingsView()
+                .tabItem { Label("Sender Rules", systemImage: "line.3.horizontal.decrease.circle") }
+
             AIProviderSettingsView()
                 .tabItem { Label("AI Provider", systemImage: "sparkles") }
         }
-        .frame(width: 460, height: 480)
+        .frame(width: 460, height: 520)
     }
 }

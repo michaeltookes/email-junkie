@@ -134,6 +134,12 @@ final class AppState: ObservableObject {
     /// Whether first-run onboarding has been completed or dismissed.
     @Published var onboardingCompleted: Bool
 
+    /// Senders to always draft, bypassing the reply-worthiness heuristics (item 18).
+    @Published var senderAllowlist: [SenderRule]
+
+    /// Senders to never draft; matches are skipped with a visible reason (item 18).
+    @Published var senderBlocklist: [SenderRule]
+
     /// Whether the loaded settings file predates the onboarding completion flag.
     /// Used only to keep already-configured installs out of first-run setup.
     let loadedSettingsPredateOnboardingCompletion: Bool
@@ -220,6 +226,7 @@ final class AppState: ObservableObject {
     @Published var skippedMessages: [SkippedMessage] = []
 
     var skippedMessageIDs: Set<String> = []
+    var skippedMessageReasonsByID: [String: ReplyWorthinessReason] = [:]
 
     /// Maximum number of skip-log entries kept in memory.
     let skippedMessageLogLimit = 100
@@ -271,6 +278,23 @@ final class AppState: ObservableObject {
 
     // MARK: - Initialization
 
+    /// Loads persisted pending drafts, dropping any already approved (and rewriting
+    /// the store when that filtering changed it). Static so `init` can call it
+    /// before all stored properties are initialized.
+    private static func loadCleanedPendingDrafts(_ persistence: PersistenceProvider) -> [Draft] {
+        let approvedDraftIdentities = persistence.loadApprovedDraftIdentities()
+        let loadedPendingDrafts = persistence.loadPendingDrafts()
+        let pendingDrafts = loadedPendingDrafts.filter { !approvedDraftIdentities.contains($0.identity) }
+        if pendingDrafts.count != loadedPendingDrafts.count {
+            do {
+                try persistence.savePendingDraftsSync(pendingDrafts)
+            } catch {
+                logger.error("Failed to clean approved pending drafts on launch: \(error.localizedDescription)")
+            }
+        }
+        return pendingDrafts
+    }
+
     init(
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
@@ -302,6 +326,8 @@ final class AppState: ObservableObject {
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.sendDelaySeconds = settings.sendDelaySeconds
         self.onboardingCompleted = settings.onboardingCompleted
+        self.senderAllowlist = settings.senderAllowlist
+        self.senderBlocklist = settings.senderBlocklist
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()

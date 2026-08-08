@@ -67,13 +67,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 ## Medium Priority
 
-18. **Sender allowlist / blocklist & rules**
-    Control which senders are drafted.
-    *As Priya, I want to choose which senders are always or never drafted, so that I control the watcher's scope.*
-    - Settings supports allowlist / blocklist by sender address or domain.
-    - Rules take effect on the next poll without restart.
-    - Rules persisted locally.
-
 20. **Voice profile refresh / re-learn**
     Keep the profile current.
     *As Priya, I want to re-learn my voice on demand or on a schedule, so that drafts keep up as my style changes.*

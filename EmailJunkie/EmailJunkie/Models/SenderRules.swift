@@ -95,9 +95,9 @@ struct SenderIdentity: Equatable {
             return nil
         }
         self.address = value
-        let parts = value.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
-        if parts.count == 2, !parts[1].isEmpty {
-            self.domain = String(parts[1])
+        if let atIndex = value.lastIndex(of: "@") {
+            let domainPart = value[value.index(after: atIndex)...]
+            self.domain = domainPart.isEmpty ? nil : String(domainPart)
         } else {
             self.domain = nil
         }

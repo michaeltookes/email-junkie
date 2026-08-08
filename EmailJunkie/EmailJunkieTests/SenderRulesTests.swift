@@ -81,6 +81,12 @@ final class SenderRulesTests: XCTestCase {
         XCTAssertEqual(decide("example.com@other.org", block: ["example.com"]), .noOpinion)
     }
 
+    func testDomainRuleUsesTextAfterLastAtSign() {
+        XCTAssertEqual(decide("quoted@local@evil.com", block: ["evil.com"]), .block)
+        XCTAssertEqual(decide("quoted@local@mail.evil.com", block: ["evil.com"]), .block)
+        XCTAssertEqual(decide("quoted@local@not-evil.com", block: ["evil.com"]), .noOpinion)
+    }
+
     func testAddressRuleDoesNotMatchDifferentAddressSameDomain() {
         XCTAssertEqual(decide("bob@example.com", block: ["alice@example.com"]), .noOpinion)
     }

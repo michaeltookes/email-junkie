@@ -28,7 +28,11 @@ struct SenderRule: Codable, Equatable, Hashable, Identifiable {
     init?(rawInput: String) {
         var value = rawInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !value.isEmpty else { return nil }
-        if value.hasPrefix("@") { value.removeFirst() }
+        let isDomainMarkerSyntax = value.hasPrefix("@")
+        if isDomainMarkerSyntax {
+            value.removeFirst()
+            guard !value.contains("@") else { return nil }
+        }
         guard !value.isEmpty, !value.contains(where: \.isWhitespace) else { return nil }
         if value.contains("@") {
             let parts = value.split(separator: "@", omittingEmptySubsequences: false)

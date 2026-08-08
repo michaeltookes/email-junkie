@@ -143,6 +143,8 @@ final class SenderRulesTests: XCTestCase {
         XCTAssertNil(SenderRule(rawInput: "foo@"))
         XCTAssertNil(SenderRule(rawInput: "foo@@example.com"))
         XCTAssertNil(SenderRule(rawInput: "foo@bar@example.com"))
+        XCTAssertNil(SenderRule(rawInput: "@alice@example.com"))
+        XCTAssertNil(SenderRule(rawInput: "@@example.com"))
         XCTAssertNil(SenderRule(rawInput: "@bar and baz"))
         XCTAssertNil(SenderRule(rawInput: "has space@example.com"))
     }

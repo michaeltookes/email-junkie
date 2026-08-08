@@ -285,7 +285,8 @@ final class SMTPSendHandler: ChannelInboundHandler {
     // MARK: - Helpers
 
     /// Validates the reply code for the current step, failing the send on a
-    /// mismatch. `auth` routes failures to `authenticationFailed`.
+    /// mismatch. Permanent auth failures route to `authenticationFailed`, while
+    /// temporary auth replies keep their SMTP code so callers can retry them.
     private func expect(
         _ response: SMTPResponse,
         _ code: Int,
@@ -293,7 +294,7 @@ final class SMTPSendHandler: ChannelInboundHandler {
         auth: Bool = false
     ) -> Bool {
         guard response.code == code else {
-            if auth {
+            if auth, isPermanentAuthFailure(response.code) {
                 settle(.failure(MailError.authenticationFailed(replyText(response))))
                 context.close(promise: nil)
             } else {
@@ -311,6 +312,10 @@ final class SMTPSendHandler: ChannelInboundHandler {
 
     private func replyText(_ response: SMTPResponse) -> String {
         response.text.isEmpty ? "SMTP error \(response.code)" : "\(response.code) \(response.text)"
+    }
+
+    private func isPermanentAuthFailure(_ code: Int) -> Bool {
+        code >= 500
     }
 
     private func settle(_ result: Result<Void, Error>) {

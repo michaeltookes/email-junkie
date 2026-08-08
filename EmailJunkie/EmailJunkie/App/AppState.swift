@@ -208,6 +208,9 @@ final class AppState: ObservableObject {
     var hasConfirmedReachability = false
     /// Prevents overlapping reconnect drains from racing each other.
     var isResumingQueuedDrafts = false
+    /// Records a reconnect callback that arrived while the current queue drain
+    /// was already running, so the drain can replay missed queued work once.
+    var needsQueuedDraftDrainAfterCurrent = false
 
     /// Observes reachability so the app can pause while offline and resume on
     /// reconnect. Injected for deterministic offline→online tests.

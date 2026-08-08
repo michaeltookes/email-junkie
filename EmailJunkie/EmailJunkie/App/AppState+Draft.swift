@@ -82,12 +82,14 @@ extension AppState {
     func draftAndEnqueue(
         _ message: MailMessage,
         mailbox: Mailbox = .inbox,
-        requireWatching: Bool = true
+        requireWatching: Bool = true,
+        credentials capturedCredentials: MailAccountCredentials? = nil
     ) async throws -> Bool {
         guard let draft = try await makePendingDraft(
             for: message,
             mailbox: mailbox,
-            requireWatching: requireWatching
+            requireWatching: requireWatching,
+            credentials: capturedCredentials
         ) else { return false }
         try enqueuePendingDraft(draft)
         return true

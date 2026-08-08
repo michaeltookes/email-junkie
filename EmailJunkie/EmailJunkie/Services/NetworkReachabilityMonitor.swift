@@ -10,6 +10,8 @@ protocol NetworkReachabilityMonitoring: AnyObject {
     var isOnline: Bool { get }
     /// Whether the monitor has delivered at least one concrete path value.
     var hasCurrentPath: Bool { get }
+    /// Whether path monitoring has started.
+    var isStarted: Bool { get }
     /// Invoked on the main actor whenever reachability changes. Set by `AppState`.
     var onChange: ((Bool) -> Void)? { get set }
     /// Begins monitoring. Idempotent.
@@ -30,7 +32,7 @@ final class NetworkReachabilityMonitor: NetworkReachabilityMonitoring {
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.reachability")
-    private var isStarted = false
+    private(set) var isStarted = false
 
     /// Nonisolated so it can serve as a default argument for `AppState.init`
     /// (which evaluates default args outside the main actor). No stored property

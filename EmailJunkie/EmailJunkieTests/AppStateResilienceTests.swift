@@ -411,6 +411,7 @@ final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
     private(set) var fetchCallCount = 0
     private(set) var searchCallCount = 0
     var beforeAppendResult: (@Sendable () async -> Void)?
+    var beforeSendResult: (@Sendable () async -> Void)?
 
     init(
         sendResults: [Result<Void, MailError>],
@@ -474,6 +475,7 @@ final class ResilienceMailProvider: MailProvider, @unchecked Sendable {
         seenRFC822.append(rfc822)
         let result = sendResults.count > 1 ? sendResults.removeFirst() : (sendResults.first ?? .success(()))
         lock.unlock()
+        await beforeSendResult?()
         try result.get()
     }
 }

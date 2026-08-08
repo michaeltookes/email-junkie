@@ -50,6 +50,7 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
         reachabilityHasCurrentPath: Bool = true,
         sendBehavior: SendBehavior = .autoSend,
         sendDelaySeconds: Int = 0,
+        sendResults: [Result<Void, MailError>] = [.success(())],
         appendResults: [Result<Void, MailError>] = [.success(())],
         searchResult: Result<MailSearchResult, MailError> = .failure(.commandFailed("search unsupported")),
         seed drafts: [Draft] = []
@@ -71,7 +72,7 @@ final class AppStateResilienceReviewFeedbackTests: XCTestCase {
             pendingDrafts: drafts
         )
         let provider = ResilienceMailProvider(
-            sendResults: [.success(())],
+            sendResults: sendResults,
             appendResults: appendResults,
             searchResult: searchResult
         )

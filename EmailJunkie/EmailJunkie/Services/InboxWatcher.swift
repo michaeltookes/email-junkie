@@ -23,6 +23,8 @@ final class InboxWatcher {
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
 
+    var isActive: Bool { isRunning }
+
     /// - Parameters:
     ///   - interval: Poll interval in seconds, read at each (re)schedule so a
     ///     settings change takes effect on the next `reschedule()`.

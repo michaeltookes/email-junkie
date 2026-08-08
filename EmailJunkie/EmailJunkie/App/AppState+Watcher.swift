@@ -28,8 +28,22 @@ extension AppState {
         watchError = nil
         recordWatcherBaselineStartIfNeeded(account: mailCredentials.email, mailbox: .inbox)
         watchStatus = .watching
-        inboxWatcher.start()
+        if canStartInboxWatcherImmediately {
+            inboxWatcher.start()
+        }
         logger.info("Inbox watching started")
+    }
+
+    private var canStartInboxWatcherImmediately: Bool {
+        hasConfirmedReachability || (!reachability.isStarted && reachability.hasCurrentPath)
+    }
+
+    func resumeInboxWatcherAfterReachabilityConfirmed() {
+        if inboxWatcher.isActive {
+            inboxWatcher.pollNow()
+        } else {
+            inboxWatcher.start()
+        }
     }
 
     /// Pauses watching; the queue and processed history are kept.
@@ -73,6 +87,7 @@ extension AppState {
         }
         // Offline (item 27): skip the poll rather than burn retries against an
         // unreachable server. Reconnect triggers an immediate catch-up poll.
+        guard hasConfirmedReachability || !reachability.isStarted else { return }
         guard isOnline else { return }
         guard !isPollingInbox else { return }
         isPollingInbox = true
@@ -237,8 +252,14 @@ extension AppState {
             // exhaustion the message is left unprocessed, so the next poll retries
             // it — the existing skip/pending-draft guards prevent re-notification.
             let enqueued = try await withResilientRetry {
-                try await self.draftAndEnqueue(message, mailbox: mailbox)
+                try self.validateWatcherDraftContext(credentials)
+                return try await self.draftAndEnqueue(
+                    message,
+                    mailbox: mailbox,
+                    credentials: credentials
+                )
             }
+            guard watchStatus == .watching, mailCredentials == credentials else { return }
             if enqueued {
                 markProcessed(message, account: credentials.email, mailbox: mailbox)
             }
@@ -253,6 +274,12 @@ extension AppState {
                 pauseWatching()
             }
             logger.error("Watcher draft failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func validateWatcherDraftContext(_ credentials: MailAccountCredentials) throws {
+        guard watchStatus == .watching, mailCredentials == credentials else {
+            throw DraftDispatchError.accountChanged
         }
     }
 

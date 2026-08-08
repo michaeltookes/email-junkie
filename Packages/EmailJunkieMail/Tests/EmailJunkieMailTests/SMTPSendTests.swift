@@ -118,6 +118,23 @@ final class SMTPSendTests: XCTestCase {
         _ = try? channel.finish()
     }
 
+    func testTemporaryAuthFailurePreservesStatusCode() throws {
+        let (channel, future) = try makeChannel()
+
+        try feed(channel, "220 ready\r\n")
+        try feed(channel, "250 ok\r\n")
+        try feed(channel, "454 4.7.0 Temporary authentication failure\r\n")
+
+        XCTAssertThrowsError(try future.wait()) { error in
+            guard case .smtpCommandFailed(let code, let message) = error as? MailError else {
+                return XCTFail("expected smtpCommandFailed, got \(error)")
+            }
+            XCTAssertEqual(code, 454)
+            XCTAssertTrue(message.contains("Temporary authentication failure"))
+        }
+        _ = try? channel.finish()
+    }
+
     func testRejectedRecipientSurfacesCommandError() throws {
         let (channel, future) = try makeChannel()
 

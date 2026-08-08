@@ -47,11 +47,11 @@ extension AppState {
         if hadConfirmedReachability, !wasOnline {
             logger.info("Network online — resuming polls and draining offline queue")
             recordActivity(ActivityEvent(kind: .resumedOnline, account: normalizedConnectedAccountEmail))
-            if watchStatus == .watching {
-                inboxWatcher.pollNow()
-            }
         } else {
             logger.info("Network online — draining restored offline queue")
+        }
+        if watchStatus == .watching {
+            resumeInboxWatcherAfterReachabilityConfirmed()
         }
         Task { await resumeQueuedDraftsAfterReconnect() }
     }
@@ -189,21 +189,31 @@ extension AppState {
     /// checks; once a network dispatch starts, the persisted marker becomes
     /// terminal so relaunch cannot repeat a send after post-send persistence fails.
     func resumeQueuedDraftsAfterReconnect() async {
-        guard !isResumingQueuedDrafts else { return }
+        guard !isResumingQueuedDrafts else {
+            needsQueuedDraftDrainAfterCurrent = true
+            return
+        }
         guard !offlineQueuedDispatch.isEmpty else { return }
         isResumingQueuedDrafts = true
-        defer { isResumingQueuedDrafts = false }
-        // Snapshot: approveDraft may re-queue entries, mutating the map mid-drain.
-        let queued = offlineQueuedDispatch
-        for (identity, intent) in queued {
-            guard offlineQueuedDispatch[identity] == intent else { continue }
-            guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else {
-                clearOfflineQueueEntry(identity)
-                continue
-            }
-            await approveDraft(draft, sendBehavior: intent.sendBehavior, force: intent.force)
-            clearQueuedDispatchIfManualReviewNeeded(identity)
+        defer {
+            needsQueuedDraftDrainAfterCurrent = false
+            isResumingQueuedDrafts = false
         }
+
+        repeat {
+            needsQueuedDraftDrainAfterCurrent = false
+            // Snapshot: approveDraft may re-queue entries, mutating the map mid-drain.
+            let queued = offlineQueuedDispatch
+            for (identity, intent) in queued {
+                guard offlineQueuedDispatch[identity] == intent else { continue }
+                guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else {
+                    clearOfflineQueueEntry(identity)
+                    continue
+                }
+                await approveDraft(draft, sendBehavior: intent.sendBehavior, force: intent.force)
+                clearQueuedDispatchIfManualReviewNeeded(identity)
+            }
+        } while isOnline && needsQueuedDraftDrainAfterCurrent && !offlineQueuedDispatch.isEmpty
     }
 
     private func clearQueuedDispatchIfManualReviewNeeded(_ identity: String) {

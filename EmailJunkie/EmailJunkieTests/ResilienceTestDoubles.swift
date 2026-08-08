@@ -9,6 +9,7 @@ final class FakeReachabilityMonitor: NetworkReachabilityMonitoring {
     private(set) var hasCurrentPath: Bool
     var onChange: ((Bool) -> Void)?
     private(set) var didStart = false
+    var isStarted: Bool { didStart }
 
     init(isOnline: Bool = true, hasCurrentPath: Bool = true) {
         self.isOnline = isOnline

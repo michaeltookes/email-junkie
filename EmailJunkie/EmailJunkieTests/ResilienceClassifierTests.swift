@@ -30,7 +30,7 @@ final class ResilienceClassifierTests: XCTestCase {
     }
 
     func testSMTPTemporaryCommandFailuresAreTransient() {
-        for code in [421, 450, 451, 452] {
+        for code in [421, 450, 451, 452, 454] {
             XCTAssertEqual(
                 ResilienceClassifier.classify(MailError.smtpCommandFailed(code: code, message: "")),
                 .transient,

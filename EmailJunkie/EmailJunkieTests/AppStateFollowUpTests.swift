@@ -171,6 +171,46 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertTrue(AppState.parseRecipients("not-an-email, also nope").isEmpty)
     }
 
+    // MARK: - Watched-folder handler
+
+    func testWatchedTranscriptEnqueuesAuthoredFollowUpWithoutRecipients() async throws {
+        let (appState, _, notifier, _) = makeAppState()
+        let ingested = try TranscriptIngest.fromPaste("Marcus: recap the call.")
+
+        appState.handleWatchedTranscript(ingested)
+
+        // The handler drafts on a detached Task; wait for it to enqueue.
+        for _ in 0..<100 where appState.pendingDrafts.isEmpty {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertTrue(appState.pendingDrafts.first?.isAuthored ?? false)
+        XCTAssertFalse(appState.pendingDrafts.first?.hasAuthoredRecipients ?? true)
+        XCTAssertEqual(notifier.notifiedDrafts.last?.identity, appState.pendingDrafts.first?.identity)
+    }
+
+    func testWatchedTranscriptWithoutConnectionSetsErrorAndDraftsNothing() throws {
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com"
+        ))
+        // No LLM key/verified model -> not connected -> cannot draft.
+        let appState = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore(seed: [.mailAppPassword: "app-pw"]),
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(())),
+            notifier: FakeDraftNotifier()
+        )
+        XCTAssertFalse(appState.canCreateFollowUp)
+
+        appState.handleWatchedTranscript(try TranscriptIngest.fromPaste("Marcus: recap."))
+
+        XCTAssertNotNil(appState.transcriptFolderError)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
     func testFollowUpSubjectFallbacks() {
         XCTAssertEqual(AppState.followUpSubject("  Custom  ", suggestedTitle: "T"), "Custom")
         XCTAssertEqual(AppState.followUpSubject(nil, suggestedTitle: "Weekly Sync"), "Follow-up: Weekly Sync")

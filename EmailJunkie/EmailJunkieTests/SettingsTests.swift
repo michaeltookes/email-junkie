@@ -128,8 +128,12 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsTwelve() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 12)
+    func testCurrentSchemaVersionIsThirteen() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 13)
+    }
+
+    func testTranscriptWatchedFolderSchemaVersionIsThirteen() {
+        XCTAssertEqual(Settings.transcriptWatchedFolderSchemaVersion, 13)
     }
 
     func testSavedAccountsSchemaVersionIsEleven() {

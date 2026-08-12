@@ -55,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.startWatchingIfReady()
         }
 
+        // Resume watching the transcript folder if it was left enabled (item 51).
+        appState.startTranscriptFolderWatchingIfEnabled()
+
         logger.info("Email Junkie launched")
     }
 
@@ -65,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // their drafts remain pending in the persisted queue.
         appState.cancelAllSendCountdowns()
         appState.stopReachabilityMonitoring()
+        appState.stopTranscriptFolderWatching()
         appState.saveSettingsSync()
         logger.info("Email Junkie terminating")
     }

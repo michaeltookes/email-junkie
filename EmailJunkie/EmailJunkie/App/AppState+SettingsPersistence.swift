@@ -33,7 +33,9 @@ extension AppState {
             sendDelaySeconds: sendDelaySeconds,
             onboardingCompleted: onboardingCompleted,
             senderAllowlist: senderAllowlist,
-            senderBlocklist: senderBlocklist
+            senderBlocklist: senderBlocklist,
+            transcriptWatchedFolderEnabled: transcriptWatchedFolderEnabled,
+            transcriptWatchedFolderPath: transcriptWatchedFolderPath
         )
     }
 

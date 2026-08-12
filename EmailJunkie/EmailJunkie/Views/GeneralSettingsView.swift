@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The "General" tab of Settings: app-wide preferences that aren't tied to a
@@ -52,6 +53,37 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            Section("Post-call follow-ups") {
+                Toggle("Watch a folder for new transcripts", isOn: Binding(
+                    get: { appState.transcriptWatchedFolderEnabled },
+                    set: { appState.setTranscriptWatchedFolderEnabled($0) }
+                ))
+                .accessibilityLabel("Watch a folder for new call transcripts")
+
+                if appState.transcriptWatchedFolderEnabled {
+                    HStack {
+                        Text(appState.transcriptWatchedFolderPath.isEmpty
+                             ? "No folder chosen"
+                             : appState.transcriptWatchedFolderPath)
+                            .font(.caption)
+                            .foregroundStyle(appState.transcriptWatchedFolderPath.isEmpty ? .secondary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button("Choose…") { chooseWatchedFolder() }
+                    }
+                    Text("A new .txt, .vtt, .srt, or .md file here is drafted into a follow-up "
+                         + "automatically. Add recipients in review before sending.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = appState.transcriptFolderError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Section("Privacy") {
                 Text(AppState.privacyStatement)
                     .font(.caption)
@@ -59,5 +91,19 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func chooseWatchedFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Watch Folder"
+        if !appState.transcriptWatchedFolderPath.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: appState.transcriptWatchedFolderPath)
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            appState.setTranscriptWatchedFolderPath(url.path)
+        }
     }
 }

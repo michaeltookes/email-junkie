@@ -94,17 +94,20 @@ extension AppState {
         llmConfiguration: DraftLLMConfiguration
     ) async throws -> String {
         let profile = voiceProfile
+        let runner = retryRunner
         return try await FollowUpGenerator().makeFollowUp(
             transcript: parsed,
             voiceProfile: profile,
             model: llmConfiguration.model
         ) { [llm] request in
-            try await llm.complete(
-                request,
-                provider: llmConfiguration.provider,
-                apiKey: llmConfiguration.apiKey,
-                baseURL: llmConfiguration.baseURL
-            )
+            try await runner.run(classify: ResilienceClassifier.retryDecision(for:)) {
+                try await llm.complete(
+                    request,
+                    provider: llmConfiguration.provider,
+                    apiKey: llmConfiguration.apiKey,
+                    baseURL: llmConfiguration.baseURL
+                )
+            }
         }
     }
 

@@ -33,6 +33,21 @@ final class TranscriptIngestTests: XCTestCase {
         XCTAssertEqual(ingested.parsed().text, "Dana: Hi there.")
     }
 
+    func testFromFileDecodesUTF16BeforeLatin1Fallback() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("transcript-ingest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("Windows Export.txt")
+        var data = Data([0xFF, 0xFE])
+        data.append("Marcus: Thanks for joining.".data(using: .utf16LittleEndian)!)
+        try data.write(to: url)
+
+        let ingested = try TranscriptIngest.fromFile(url)
+
+        XCTAssertEqual(ingested.rawText, "Marcus: Thanks for joining.")
+    }
+
     func testFromFileRejectsUnsupportedExtension() throws {
         let url = try writeTempFile(name: "recording.mp4", contents: "not a transcript")
         defer { try? FileManager.default.removeItem(at: url) }

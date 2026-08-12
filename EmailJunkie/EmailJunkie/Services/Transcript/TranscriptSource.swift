@@ -95,14 +95,25 @@ enum TranscriptIngest {
     }
 
     private static func readText(_ url: URL) throws -> String {
-        if let utf8 = try? String(contentsOf: url, encoding: .utf8) {
+        guard let data = try? Data(contentsOf: url) else {
+            throw TranscriptIngestError.unreadableFile(url.lastPathComponent)
+        }
+        if let utf8 = String(data: data, encoding: .utf8) {
             return utf8
         }
-        guard let data = try? Data(contentsOf: url),
-              let decoded = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .isoLatin1) else {
+        guard let decoded = decodeUTF16WithBOM(data) ?? String(data: data, encoding: .isoLatin1) else {
             throw TranscriptIngestError.unreadableFile(url.lastPathComponent)
         }
         return decoded
+    }
+
+    private static func decodeUTF16WithBOM(_ data: Data) -> String? {
+        guard data.count >= 2 else { return nil }
+        let first = data[data.startIndex]
+        let second = data[data.index(after: data.startIndex)]
+        guard (first == 0xFE && second == 0xFF) || (first == 0xFF && second == 0xFE) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf16)
     }
 }

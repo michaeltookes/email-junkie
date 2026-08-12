@@ -17,14 +17,15 @@ enum WatchedFolderError: Error, Equatable {
 /// the v1 `TranscriptSource`; platform integrations (item 53) and native capture
 /// (item 54) will conform the same way.
 ///
-/// Event-driven via a `DispatchSourceFileSystemObject` on the folder descriptor,
-/// mirroring how `InboxWatcher` splits mechanism from policy: the new-vs-seen
-/// bookkeeping is the pure `WatchedFolderScanner`, and delivery is `onTranscript`,
-/// so a scan can be driven deterministically in tests without real FS events. A
-/// file is marked processed only after it is ingested *and* accepted by the
-/// delivery callback, so a file that appears mid-write or arrives before the app
-/// can draft is retried on a later scan rather than being permanently dropped. It
-/// never moves or deletes the user's files.
+/// Event-driven via a `DispatchSourceFileSystemObject` on the root folder plus a
+/// bounded recursive rescan loop, mirroring how `InboxWatcher` splits mechanism
+/// from policy: the new-vs-seen bookkeeping is the pure `WatchedFolderScanner`,
+/// and delivery is `onTranscript`, so a scan can be driven deterministically in
+/// tests without real FS events. A file is marked processed only after it is
+/// ingested *and* accepted by the delivery callback, so a file that appears
+/// mid-write or arrives before the app can draft is retried on a later scan
+/// rather than being permanently dropped. It never moves or deletes the user's
+/// files.
 @MainActor
 final class WatchedFolderTranscriptSource: TranscriptSource {
 
@@ -37,13 +38,14 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     let folderURL: URL
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
-    private var subdirectorySources: [String: DispatchSourceFileSystemObject] = [:]
+    private var recursiveRescanTask: Task<Void, Never>?
     private var rejectedDeliveryRetryTask: Task<Void, Never>?
     private var fileStabilityRetryTask: Task<Void, Never>?
     private var pendingFileStability: [String: PendingFileStability] = [:]
     private var seen: [String: WatchedFolderFileSnapshot] = [:]
     private var processing: Set<String> = []
     private var isRunning = false
+    var recursiveRescanDelayNanoseconds: UInt64 = 30_000_000_000
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
     var fileStabilityDelayNanoseconds: UInt64 = 2_000_000_000
 
@@ -74,7 +76,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             return
         }
         isRunning = true
-        syncSubdirectoryWatches()
+        startRecursiveRescanLoop()
         Task { @MainActor [weak self] in
             await self?.scanForNewTranscripts()
         }
@@ -83,11 +85,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// Stops watching and releases the folder descriptor. Idempotent.
     func stop() {
         isRunning = false
-        rejectedDeliveryRetryTask?.cancel()
-        fileStabilityRetryTask?.cancel()
-        rejectedDeliveryRetryTask = nil
-        fileStabilityRetryTask = nil
-        pendingFileStability.removeAll()
+        cancelScheduledWork()
         teardownWatch()
     }
 
@@ -96,7 +94,6 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// it. Internal so the FS-event handler and tests can trigger a scan.
     func scanForNewTranscripts() async {
         guard isRunning else { return }
-        syncSubdirectoryWatches()
         let contents = currentContents()
         seen = WatchedFolderScanner.reconcileSeenVersions(seen, with: contents)
         let candidates = WatchedFolderScanner.newTranscripts(in: contents, alreadySeen: seen)
@@ -134,10 +131,6 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         currentRecursiveURLs().filter { !isDirectory($0) }
     }
 
-    private func currentSubdirectories() -> [URL] {
-        currentRecursiveURLs().filter { isDirectory($0) }
-    }
-
     private func currentRecursiveURLs() -> [URL] {
         guard let enumerator = fileManager.enumerator(
             at: folderURL,
@@ -150,20 +143,6 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     private func isDirectory(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-    }
-
-    private func syncSubdirectoryWatches() {
-        let directories = currentSubdirectories()
-        let currentPaths = Set(directories.map { WatchedFolderScanner.seenKey(for: $0) })
-        for path in Array(subdirectorySources.keys) where !currentPaths.contains(path) {
-            teardownSubdirectoryWatch(for: path)
-        }
-        for directory in directories {
-            let path = WatchedFolderScanner.seenKey(for: directory)
-            guard subdirectorySources[path] == nil else { continue }
-            guard let watch = makeWatch(for: directory, isRoot: false) else { continue }
-            subdirectorySources[path] = watch
-        }
     }
 
     /// Opens the folder descriptor and starts the dispatch source. Returns whether
@@ -186,7 +165,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         watch.setEventHandler { [weak self] in
             let flags = watch.data
             Task { @MainActor in
-                await self?.handleEvent(flags, for: url, isRoot: isRoot)
+                await self?.handleEvent(flags, isRoot: isRoot)
             }
         }
         watch.setCancelHandler { close(descriptor) }
@@ -197,14 +176,28 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private func teardownWatch() {
         source?.cancel()
         source = nil
-        for watch in subdirectorySources.values {
-            watch.cancel()
-        }
-        subdirectorySources.removeAll()
     }
 
-    private func teardownSubdirectoryWatch(for path: String) {
-        subdirectorySources.removeValue(forKey: path)?.cancel()
+    private func cancelScheduledWork() {
+        recursiveRescanTask?.cancel()
+        rejectedDeliveryRetryTask?.cancel()
+        fileStabilityRetryTask?.cancel()
+        recursiveRescanTask = nil
+        rejectedDeliveryRetryTask = nil
+        fileStabilityRetryTask = nil
+        pendingFileStability.removeAll()
+    }
+
+    private func startRecursiveRescanLoop() {
+        guard recursiveRescanTask == nil else { return }
+        recursiveRescanTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                try? await Task.sleep(nanoseconds: self.recursiveRescanDelayNanoseconds)
+                if Task.isCancelled { return }
+                await self.scanForNewTranscripts()
+            }
+        }
     }
 
     private func isStableForDelivery(_ url: URL, key: String) -> Bool {
@@ -269,13 +262,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         }
     }
 
-    private func handleEvent(_ flags: DispatchSource.FileSystemEvent, for watchedURL: URL, isRoot: Bool) async {
+    private func handleEvent(_ flags: DispatchSource.FileSystemEvent, isRoot: Bool) async {
         if isRoot, flags.contains(.delete) || flags.contains(.rename) {
             await handleFolderMoved()
         } else {
-            if !isRoot, flags.contains(.delete) || flags.contains(.rename) {
-                teardownSubdirectoryWatch(for: WatchedFolderScanner.seenKey(for: watchedURL))
-            }
             await scanForNewTranscripts()
         }
     }
@@ -287,15 +277,16 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         teardownWatch()
         guard fileManager.fileExists(atPath: folderURL.path) else {
             isRunning = false
+            cancelScheduledWork()
             report(.folderUnavailable(folderURL.path))
             return
         }
         guard openWatch() else {
             isRunning = false
+            cancelScheduledWork()
             report(.cannotOpenFolder(folderURL.path))
             return
         }
-        syncSubdirectoryWatches()
         await scanForNewTranscripts()
     }
 

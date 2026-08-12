@@ -1,6 +1,25 @@
 import EmailJunkieMail
 import XCTest
 @testable import EmailJunkie
+private actor SequencedCompletionLLMProvider: LLMProviding {
+    private var completions: [Result<LLMResponse, LLMError>]
+    private(set) var completionCount = 0
+    init(completions: [Result<LLMResponse, LLMError>]) { self.completions = completions }
+
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {}
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String,
+        baseURL: String?
+    ) async throws -> LLMResponse {
+        completionCount += 1
+        let next = completions.isEmpty
+            ? Result.success(LLMResponse(text: "Follow-up body."))
+            : completions.removeFirst()
+        return try next.get()
+    }
+}
 
 @MainActor
 final class AppStateFollowUpTests: XCTestCase {
@@ -160,6 +179,41 @@ final class AppStateFollowUpTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    func testCreateFollowUpRetriesTransientLLMCompletion() async throws {
+        let llm = SequencedCompletionLLMProvider(completions: [
+            .failure(.http(status: 429, message: "slow down")),
+            .success(LLMResponse(text: "Follow-up body."))
+        ])
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: llm,
+            notifier: FakeDraftNotifier()
+        )
+        appState.retryRunner = .immediate
+
+        let draft = try await appState.createFollowUp(
+            from: TranscriptIngest.fromPaste("Marcus: ship Friday."),
+            recipients: [MailAddress(email: "dana@example.com")]
+        )
+        let completionCount = await llm.completionCount
+
+        XCTAssertEqual(completionCount, 2)
+        XCTAssertEqual(draft.body, "Follow-up body.")
     }
 
     // MARK: - Recipients gate

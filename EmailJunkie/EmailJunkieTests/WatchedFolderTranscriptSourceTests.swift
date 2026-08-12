@@ -170,6 +170,25 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(delivered.first?.parsed().text, "Dana: Hi there.")
     }
 
+    func testPeriodicRecursiveScanDeliversTranscriptInsideExistingSubdirectory() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let callDir = dir.appendingPathComponent("Existing Call", isDirectory: true)
+        try FileManager.default.createDirectory(at: callDir, withIntermediateDirectories: true)
+
+        var delivered: [IngestedTranscript] = []
+        let source = makeSource(folderURL: dir)
+        source.recursiveRescanDelayNanoseconds = 1_000_000
+        source.onTranscript = { delivered.append($0); return true }
+        source.start()
+        defer { source.stop() }
+
+        try write(sampleVTT, to: callDir.appendingPathComponent("call.vtt"))
+
+        try await waitFor { delivered.count == 1 }
+        XCTAssertEqual(delivered.first?.parsed().text, "Dana: Hi there.")
+    }
+
     func testPreExistingNestedTranscriptIsSeededAsSeen() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -1,17 +1,24 @@
 # Backlog
 
-Prioritized list of planned features, improvements, and technical debt for **email-junkie** — a native, local-first, open-source macOS menu-bar email assistant that learns your voice from your Sent mail, watches your inbox, drafts replies with a pluggable LLM, and surfaces them for one-tap approval.
+Prioritized list of planned features, improvements, and technical debt for **email-junkie** — a native, local-first macOS assistant that learns your voice from your Sent mail and drafts email on your behalf for one-tap approval. Its **flagship workflow (2026-08-12 pivot)** is the **post-call follow-up**: when a call ends, ingest the transcript and draft the next-steps email in the user's voice. Inbox reply drafting remains, as one workflow among several.
 
-**v1 design decisions (locked):**
-- **Platform:** native macOS menu-bar app (Swift), following the Prompter distribution pattern (DMG + Homebrew cask + Sparkle auto-update).
+**Product direction (updated 2026-08-12):**
+- **Flagship workflow:** transcript in → next-steps follow-up email out, in the user's voice (items 51–55). The existing drafting → approval → send plumbing is reused; transcript acquisition is the new subsystem, phased: file/paste ingestion first (51), calendar awareness (52), platform APIs (53), native no-bot capture last (54).
+- **Primary commercial ICP:** Account Executives / salespeople in high-velocity roles (see **Marcus** persona). Priya remains the persona for the inbox-reply workflow.
+- **No-bot promise:** calls are never joined by a bot. Transcripts come from local files, the user's own platform APIs, or (future) on-device capture. This is a core differentiator vs. Fathom/Fireflies/Gong-style cloud notetakers.
+- **Monetization (supersedes the original "no subscription" ethos line):** open core / paid binary — source stays public, signed auto-updating binaries are licensed. Subscription pricing: trial → Individual ~$15/mo → Team tier with CRM logging (items 55–56). Enterprise is explicitly parked.
+
+**v1 design decisions:**
+- **Platform:** native macOS menu-bar app (Swift), following the Prompter distribution pattern (DMG + Homebrew cask + Sparkle auto-update). **Affirmed over an Electron rewrite 2026-08-12** — validate on macOS first (the ICP skews Mac); measure Windows demand via a landing-page waitlist (item 57) and revisit Tauri/Electron only if it fills.
 - **Approval channel:** native macOS notification first. (Slack is a future item.)
 - **Email provider:** Gmail first. (Outlook/M365 and IMAP/SMTP are future items.)
 - **Send behavior:** user-configurable — auto-send on approve *or* save-as-draft.
 - **LLM access:** pluggable BYO-any-provider **and** a local-model option.
-- **Ethos:** local-first, private, BYO-key, no subscription. Data stays on the user's machine except the LLM call (which the user controls).
+- **Ethos:** local-first, private, BYO-key. Data stays on the user's machine except the LLM call (which the user controls). *(The original "no subscription" clause was superseded 2026-08-12 — see Monetization above.)*
 
 **Personas referenced in stories below:**
-- **Priya — busy technical professional (primary).** A Solutions Architect. Comfortable installing a signed Mac app and pasting an API key, but does *not* want to run servers or babysit a CLI. Lives in email; wants drafts waiting so she can triage in seconds. Cares about privacy and control.
+- **Marcus — Account Executive, high-velocity sales (primary commercial ICP).** Runs 4–8 calls a day on Zoom/Meet/Teams from a company MacBook. Post-call admin — follow-up emails, CRM logging — eats 30+ minutes daily. Expenses $15–20/mo tools without blinking; his manager cares that activity lands in the CRM. May already use a notetaker (Fathom/Granola/Otter) — those transcripts are an ingestion source, not competition.
+- **Priya — busy technical professional.** A Solutions Architect. Comfortable installing a signed Mac app and pasting an API key, but does *not* want to run servers or babysit a CLI. Lives in email; wants drafts waiting so she can triage in seconds. Cares about privacy and control.
 - **Sam — self-hoster / privacy maximalist (secondary).** Wants everything local, will run a local model, may bring their own Google Cloud credentials. Values openness and "no data leaves my machine."
 
 > **Item format:** every item has a bold title, a one-line summary, a user story (*As a … I want … so that …*), and acceptance criteria. See `CLAUDE.md` for backlog conventions.
@@ -64,6 +71,26 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ✅ **Folder resolution:** Sent/Drafts load; "All Mail" correctly hidden; live **Trash** and **Archive** folder names confirmed by successful moves during the item-49 sweep verification. *(Verified live.)*
     - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
     - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
+
+51. **Post-call follow-up workflow: transcript in → next-steps email out** — *v1 of the 2026-08-12 pivot; the flagship workflow*
+    Ingest a finished call's transcript and draft the follow-up email in the user's voice, through the existing approval → send/save pipeline. Deliberately no capture and no platform integrations — the transcript arrives as a file or paste. This validates the core value proposition using ~90% existing plumbing before any investment in transcript acquisition (items 52–54).
+    *As Marcus, I want my next-steps follow-up drafted from the call transcript before I'm back from getting coffee, so that post-call admin stops eating my selling time.*
+    - Transcript ingestion by **paste** and by **file** (`.txt`, `.vtt`, `.srt`, `.md` — the formats Zoom/Teams/notetakers export), via the menu-bar UI including drag-and-drop.
+    - Optional **watched folder** (e.g. Zoom's local recording directory): a new transcript file appearing there triggers the workflow automatically.
+    - A **`TranscriptSource` abstraction** so future sources (platform APIs — item 53, native capture — item 54) plug in the way LLM providers do.
+    - The LLM reads the full transcript and drafts a follow-up in the user's learned voice: brief recap, agreed next steps / action items with owners, proposed next meeting. Prompting must handle transcripts both with and without speaker labels.
+    - Recipients are user-editable before approval (auto-fill is item 52's job); the draft flows through the existing notification → approve → send/save-as-draft path unchanged.
+    - Works with BYO cloud providers and the local-model option; long transcripts are handled within model context limits (chunk/summarize as needed) rather than failing.
+
+57. **Landing page / marketing site** — *⚠️ discussion required before building; lives in its own repo*
+    The public site where people find the product, understand it in 30 seconds, and pay: positioning, pricing/checkout, download, and the Windows-demand waitlist.
+    > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not email-junkie. This item exists so the work isn't forgotten and its requirements are captured.
+    *As Marcus, I want to find the product, get what it does in 30 seconds, and start a trial without friction, so that trying it is easier than ignoring it.*
+    - Positioning centered on the post-call follow-up workflow ("your follow-up is drafted before you're back from coffee") and the differentiators: no bot in your meetings, local-first/private, BYO-key.
+    - Pricing page and checkout wired to the item 56 licensing/billing flow; prominent trial/download CTA.
+    - **"Windows — join the waitlist"** email capture — the demand probe that decides if/when a cross-platform port (Tauri/Electron) is justified.
+    - Basic discoverability: SEO fundamentals, OG/social cards, and a home for a demo video.
+    - Held in a separate repo with its own deployment; all stack/hosting/analytics decisions deferred to the pre-build discussion.
 
 ## Medium Priority
 
@@ -135,6 +162,24 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Deny, successful dispatch, account switch, and disconnect clear the persisted entry.
     - Note: a pre-review prototype of exactly this exists in `stash@{0}` (2026-08-06, includes `AppStateOfflineQueueReviewFeedbackTests`), but it predates the merged review-feedback rework — re-implement against current `main` rather than popping the stash.
 
+52. **Calendar awareness: auto-fill follow-up recipients and context**
+    Match an ingested transcript (item 51) to the call's calendar event so the follow-up is pre-addressed and context-enriched.
+    *As Marcus, I want the follow-up pre-addressed to everyone on the meeting invite, so that I never copy email addresses by hand.*
+    - Read-only access to the macOS Calendar via **EventKit** (local, no OAuth — any account the user's Calendar app syncs, including Google/M365, comes for free).
+    - A transcript is matched to an event by time proximity (file timestamp / ingestion time vs. the event window); ambiguous matches are resolved by asking the user, never guessed silently.
+    - Attendee emails pre-fill To/Cc (external attendees To, same-domain colleagues Cc — configurable), fully editable before approval.
+    - Event title, attendee names/companies, and description enrich the drafting prompt.
+    - Degrades gracefully: no matching event → the item 51 flow proceeds with empty recipients.
+
+56. **Licensing, trial, and subscription billing (open core / paid binary)**
+    The monetization plumbing behind the 2026-08-12 pricing decision: public source, licensed binaries, subscription checkout.
+    *As the maintainer, I want people to be able to pay for email-junkie, so that the product sustains itself; as Marcus, I want a full-featured trial, so that the workflow proves itself before I pay.*
+    - **Open core / paid binary:** source stays public on GitHub (self-compilers welcome); the signed, notarized, Sparkle-updating binary requires a license.
+    - Full-featured **trial** (14 days or first N calls — exact mechanic TBD); trial state survives reinstall reasonably.
+    - **Individual** tier ~$15/mo or ~$120/yr; **Team** tier (3+ seats, adds CRM logging — item 55 — and centralized billing) as a follow-on; Enterprise explicitly parked.
+    - Checkout via a **merchant-of-record** (Paddle / Lemon Squeezy class) so a solo maintainer isn't handling global sales tax; license issuance + in-app validation with an offline grace period (a local-first app must not phone home per-launch).
+    - Final pricing, trial mechanics, and provider choice to be settled in the item 57 pre-build discussion.
+
 ## Low Priority
 
 30. **Slack approval channel**
@@ -196,3 +241,28 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     *As a maintainer, I want CI enforced and fast, so that broken code can't merge and runs stay cheap.*
     - Enable branch protection on `main` requiring the CI check to pass before merge.
     - Cache SwiftPM/Xcode build dependencies to speed up runs.
+
+53. **Platform transcript integrations (Zoom first, Teams later)**
+    Pull call transcripts automatically from the user's own meeting-platform account — no bot joins the call, nothing transits an email-junkie server.
+    *As Marcus, whose org records to Zoom cloud, I want new call transcripts picked up automatically, so that I never export a file by hand.*
+    - **Zoom first:** poll the cloud-recordings API with the user's own credentials for newly completed transcripts. **Polling, not webhooks** — a local-first app has no public URL; a "dumb relay" push function (Cloudflare Worker/Lambda that forwards only a "new recording exists" ping, never the transcript) is a possible later latency upgrade.
+    - Transcripts are fetched directly from the platform to the Mac and feed the item 51 `TranscriptSource` pipeline.
+    - **Teams (Microsoft Graph) is a follow-on**; its tenant-admin-consent requirement must be documented honestly — same lesson as the parked BYO-OAuth path (item 3). Requires-IT-approval is expected for many orgs.
+    - Per-platform setup friction (cloud recording enabled, plan requirements, credentials) documented; when the API path isn't available, degrade cleanly to item 51's file/folder ingestion.
+
+54. **Native call capture + on-device transcription (the no-bot moat)**
+    Capture call audio locally and transcribe on-device — the Granola-style capture path that makes the no-bot promise total. The biggest lift in the pivot; explicitly gated on item 51 proving demand.
+    *As Marcus, I want calls transcribed on my Mac with no bot joining and no audio leaving the machine, so that prospects never see "Notetaker has joined the meeting."*
+    - System-audio + microphone capture via Core Audio process taps / ScreenCaptureKit, working across Zoom/Meet/Teams whether in a desktop app or a browser.
+    - **On-device transcription** (Apple Speech / whisper.cpp class); speaker diarization is *not* required for v1 — a next-steps email doesn't need per-speaker attribution.
+    - Call start/end detection (mic-in-use heuristics plus a manual control), with call-end automatically triggering the item 51 workflow.
+    - A clearly visible "transcribing" indicator whenever capture is active, and a documented consent/disclosure story (two-party-consent jurisdictions) **before** this ships.
+    - **Gate:** do not start until item 51 has paying/active users asking for automatic capture.
+
+55. **CRM logging (HubSpot first, Salesforce later) — Team-tier differentiator**
+    After a follow-up is approved, log the call summary and sent email to the CRM against the right contact/deal.
+    *As Marcus's sales manager, I want call activity landing in the CRM without nagging reps, so that pipeline data reflects reality.*
+    - After approval, optionally log the call summary + follow-up email to **HubSpot** (first; friendlier API/auth for individuals) or Salesforce, matched to contact/deal by attendee email.
+    - Uses the user's own CRM credentials; calls go directly Mac → CRM, keeping the local-first promise.
+    - Off by default, per-call opt-out; failures never block the email send itself.
+    - Positioned as the **Team-tier** feature in the item 56 pricing model — the follow-up email sells to the rep, CRM hygiene sells to the manager who holds budget.

@@ -4,17 +4,20 @@ Guidance for agents working in the **email-junkie** repository.
 
 ## What this is
 
-email-junkie is a **native, local-first, open-source macOS menu-bar email assistant**. It learns the user's voice from their Sent mail, watches the inbox, drafts replies with a pluggable LLM, and surfaces those drafts for one-tap approval via a native macOS notification.
+email-junkie is a **native, local-first macOS menu-bar assistant** that learns the user's voice from their Sent mail and drafts email on their behalf for one-tap approval via a native macOS notification.
+
+**Direction update (2026-08-12):** the **flagship workflow is the post-call follow-up** — when a call ends, ingest the transcript and draft the next-steps email in the user's voice (backlog items 51–57). Inbox reply drafting remains, as one workflow among several. Primary commercial ICP: **Account Executives / high-velocity salespeople** (the "Marcus" persona in `docs/backlog.md`). **No-bot promise:** calls are never joined by a bot — transcripts come from local files, the user's own platform APIs, or (future) on-device capture.
 
 It is a **Prompter-family product** — a native Mac app for individual knowledge-worker productivity — **not** part of the Prowl Tools (CLI-first developer SDLC) suite. Keep that identity clear: this is a private, on-device GUI app for busy professionals, not developer tooling.
 
-### v1 design decisions (locked)
-- **Platform:** native macOS menu-bar app (Swift), shipped via the Prompter pattern — signed/notarized DMG + Homebrew cask + Sparkle auto-update.
+### v1 design decisions
+- **Platform:** native macOS menu-bar app (Swift), shipped via the Prompter pattern — signed/notarized DMG + Homebrew cask + Sparkle auto-update. **Affirmed over an Electron rewrite 2026-08-12**; Windows demand is measured via a landing-page waitlist (item 57) before any port is considered.
 - **Approval channel:** native macOS notification first. Slack is a future item.
 - **Email provider:** Gmail first. Outlook/M365 and IMAP/SMTP are future items.
 - **Send behavior:** user-configurable — auto-send on approve *or* save-as-draft.
 - **LLM access:** pluggable BYO-any-provider, plus a local-model option (e.g. Ollama).
-- **Ethos:** local-first, private, BYO-key, no subscription. Nothing leaves the machine except the user-controlled LLM call. Secrets live in the macOS Keychain.
+- **Ethos:** local-first, private, BYO-key. Nothing leaves the machine except the user-controlled LLM call. Secrets live in the macOS Keychain.
+- **Monetization (updated 2026-08-12, supersedes the original "no subscription" clause):** open core / paid binary — source stays public, signed auto-updating binaries are licensed; subscription pricing (trial → Individual → Team). See backlog items 56–57. The landing page/marketing site lives in **its own repo** and requires a discussion before any building starts.
 
 ### Email connection method (updated 2026-07-03): IMAP + app password
 **The primary connection path is IMAP + a Google app password**, implemented with SwiftNIO (`swift-nio-imap`) in the local `Packages/EmailJunkieMail` package. Users paste their email + a 16-character app password (2FA required) — no Google Cloud console, no client ID/secret, no verification/CASA.

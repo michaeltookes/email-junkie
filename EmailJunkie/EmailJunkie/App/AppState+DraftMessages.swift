@@ -12,6 +12,8 @@ extension AppState {
             return draftDispatchMessage(for: error)
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
+        case DraftError.llmUnavailable:
+            return "Connect an AI provider first (Test Connection in Settings)."
         case DraftError.unsupportedSourceMailbox:
             return "Draft replies are only available for incoming mail."
         case DraftError.needsUserInput:

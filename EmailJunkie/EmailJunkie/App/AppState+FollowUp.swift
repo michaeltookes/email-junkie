@@ -23,7 +23,7 @@ extension AppState {
         subject: String? = nil
     ) async throws -> Draft {
         guard let llmConfiguration = currentDraftLLMConfiguration else {
-            throw DraftError.emptyDraft
+            throw DraftError.llmUnavailable
         }
         let credentials = mailCredentials
         guard credentials.isComplete else {

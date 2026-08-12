@@ -134,6 +134,9 @@ final class UserNotificationService: NSObject, DraftNotifying {
     /// Category for a flagged "needs input" draft — Deny only, no Approve, since
     /// there is nothing safe to send (item 13).
     static let needsInputCategoryIdentifier = "DRAFT_NEEDS_INPUT"
+    /// Category for authored follow-ups that still need recipients. It deliberately
+    /// has no inline actions: dismissing the banner must not discard the draft.
+    static let recipientNeededCategoryIdentifier = "DRAFT_NEEDS_RECIPIENTS"
     static let approveActionIdentifier = "APPROVE_DRAFT"
     static let denyActionIdentifier = "DENY_DRAFT"
 
@@ -258,8 +261,8 @@ final class UserNotificationService: NSObject, DraftNotifying {
     }
 
     /// Banner copy for an authored post-call follow-up (item 51). A follow-up with
-    /// no recipients yet uses the Deny-only "needs input" category, so it can't be
-    /// approved from the banner until the user adds recipients in review.
+    /// no recipients yet uses an open-only category, so dismissing the banner cannot
+    /// discard the draft.
     private static func applyAuthoredFollowUpContent(
         to content: UNMutableNotificationContent,
         draft: Draft,
@@ -270,7 +273,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
             content.title = "Follow-up drafted — add recipients"
             content.subtitle = subject
             content.body = "Open review to choose who this goes to."
-            content.categoryIdentifier = needsInputCategoryIdentifier
+            content.categoryIdentifier = recipientNeededCategoryIdentifier
             return
         }
         let first = draft.authoredRecipients?.first
@@ -343,6 +346,10 @@ final class UserNotificationService: NSObject, DraftNotifying {
         )]
     }
 
+    static func recipientNeededActions() -> [UNNotificationAction] {
+        []
+    }
+
     private func registerCategory() {
         var categories = Set(SendBehavior.allCases.map { sendBehavior in
             UNNotificationCategory(
@@ -355,6 +362,12 @@ final class UserNotificationService: NSObject, DraftNotifying {
         categories.insert(UNNotificationCategory(
             identifier: Self.needsInputCategoryIdentifier,
             actions: Self.needsInputActions(),
+            intentIdentifiers: [],
+            options: []
+        ))
+        categories.insert(UNNotificationCategory(
+            identifier: Self.recipientNeededCategoryIdentifier,
+            actions: Self.recipientNeededActions(),
             intentIdentifiers: [],
             options: []
         ))

@@ -26,6 +26,25 @@ final class NotificationServiceTests: XCTestCase {
         )
     }
 
+    private func recipientlessFollowUp() -> Draft {
+        Draft(
+            id: 8,
+            sourceUIDValidity: nil,
+            sourceAccountEmail: "me@gmail.com",
+            sourceMailbox: nil,
+            sourceSubject: "Post-call follow-up",
+            sourceFrom: nil,
+            sourceReplyTo: nil,
+            sourceMessageID: nil,
+            incomingBody: "Marcus: ship Friday.",
+            replySubject: "Post-call follow-up",
+            body: "Thanks for the call.",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            authoredRecipients: []
+        )
+    }
+
     func testFlaggedNotificationOffersNoApproveAction() {
         let actions = UserNotificationService.needsInputActions()
         XCTAssertFalse(
@@ -38,6 +57,17 @@ final class NotificationServiceTests: XCTestCase {
     func testReadyDraftNotificationStillOffersApprove() {
         let actions = UserNotificationService.draftActions(for: .autoSend)
         XCTAssertTrue(actions.contains { $0.identifier == UserNotificationService.approveActionIdentifier })
+    }
+
+    func testRecipientlessFollowUpNotificationHasNoDestructiveActions() {
+        let content = UserNotificationService.notificationContent(
+            for: recipientlessFollowUp(),
+            sendBehavior: .autoSend
+        )
+        let actions = UserNotificationService.recipientNeededActions()
+
+        XCTAssertEqual(content.categoryIdentifier, UserNotificationService.recipientNeededCategoryIdentifier)
+        XCTAssertTrue(actions.isEmpty)
     }
 
     func testRefreshUserInfoSuppressesPresentation() {

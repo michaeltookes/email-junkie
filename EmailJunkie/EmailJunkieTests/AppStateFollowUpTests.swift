@@ -120,6 +120,48 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertEqual(draft.replySubject, "Follow-up: Weekly Sync")
     }
 
+    func testCreateFollowUpDoesNotEnqueueWhenAccountChangesDuringGeneration() async throws {
+        let llm = SuspendedLLMProvider()
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: llm,
+            notifier: FakeDraftNotifier()
+        )
+        let task = Task {
+            try await appState.createFollowUp(
+                from: TranscriptIngest.fromPaste("Marcus: ship Friday."),
+                recipients: [MailAddress(email: "dana@example.com")]
+            )
+        }
+        await fulfillment(of: [llm.didStartCompletion], timeout: 1)
+
+        appState.mailEmail = "other@gmail.com"
+        llm.completeDraft(with: .success(LLMResponse(text: "Follow up.")))
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected account change to reject the stale follow-up")
+        } catch DraftDispatchError.accountChanged {
+            XCTAssertTrue(appState.pendingDrafts.isEmpty)
+            XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     // MARK: - Recipients gate
 
     func testFollowUpWithNoRecipientsEnqueuesButBlocksApproval() async throws {

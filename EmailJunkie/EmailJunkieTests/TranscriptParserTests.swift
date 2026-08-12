@@ -87,6 +87,22 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertFalse(parsed.hasSpeakerLabels)
     }
 
+    func testWebVTTPreservesCueTextStartingWithMetadataWords() {
+        let raw = """
+        WEBVTT
+
+        00:00:00.000 --> 00:00:03.000
+        NOTE that Dana owns the rollout.
+        STYLE guide is due Friday.
+        REGION launch depends on legal.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+        XCTAssertEqual(
+            parsed.text,
+            "NOTE that Dana owns the rollout.\nSTYLE guide is due Friday.\nREGION launch depends on legal."
+        )
+    }
+
     func testWebVTTStripsInlineTagsAndStylingClasses() {
         let raw = """
         WEBVTT

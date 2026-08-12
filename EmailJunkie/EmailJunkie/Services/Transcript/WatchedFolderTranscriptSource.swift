@@ -38,9 +38,11 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
     private var subdirectorySources: [String: DispatchSourceFileSystemObject] = [:]
+    private var rejectedDeliveryRetryTask: Task<Void, Never>?
     private var seen: Set<String> = []
     private var processing: Set<String> = []
     private var isRunning = false
+    var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
 
     /// Whether the folder is currently being watched. Reflects reality — it is
     /// only true after the descriptor opened successfully.
@@ -68,6 +70,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// Stops watching and releases the folder descriptor. Idempotent.
     func stop() {
         isRunning = false
+        rejectedDeliveryRetryTask?.cancel()
+        rejectedDeliveryRetryTask = nil
         teardownWatch()
     }
 
@@ -89,6 +93,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             processing.remove(key)
             if accepted {
                 seen.insert(key)
+            } else {
+                scheduleRejectedDeliveryRetry()
             }
         }
     }
@@ -170,6 +176,25 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     private func teardownSubdirectoryWatch(for path: String) {
         subdirectorySources.removeValue(forKey: path)?.cancel()
+    }
+
+    private func scheduleRejectedDeliveryRetry() {
+        guard isRunning, rejectedDeliveryRetryTask == nil else { return }
+        rejectedDeliveryRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.rejectedDeliveryRetryDelayNanoseconds)
+            } catch {
+                self.rejectedDeliveryRetryTask = nil
+                return
+            }
+            guard self.isRunning else {
+                self.rejectedDeliveryRetryTask = nil
+                return
+            }
+            self.rejectedDeliveryRetryTask = nil
+            await self.scanForNewTranscripts()
+        }
     }
 
     private func handleEvent(_ flags: DispatchSource.FileSystemEvent, for watchedURL: URL, isRoot: Bool) async {

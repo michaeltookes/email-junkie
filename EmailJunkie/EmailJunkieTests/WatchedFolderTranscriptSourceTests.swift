@@ -147,6 +147,33 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(deliveredCount, 1, "Retried once ready, then never duplicated")
     }
 
+    func testRejectedDeliverySchedulesRetryScan() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var ready = false
+        var deliveredCount = 0
+        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        source.rejectedDeliveryRetryDelayNanoseconds = 1_000_000
+        source.onTranscript = { _ in
+            guard ready else { return false }
+            deliveredCount += 1
+            return true
+        }
+        source.start()
+        defer { source.stop() }
+
+        try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
+        await source.scanForNewTranscripts()
+        XCTAssertEqual(deliveredCount, 0)
+
+        ready = true
+        for _ in 0..<100 where deliveredCount == 0 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(deliveredCount, 1)
+    }
+
     func testInFlightDeliveryIsNotDeliveredTwiceBeforeAccepted() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }

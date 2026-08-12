@@ -38,22 +38,28 @@ enum TranscriptParser {
         var output: [String] = []
         var sawVoiceTag = false
         var skippingMetadataBlock = false
+        var isInCuePayload = false
 
         for (offset, rawLine) in lines.enumerated() {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty {
                 skippingMetadataBlock = false
+                isInCuePayload = false
                 continue
             }
-            if isWebVTT, isWebVTTMetadata(trimmed) {
+            if skippingMetadataBlock { continue }
+            if isWebVTT, !isInCuePayload, isWebVTTMetadata(trimmed) {
                 // WEBVTT header and NOTE/STYLE/REGION blocks run until a blank line.
                 skippingMetadataBlock = trimmed.hasPrefix("WEBVTT") || trimmed.hasPrefix("NOTE")
                     || trimmed.hasPrefix("STYLE") || trimmed.hasPrefix("REGION")
                 continue
             }
-            if skippingMetadataBlock { continue }
-            if trimmed.contains("-->") { continue }
-            if isCueIdentifier(trimmed, isWebVTT: isWebVTT, immediatelyFollowedBy: immediateLine(in: lines, after: offset)) {
+            if trimmed.contains("-->") {
+                isInCuePayload = true
+                continue
+            }
+            if !isInCuePayload,
+               isCueIdentifier(trimmed, isWebVTT: isWebVTT, immediatelyFollowedBy: immediateLine(in: lines, after: offset)) {
                 continue
             }
             let cleaned = cleanedCueText(trimmed, isWebVTT: isWebVTT, sawVoiceTag: &sawVoiceTag)

@@ -33,6 +33,10 @@ extension AppState {
         guard !parsed.isEmpty else { throw DraftError.emptyDraft }
 
         let body = try await makeFollowUpBody(parsed: parsed, llmConfiguration: llmConfiguration)
+        guard mailCredentials == credentials,
+              currentDraftLLMConfiguration == llmConfiguration else {
+            throw DraftDispatchError.accountChanged
+        }
         let draft = makeAuthoredDraft(
             body: body,
             recipients: Self.dedupedRecipients(recipients),

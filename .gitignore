@@ -20,3 +20,7 @@ xcuserdata/
 
 # Distribution artifacts
 dist/
+
+# Local secrets (live-QA credentials, etc.) — never committed
+.env
+.env.*

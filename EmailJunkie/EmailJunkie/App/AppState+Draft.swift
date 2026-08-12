@@ -180,7 +180,7 @@ extension AppState {
         isGeneratingDraft = false
     }
 
-    private var currentDraftLLMConfiguration: DraftLLMConfiguration? {
+    var currentDraftLLMConfiguration: DraftLLMConfiguration? {
         guard isLLMConnected else { return nil }
         let key = ((try? secrets.value(for: llmProviderKind.apiKeySecret)) ?? nil) ?? ""
         // Key-optional providers (local runtimes) draft with an empty key; cloud
@@ -261,7 +261,7 @@ extension AppState {
             && currentDraftLLMConfiguration == llmConfiguration
     }
 
-    private func enqueuePendingDraft(_ draft: Draft) throws {
+    func enqueuePendingDraft(_ draft: Draft) throws {
         pendingDrafts.append(draft)
         do {
             try persistence.savePendingDraftsSync(pendingDrafts)
@@ -443,24 +443,6 @@ extension AppState {
         draft.wasEdited ? "Edited before send" : nil
     }
 
-    static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {
-        OutgoingMessage(
-            from: from,
-            to: [draft.sourceReplyTo?.email ?? draft.sourceFrom?.email].compactMap { $0 },
-            subject: draft.replySubject,
-            body: draft.body,
-            date: date,
-            messageID: messageID,
-            inReplyTo: draft.sourceMessageID,
-            references: [draft.sourceMessageID].compactMap { $0 }
-        )
-    }
-
-    static func generateMessageID(forEmail email: String) -> String {
-        let host = email.split(separator: "@").last.map(String.init) ?? "emailjunkie.local"
-        return "<\(UUID().uuidString)@\(host)>"
-    }
-
     func draftSourceAllowsReplyDispatch(_ draft: Draft) -> Bool {
         guard let sourceMailbox = draft.sourceMailbox else { return true }
         let normalized = sourceMailbox.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -489,7 +471,7 @@ extension AppState {
 
 }
 
-private struct DraftLLMConfiguration: Equatable {
+struct DraftLLMConfiguration: Equatable {
     let provider: LLMProviderKind
     let model: String
     let apiKey: String

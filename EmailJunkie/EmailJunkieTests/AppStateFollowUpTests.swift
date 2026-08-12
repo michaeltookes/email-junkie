@@ -1,0 +1,179 @@
+import EmailJunkieMail
+import XCTest
+@testable import EmailJunkie
+
+@MainActor
+final class AppStateFollowUpTests: XCTestCase {
+
+    private func makeAppState(
+        sendBehavior: SendBehavior = .autoSend,
+        completion: Result<LLMResponse, LLMError> = .success(LLMResponse(text: "Hi team,\n\nGreat call — I'll send the deck Friday.")),
+        seed drafts: [Draft] = []
+    ) -> (AppState, FakeAppMailProvider, FakeDraftNotifier, AppStateMemoryPersistence) {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            sendBehavior: sendBehavior.rawValue,
+            sendDelaySeconds: 0
+        ), pendingDrafts: drafts)
+        let provider = FakeAppMailProvider(result: .success(()))
+        let notifier = FakeDraftNotifier()
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: provider,
+            llm: FakeLLMProvider(result: .success(()), completion: completion),
+            notifier: notifier
+        )
+        appState.pendingDrafts = drafts
+        appState.pendingDraftCount = drafts.count
+        return (appState, provider, notifier, persistence)
+    }
+
+    private func authoredDraft(recipients: [MailAddress], id: UInt32 = 7) -> Draft {
+        Draft(
+            id: id,
+            sourceUIDValidity: nil,
+            sourceAccountEmail: "me@gmail.com",
+            sourceSubject: "Follow-up: Sync",
+            sourceFrom: recipients.first,
+            sourceReplyTo: nil,
+            sourceMessageID: nil,
+            replySubject: "Follow-up: Sync",
+            body: "Thanks for the call.",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            authoredRecipients: recipients
+        )
+    }
+
+    // MARK: - Creating follow-ups
+
+    func testCreateFollowUpEnqueuesAuthoredDraftAndNotifies() async throws {
+        let (appState, _, notifier, persistence) = makeAppState()
+        let ingested = try TranscriptIngest.fromPaste("Marcus: Let's ship Friday.\nDana: I'll send the deck.")
+
+        let draft = try await appState.createFollowUp(
+            from: ingested,
+            recipients: [MailAddress(email: "dana@example.com")]
+        )
+
+        XCTAssertTrue(draft.isAuthored)
+        XCTAssertEqual(draft.authoredRecipients?.map(\.email), ["dana@example.com"])
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertEqual(appState.pendingDrafts.first?.identity, draft.identity)
+        XCTAssertEqual(notifier.notifiedDrafts.last?.identity, draft.identity)
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.identity, draft.identity)
+    }
+
+    func testCreateFollowUpUsesFollowUpPromptAndTranscript() async throws {
+        let llm = FakeLLMProvider(
+            result: .success(()),
+            completion: .success(LLMResponse(text: "Follow-up body."))
+        )
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword: "app-pw",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6"
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: llm,
+            notifier: FakeDraftNotifier()
+        )
+        let ingested = try TranscriptIngest.fromPaste("Marcus: ship it Friday.")
+
+        _ = try await appState.createFollowUp(from: ingested, recipients: [MailAddress(email: "a@b.com")])
+
+        XCTAssertTrue(llm.lastRequest?.system?.contains("follow-up email") ?? false)
+        XCTAssertTrue(llm.lastRequest?.messages.first?.content.contains("ship it Friday") ?? false)
+    }
+
+    func testCreateFollowUpDefaultsSubjectFromTitle() async throws {
+        let (appState, _, _, _) = makeAppState()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Weekly Sync.txt")
+        try "Notes from the call.".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let ingested = try TranscriptIngest.fromFile(url)
+
+        let draft = try await appState.createFollowUp(from: ingested, recipients: [MailAddress(email: "a@b.com")])
+        XCTAssertEqual(draft.replySubject, "Follow-up: Weekly Sync")
+    }
+
+    // MARK: - Recipients gate
+
+    func testFollowUpWithNoRecipientsEnqueuesButBlocksApproval() async throws {
+        let (appState, provider, _, _) = makeAppState(sendBehavior: .autoSend)
+        let ingested = try TranscriptIngest.fromPaste("Marcus: recap the call.")
+
+        let draft = try await appState.createFollowUp(from: ingested, recipients: [])
+        XCTAssertFalse(draft.hasAuthoredRecipients)
+
+        await appState.approveDraft(draft)
+
+        XCTAssertNil(provider.sentEnvelope, "A recipient-less follow-up must not send")
+        XCTAssertEqual(appState.pendingDrafts.count, 1, "It stays queued for the user to add recipients")
+        XCTAssertNotNil(appState.approvalError)
+    }
+
+    func testUpdatePendingDraftRecipientsPersists() throws {
+        let draft = authoredDraft(recipients: [])
+        let (appState, _, _, persistence) = makeAppState(seed: [draft])
+
+        let updated = appState.updatePendingDraftRecipients(
+            draft,
+            to: [MailAddress(email: "dana@example.com"), MailAddress(email: "dana@example.com")]
+        )
+
+        XCTAssertEqual(updated?.authoredRecipients?.map(\.email), ["dana@example.com"])
+        XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), ["dana@example.com"])
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.authoredRecipients?.map(\.email), ["dana@example.com"])
+    }
+
+    // MARK: - Dispatch
+
+    func testApproveAuthoredFollowUpSendsToRecipientsWithoutThreading() async throws {
+        let draft = authoredDraft(recipients: [MailAddress(email: "dana@example.com")])
+        let (appState, provider, _, _) = makeAppState(sendBehavior: .autoSend, seed: [draft])
+
+        await appState.approveDraft(draft)
+
+        XCTAssertEqual(provider.sentEnvelope?.recipients, ["dana@example.com"])
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        if let rfc822 = provider.sentRFC822, let text = String(data: rfc822, encoding: .utf8) {
+            XCTAssertFalse(text.contains("In-Reply-To"), "Authored follow-ups do not thread")
+        }
+    }
+
+    // MARK: - Recipient parsing
+
+    func testParseRecipientsHandlesMixedFormats() {
+        let parsed = AppState.parseRecipients("dana@example.com, Marcus <marcus@example.com>; a@b.com a@b.com")
+        XCTAssertEqual(parsed.map(\.email), ["dana@example.com", "marcus@example.com", "a@b.com"])
+    }
+
+    func testParseRecipientsRejectsNonEmails() {
+        XCTAssertTrue(AppState.parseRecipients("not-an-email, also nope").isEmpty)
+    }
+
+    func testFollowUpSubjectFallbacks() {
+        XCTAssertEqual(AppState.followUpSubject("  Custom  ", suggestedTitle: "T"), "Custom")
+        XCTAssertEqual(AppState.followUpSubject(nil, suggestedTitle: "Weekly Sync"), "Follow-up: Weekly Sync")
+        XCTAssertEqual(AppState.followUpSubject(nil, suggestedTitle: nil), "Post-call follow-up")
+    }
+}

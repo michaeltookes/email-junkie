@@ -64,6 +64,11 @@ extension AppState {
         guard !draft.isFlagged else {
             throw DraftError.needsUserInput
         }
+        // An authored follow-up (item 51) can't dispatch until it has recipients;
+        // the user supplies them in review before approving.
+        guard !draft.isAuthored || draft.hasAuthoredRecipients else {
+            throw DraftDispatchError.noRecipient
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             throw DraftDispatchError.missingCredentials
@@ -467,15 +472,6 @@ extension AppState {
     private func isReplacementDraftUnavailable(_ replacement: Draft) -> Bool {
         approvingDraftIDs.contains(replacement.identity)
             || persistence.loadApprovedDraftIdentities().contains(replacement.identity)
-    }
-
-    func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
-        guard let sourceAccount = draft.sourceAccountEmail else { return false }
-        return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
-    }
-
-    private func normalizedEmail(_ email: String) -> String {
-        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     func draftDispatchCredentialsStillCurrent(

@@ -41,7 +41,11 @@ protocol TranscriptSource: AnyObject {
     /// The origin category this source represents.
     var kind: TranscriptSourceKind { get }
     /// Invoked with each newly available transcript while the source is running.
-    var onTranscript: ((IngestedTranscript) -> Void)? { get set }
+    /// Returns `true` when the transcript was accepted for processing; a source
+    /// that tracks which inputs it has handled (e.g. the watched folder) should
+    /// only mark the input processed on `true`, so a rejected input is retried
+    /// rather than dropped.
+    var onTranscript: ((IngestedTranscript) -> Bool)? { get set }
     /// Begins producing transcripts.
     func start()
     /// Stops producing transcripts and releases any OS resources.

@@ -14,24 +14,43 @@ extension AppState {
     }
 
     /// Starts the watcher if the feature is enabled and a folder is configured.
-    /// Called at launch and after settings changes. Idempotent.
+    /// Called at launch and after settings/connection changes. When a watcher for
+    /// the same folder is already running it triggers a catch-up scan, so a
+    /// transcript that arrived while the app couldn't yet draft is picked up once
+    /// the app becomes ready. Idempotent.
     func startTranscriptFolderWatchingIfEnabled() {
         guard transcriptWatchedFolderEnabled, let url = transcriptWatchedFolderURL else {
             stopTranscriptFolderWatching()
             return
         }
-        // Rebuild if the target folder changed; otherwise leave the running one.
-        if let existing = transcriptFolderSource, existing.folderURL == url { return }
+        // Rebuild if the target folder changed; otherwise catch up the running one.
+        if let existing = transcriptFolderSource, existing.folderURL == url {
+            existing.scanForNewTranscripts()
+            return
+        }
         stopTranscriptFolderWatching()
 
         transcriptFolderError = nil
         let source = WatchedFolderTranscriptSource(folderURL: url)
         source.onTranscript = { [weak self] ingested in
-            self?.handleWatchedTranscript(ingested)
+            self?.handleWatchedTranscript(ingested) ?? false
+        }
+        source.onError = { [weak self] error in
+            self?.transcriptFolderError = Self.watchedFolderMessage(for: error)
         }
         transcriptFolderSource = source
         source.start()
         transcriptFolderLogger.info("Started watching transcript folder")
+    }
+
+    /// User-facing copy for a watched-folder failure.
+    static func watchedFolderMessage(for error: WatchedFolderError) -> String {
+        switch error {
+        case .cannotOpenFolder(let path):
+            return "Couldn't watch \(path). Check the folder exists and Email Junkie has access to it."
+        case .folderUnavailable(let path):
+            return "The watched folder \(path) is no longer available. Choose it again in Settings."
+        }
     }
 
     /// Stops and tears down the watcher. Idempotent.
@@ -61,12 +80,16 @@ extension AppState {
 
     /// Handles a transcript that appeared in the watched folder: drafts a follow-up
     /// and enqueues it with no recipients yet (auto-fill is item 52), so the user
-    /// adds recipients in review before approving.
-    func handleWatchedTranscript(_ ingested: IngestedTranscript) {
+    /// adds recipients in review before approving. Returns whether the transcript
+    /// was accepted for processing — `false` when the app can't yet draft, so the
+    /// source leaves the file unseen and retries it once the app is ready rather
+    /// than dropping it.
+    @discardableResult
+    func handleWatchedTranscript(_ ingested: IngestedTranscript) -> Bool {
         guard canCreateFollowUp else {
             transcriptFolderError =
                 "A transcript arrived, but connect an email account and AI provider to draft follow-ups."
-            return
+            return false
         }
         Task { [weak self] in
             guard let self else { return }
@@ -77,5 +100,6 @@ extension AppState {
                 transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")
             }
         }
+        return true
     }
 }

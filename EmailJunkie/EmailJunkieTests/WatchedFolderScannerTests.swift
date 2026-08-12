@@ -16,7 +16,7 @@ final class WatchedFolderScannerTests: XCTestCase {
 
     func testNewTranscriptsReturnsOnlyUnseenTranscriptFiles() {
         let seeded = WatchedFolderScanner.seedSeen(from: [url("/calls/old.txt")])
-        let result = WatchedFolderScanner.newTranscripts(
+        let new = WatchedFolderScanner.newTranscripts(
             in: [
                 url("/calls/old.txt"),        // already seen
                 url("/calls/new.vtt"),        // new transcript
@@ -25,23 +25,23 @@ final class WatchedFolderScannerTests: XCTestCase {
             ],
             alreadySeen: seeded
         )
-        XCTAssertEqual(result.new.map(\.lastPathComponent), ["new.vtt", "notes.md"])
-        XCTAssertTrue(result.seen.contains("/calls/new.vtt"))
-        XCTAssertTrue(result.seen.contains("/calls/notes.md"))
-        XCTAssertFalse(result.seen.contains("/calls/ignore.mp4"))
+        XCTAssertEqual(new.map(\.lastPathComponent), ["new.vtt", "notes.md"])
     }
 
-    func testRescanDoesNotRedeliverAlreadyProcessedFiles() {
-        let first = WatchedFolderScanner.newTranscripts(
-            in: [url("/calls/one.vtt")],
-            alreadySeen: []
-        )
-        XCTAssertEqual(first.new.count, 1)
+    func testNewTranscriptsDoesNotCommitSeen() {
+        // The scanner never mutates the seen-set — committing a file is the
+        // caller's job, done only after a successful ingest+delivery.
+        let seen: Set<String> = []
+        let first = WatchedFolderScanner.newTranscripts(in: [url("/calls/one.vtt")], alreadySeen: seen)
+        let second = WatchedFolderScanner.newTranscripts(in: [url("/calls/one.vtt")], alreadySeen: seen)
+        XCTAssertEqual(first.map(\.lastPathComponent), ["one.vtt"])
+        XCTAssertEqual(second.map(\.lastPathComponent), ["one.vtt"])
+    }
 
-        let second = WatchedFolderScanner.newTranscripts(
-            in: [url("/calls/one.vtt")],
-            alreadySeen: first.seen
+    func testSeenKeyStandardizesPath() {
+        XCTAssertEqual(
+            WatchedFolderScanner.seenKey(for: url("/calls/one.vtt")),
+            "/calls/one.vtt"
         )
-        XCTAssertTrue(second.new.isEmpty)
     }
 }

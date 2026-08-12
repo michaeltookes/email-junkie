@@ -177,19 +177,16 @@ final class AppStateFollowUpTests: XCTestCase {
         let (appState, _, notifier, _) = makeAppState()
         let ingested = try TranscriptIngest.fromPaste("Marcus: recap the call.")
 
-        appState.handleWatchedTranscript(ingested)
+        let accepted = await appState.handleWatchedTranscript(ingested)
 
-        // The handler drafts on a detached Task; wait for it to enqueue.
-        for _ in 0..<100 where appState.pendingDrafts.isEmpty {
-            try await Task.sleep(nanoseconds: 5_000_000)
-        }
+        XCTAssertTrue(accepted)
         XCTAssertEqual(appState.pendingDrafts.count, 1)
         XCTAssertTrue(appState.pendingDrafts.first?.isAuthored ?? false)
         XCTAssertFalse(appState.pendingDrafts.first?.hasAuthoredRecipients ?? true)
         XCTAssertEqual(notifier.notifiedDrafts.last?.identity, appState.pendingDrafts.first?.identity)
     }
 
-    func testWatchedTranscriptWithoutConnectionSetsErrorAndDraftsNothing() throws {
+    func testWatchedTranscriptWithoutConnectionSetsErrorAndDraftsNothing() async throws {
         let persistence = AppStateMemoryPersistence(settings: Settings(
             schemaVersion: Settings.currentSchemaVersion,
             pollIntervalSeconds: 300,
@@ -205,10 +202,93 @@ final class AppStateFollowUpTests: XCTestCase {
         )
         XCTAssertFalse(appState.canCreateFollowUp)
 
-        appState.handleWatchedTranscript(try TranscriptIngest.fromPaste("Marcus: recap."))
+        let accepted = await appState.handleWatchedTranscript(try TranscriptIngest.fromPaste("Marcus: recap."))
 
+        XCTAssertFalse(accepted)
         XCTAssertNotNil(appState.transcriptFolderError)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
+    }
+
+    func testWatchedTranscriptReturnsFalseWhenPendingDraftCannotPersist() async throws {
+        let (appState, _, _, persistence) = makeAppState()
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        let accepted = await appState.handleWatchedTranscript(
+            try TranscriptIngest.fromPaste("Marcus: recap.")
+        )
+
+        XCTAssertFalse(accepted)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertNotNil(appState.transcriptFolderError)
+    }
+
+    func testMailConnectionCatchesUpRejectedWatchedTranscript() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mail-catchup-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let secrets = InMemorySecretStore(seed: [
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "anthropic",
+            llmVerifiedModel: "claude-sonnet-4-6",
+            transcriptWatchedFolderEnabled: true,
+            transcriptWatchedFolderPath: dir.path
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()), completion: .success(LLMResponse(text: "Follow up."))),
+            notifier: FakeDraftNotifier()
+        )
+        appState.startTranscriptFolderWatchingIfEnabled()
+        guard let source = appState.transcriptFolderSource else {
+            return XCTFail("Expected transcript folder source")
+        }
+
+        try "Marcus: recap.".write(to: dir.appendingPathComponent("call.txt"), atomically: true, encoding: .utf8)
+        await source.scanForNewTranscripts()
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertNotNil(appState.transcriptFolderError)
+
+        await appState.testConnection(with: MailAccountCredentials(
+            email: "me@gmail.com",
+            appPassword: "app-pw",
+            host: "imap.gmail.com",
+            port: 993
+        ))
+
+        for _ in 0..<100 where appState.pendingDrafts.isEmpty {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(appState.pendingDrafts.count, 1)
+    }
+
+    func testInactiveTranscriptFolderSourceIsRebuiltForSameFolder() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inactive-source-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let appState = AppState(persistence: AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            transcriptWatchedFolderEnabled: true,
+            transcriptWatchedFolderPath: dir.path
+        )))
+        appState.startTranscriptFolderWatchingIfEnabled()
+        let failedSource = appState.transcriptFolderSource
+        XCTAssertFalse(failedSource?.isActive ?? true)
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        appState.startTranscriptFolderWatchingIfEnabled()
+
+        XCTAssertTrue(appState.transcriptFolderSource?.isActive ?? false)
+        XCTAssertFalse(appState.transcriptFolderSource === failedSource)
     }
 
     func testFollowUpSubjectFallbacks() {

@@ -29,7 +29,7 @@ enum WatchedFolderError: Error, Equatable {
 final class WatchedFolderTranscriptSource: TranscriptSource {
 
     let kind: TranscriptSourceKind = .watchedFolder
-    var onTranscript: ((IngestedTranscript) -> Bool)?
+    var onTranscript: ((IngestedTranscript) async -> Bool)?
 
     /// Reports a watch-start or watch-loss failure so the owner can surface it.
     var onError: ((WatchedFolderError) -> Void)?
@@ -38,6 +38,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
     private var seen: Set<String> = []
+    private var processing: Set<String> = []
     private var isRunning = false
 
     /// Whether the folder is currently being watched. Reflects reality — it is
@@ -71,15 +72,20 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// Rescans the folder and delivers any newly appeared transcript files. A file
     /// is marked processed only once it ingests and the delivery callback accepts
     /// it. Internal so the FS-event handler and tests can trigger a scan.
-    func scanForNewTranscripts() {
+    func scanForNewTranscripts() async {
         for url in WatchedFolderScanner.newTranscripts(in: currentContents(), alreadySeen: seen) {
+            let key = WatchedFolderScanner.seenKey(for: url)
+            guard !processing.contains(key) else { continue }
             guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
                 // Transient (e.g. a file still being written reads empty): leave it
                 // unseen so a later write event or scan retries it.
                 continue
             }
-            if onTranscript?(ingested) == true {
-                seen.insert(WatchedFolderScanner.seenKey(for: url))
+            processing.insert(key)
+            let accepted = await onTranscript?(ingested) == true
+            processing.remove(key)
+            if accepted {
+                seen.insert(key)
             }
         }
     }
@@ -106,7 +112,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             queue: .main
         )
         watch.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.handleEvent() }
+            let flags = watch.data
+            Task { @MainActor in
+                await self?.handleEvent(flags)
+            }
         }
         watch.setCancelHandler { close(descriptor) }
         source = watch
@@ -119,19 +128,18 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         source = nil
     }
 
-    private func handleEvent() {
-        let flags = source?.data ?? []
+    private func handleEvent(_ flags: DispatchSource.FileSystemEvent) async {
         if flags.contains(.delete) || flags.contains(.rename) {
-            handleFolderMoved()
+            await handleFolderMoved()
         } else {
-            scanForNewTranscripts()
+            await scanForNewTranscripts()
         }
     }
 
     /// The watched folder itself was renamed or deleted, so the descriptor points
     /// at a stale inode. Re-open the path if something is still there; otherwise
     /// surface the loss so the UI stops claiming to watch.
-    private func handleFolderMoved() {
+    private func handleFolderMoved() async {
         teardownWatch()
         guard fileManager.fileExists(atPath: folderURL.path) else {
             isRunning = false
@@ -143,7 +151,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             report(.cannotOpenFolder(folderURL.path))
             return
         }
-        scanForNewTranscripts()
+        await scanForNewTranscripts()
     }
 
     private func report(_ error: WatchedFolderError) {

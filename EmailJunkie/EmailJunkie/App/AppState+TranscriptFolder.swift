@@ -23,9 +23,16 @@ extension AppState {
             stopTranscriptFolderWatching()
             return
         }
-        // Rebuild if the target folder changed; otherwise catch up the running one.
+        // Rebuild if the target folder changed or a prior source failed to start;
+        // otherwise catch up the running one.
         if let existing = transcriptFolderSource, existing.folderURL == url {
-            existing.scanForNewTranscripts()
+            guard existing.isActive else {
+                stopTranscriptFolderWatching()
+                return startTranscriptFolderWatchingIfEnabled()
+            }
+            Task { @MainActor in
+                await existing.scanForNewTranscripts()
+            }
             return
         }
         stopTranscriptFolderWatching()
@@ -33,7 +40,7 @@ extension AppState {
         transcriptFolderError = nil
         let source = WatchedFolderTranscriptSource(folderURL: url)
         source.onTranscript = { [weak self] ingested in
-            self?.handleWatchedTranscript(ingested) ?? false
+            await self?.handleWatchedTranscript(ingested) ?? false
         }
         source.onError = { [weak self] error in
             self?.transcriptFolderError = Self.watchedFolderMessage(for: error)
@@ -81,25 +88,23 @@ extension AppState {
     /// Handles a transcript that appeared in the watched folder: drafts a follow-up
     /// and enqueues it with no recipients yet (auto-fill is item 52), so the user
     /// adds recipients in review before approving. Returns whether the transcript
-    /// was accepted for processing — `false` when the app can't yet draft, so the
-    /// source leaves the file unseen and retries it once the app is ready rather
-    /// than dropping it.
+    /// was durably accepted for processing — `false` when the app can't yet draft
+    /// or enqueue the pending draft, so the source leaves the file unseen and
+    /// retries it once the app is ready rather than dropping it.
     @discardableResult
-    func handleWatchedTranscript(_ ingested: IngestedTranscript) -> Bool {
+    func handleWatchedTranscript(_ ingested: IngestedTranscript) async -> Bool {
         guard canCreateFollowUp else {
             transcriptFolderError =
                 "A transcript arrived, but connect an email account and AI provider to draft follow-ups."
             return false
         }
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                _ = try await self.createFollowUp(from: ingested)
-            } catch {
-                self.transcriptFolderError = Self.draftMessage(for: error)
-                transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")
-            }
+        do {
+            _ = try await createFollowUp(from: ingested)
+            return true
+        } catch {
+            transcriptFolderError = Self.draftMessage(for: error)
+            transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")
+            return false
         }
-        return true
     }
 }

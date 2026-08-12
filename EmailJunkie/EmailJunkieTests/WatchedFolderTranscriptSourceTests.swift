@@ -22,7 +22,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
     <v Dana>Hi there.</v>
     """
 
-    func testDeliversOnlyNewTranscriptFilesAndSkipsPreExisting() throws {
+    func testDeliversOnlyNewTranscriptFilesAndSkipsPreExisting() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
         try write("Pre-existing notes.", to: dir.appendingPathComponent("old.txt"))
@@ -36,14 +36,14 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
 
         try write(sampleVTT, to: dir.appendingPathComponent("call.vtt"))
         try write("not a transcript", to: dir.appendingPathComponent("video.mp4"))
-        source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
 
         XCTAssertEqual(delivered.count, 1)
         XCTAssertEqual(delivered.first?.origin, .watchedFolder)
         XCTAssertEqual(delivered.first?.parsed().text, "Dana: Hi there.")
     }
 
-    func testRescanDoesNotRedeliverProcessedFiles() throws {
+    func testRescanDoesNotRedeliverProcessedFiles() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -54,15 +54,15 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("one.txt"))
-        source.scanForNewTranscripts()
-        source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
 
         XCTAssertEqual(delivered.count, 1)
     }
 
     // Finding 1(a): a file created empty (mid-write) then gaining content must be
     // delivered exactly once, not permanently dropped.
-    func testFileAppearingEmptyThenGainingContentDeliveredExactlyOnce() throws {
+    func testFileAppearingEmptyThenGainingContentDeliveredExactlyOnce() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -74,18 +74,18 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
 
         let url = dir.appendingPathComponent("call.vtt")
         try write("", to: url)             // appears empty first
-        source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
         XCTAssertTrue(delivered.isEmpty, "An empty (mid-write) file must not be delivered or marked seen")
 
         try write(sampleVTT, to: url)      // content lands on a later event
-        source.scanForNewTranscripts()
-        source.scanForNewTranscripts()     // and never duplicates afterwards
+        await source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()     // and never duplicates afterwards
         XCTAssertEqual(delivered.count, 1)
     }
 
     // Finding 1(b): a delivery the app can't yet accept (returns false) must be
     // retried on the next scan, then delivered exactly once when accepted.
-    func testRejectedDeliveryIsRetriedThenDeliveredOnce() throws {
+    func testRejectedDeliveryIsRetriedThenDeliveredOnce() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -101,13 +101,41 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
-        source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
         XCTAssertEqual(deliveredCount, 0, "Not-ready delivery must be rejected, file left unseen")
 
         ready = true
-        source.scanForNewTranscripts()
-        source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
         XCTAssertEqual(deliveredCount, 1, "Retried once ready, then never duplicated")
+    }
+
+    func testInFlightDeliveryIsNotDeliveredTwiceBeforeAccepted() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let started = expectation(description: "delivery started")
+        var continuation: CheckedContinuation<Bool, Never>?
+        var deliveryCount = 0
+        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        source.onTranscript = { _ in
+            deliveryCount += 1
+            started.fulfill()
+            return await withCheckedContinuation { continuation = $0 }
+        }
+        source.start()
+        defer { source.stop() }
+
+        try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
+        let firstScan = Task { await source.scanForNewTranscripts() }
+        await fulfillment(of: [started], timeout: 1)
+        await source.scanForNewTranscripts()
+        XCTAssertEqual(deliveryCount, 1, "A pending delivery must not duplicate before acceptance is known")
+
+        continuation?.resume(returning: true)
+        await firstScan.value
+        await source.scanForNewTranscripts()
+        XCTAssertEqual(deliveryCount, 1, "Accepted files are marked seen only after the async callback completes")
     }
 
     // Finding 2: a folder that can't be opened must surface an error and leave the

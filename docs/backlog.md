@@ -5,7 +5,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 **Product direction (updated 2026-08-12):**
 - **Flagship workflow:** transcript in → next-steps follow-up email out, in the user's voice (items 51–55). The existing drafting → approval → send plumbing is reused; transcript acquisition is the new subsystem, phased: file/paste ingestion first (51), calendar awareness (52), platform APIs (53), native no-bot capture last (54).
 - **Primary commercial ICP:** Account Executives / salespeople in high-velocity roles (see **Marcus** persona). Priya remains the persona for the inbox-reply workflow.
-- **No-bot promise:** calls are never joined by a bot. Transcripts come from local files, the user's own platform APIs, or (future) on-device capture. This is a core differentiator vs. Fathom/Fireflies/Gong-style cloud notetakers.
+- **No bot, no cloud:** calls are never joined by a bot, and conversations are never processed or stored on anyone else's servers — transcripts come from local files, the user's own platform APIs, or (future) on-device capture. **Competitive note (2026-08-12):** Fathom now ships bot-free desktop capture, so "no bot" alone is no longer unique. The durable differentiators are (a) *on-device privacy* — bot-free cloud notetakers still upload and store your calls — and (b) the workflow's back half: a **send-ready email in the user's learned voice, sent from their own mailbox**, not a summary stranded in a notetaker app.
 - **Monetization (supersedes the original "no subscription" ethos line):** open core / paid binary — source stays public, signed auto-updating binaries are licensed. Subscription pricing: trial → Individual ~$15/mo → Team tier with CRM logging (items 55–56). Enterprise is explicitly parked.
 
 **v1 design decisions:**
@@ -74,6 +74,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 51. **Post-call follow-up workflow: transcript in → next-steps email out** — *v1 of the 2026-08-12 pivot; the flagship workflow*
     Ingest a finished call's transcript and draft the follow-up email in the user's voice, through the existing approval → send/save pipeline. Deliberately no capture and no platform integrations — the transcript arrives as a file or paste. This validates the core value proposition using ~90% existing plumbing before any investment in transcript acquisition (items 52–54).
+    > **Urgency (2026-08-12):** Fathom's bot-free capture launch shows the capture layer commoditizing fast. The defensible part of the workflow is this item — a send-ready email in the user's learned voice, from their own mailbox — so ship it ahead of everything else in the pivot.
     *As Marcus, I want my next-steps follow-up drafted from the call transcript before I'm back from getting coffee, so that post-call admin stops eating my selling time.*
     - Transcript ingestion by **paste** and by **file** (`.txt`, `.vtt`, `.srt`, `.md` — the formats Zoom/Teams/notetakers export), via the menu-bar UI including drag-and-drop.
     - Optional **watched folder** (e.g. Zoom's local recording directory): a new transcript file appearing there triggers the workflow automatically.
@@ -250,8 +251,9 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Teams (Microsoft Graph) is a follow-on**; its tenant-admin-consent requirement must be documented honestly — same lesson as the parked BYO-OAuth path (item 3). Requires-IT-approval is expected for many orgs.
     - Per-platform setup friction (cloud recording enabled, plan requirements, credentials) documented; when the API path isn't available, degrade cleanly to item 51's file/folder ingestion.
 
-54. **Native call capture + on-device transcription (the no-bot moat)**
-    Capture call audio locally and transcribe on-device — the Granola-style capture path that makes the no-bot promise total. The biggest lift in the pivot; explicitly gated on item 51 proving demand.
+54. **Native call capture + on-device transcription**
+    Capture call audio locally and transcribe on-device. The biggest lift in the pivot; explicitly gated on item 51 proving demand.
+    > **Competitive context (2026-08-12):** bot-free capture is being commoditized — Fathom now ships a bot-free desktop app, and Granola has been bot-free from day one (both still process calls in their cloud). The differentiation this item must protect is **on-device transcription** — audio and transcript never leave the Mac — not bot-free capture per se.
     *As Marcus, I want calls transcribed on my Mac with no bot joining and no audio leaving the machine, so that prospects never see "Notetaker has joined the meeting."*
     - System-audio + microphone capture via Core Audio process taps / ScreenCaptureKit, working across Zoom/Meet/Teams whether in a desktop app or a browser.
     - **On-device transcription** (Apple Speech / whisper.cpp class); speaker diarization is *not* required for v1 — a next-steps email doesn't need per-speaker attribution.

@@ -39,10 +39,17 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private var source: DispatchSourceFileSystemObject?
     private var subdirectorySources: [String: DispatchSourceFileSystemObject] = [:]
     private var rejectedDeliveryRetryTask: Task<Void, Never>?
+    private var fileStabilityRetryTask: Task<Void, Never>?
+    private var pendingFileStability: [String: PendingFileStability] = [:]
     private var seen: Set<String> = []
     private var processing: Set<String> = []
     private var isRunning = false
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
+    var fileStabilityDelayNanoseconds: UInt64 = 2_000_000_000
+
+    #if DEBUG
+    var onAfterSeedSeenForTesting: (() -> Void)?
+    #endif
 
     /// Whether the folder is currently being watched. Reflects reality — it is
     /// only true after the descriptor opened successfully.
@@ -59,19 +66,28 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     func start() {
         guard !isRunning else { return }
         seen = WatchedFolderScanner.seedSeen(from: currentContents())
+        #if DEBUG
+        onAfterSeedSeenForTesting?()
+        #endif
         guard openWatch() else {
             report(.cannotOpenFolder(folderURL.path))
             return
         }
         isRunning = true
         syncSubdirectoryWatches()
+        Task { @MainActor [weak self] in
+            await self?.scanForNewTranscripts()
+        }
     }
 
     /// Stops watching and releases the folder descriptor. Idempotent.
     func stop() {
         isRunning = false
         rejectedDeliveryRetryTask?.cancel()
+        fileStabilityRetryTask?.cancel()
         rejectedDeliveryRetryTask = nil
+        fileStabilityRetryTask = nil
+        pendingFileStability.removeAll()
         teardownWatch()
     }
 
@@ -79,13 +95,19 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// is marked processed only once it ingests and the delivery callback accepts
     /// it. Internal so the FS-event handler and tests can trigger a scan.
     func scanForNewTranscripts() async {
+        guard isRunning else { return }
         syncSubdirectoryWatches()
-        for url in WatchedFolderScanner.newTranscripts(in: currentContents(), alreadySeen: seen) {
+        let candidates = WatchedFolderScanner.newTranscripts(in: currentContents(), alreadySeen: seen)
+        let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
+        pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
+        for url in candidates {
             let key = WatchedFolderScanner.seenKey(for: url)
             guard !processing.contains(key) else { continue }
+            guard isStableForDelivery(url, key: key) else { continue }
             guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
-                // Transient (e.g. a file still being written reads empty): leave it
-                // unseen so a later write event or scan retries it.
+                // Transient (e.g. a file still being written reads empty): leave
+                // it unseen so a later write event or stability retry can retry.
+                scheduleFileStabilityRetry()
                 continue
             }
             processing.insert(key)
@@ -93,6 +115,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             processing.remove(key)
             if accepted {
                 seen.insert(key)
+                pendingFileStability.removeValue(forKey: key)
             } else {
                 scheduleRejectedDeliveryRetry()
             }
@@ -178,6 +201,49 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         subdirectorySources.removeValue(forKey: path)?.cancel()
     }
 
+    private func isStableForDelivery(_ url: URL, key: String) -> Bool {
+        guard let snapshot = FileSnapshot(url: url) else {
+            pendingFileStability.removeValue(forKey: key)
+            return false
+        }
+
+        let now = Date()
+        if let pending = pendingFileStability[key], pending.snapshot == snapshot {
+            if now.timeIntervalSince(pending.observedAt) >= fileStabilityDelaySeconds {
+                return true
+            }
+            scheduleFileStabilityRetry()
+            return false
+        }
+
+        pendingFileStability[key] = PendingFileStability(snapshot: snapshot, observedAt: now)
+        scheduleFileStabilityRetry()
+        return false
+    }
+
+    private var fileStabilityDelaySeconds: TimeInterval {
+        TimeInterval(fileStabilityDelayNanoseconds) / 1_000_000_000
+    }
+
+    private func scheduleFileStabilityRetry() {
+        guard isRunning, fileStabilityRetryTask == nil else { return }
+        fileStabilityRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.fileStabilityDelayNanoseconds)
+            } catch {
+                self.fileStabilityRetryTask = nil
+                return
+            }
+            guard self.isRunning else {
+                self.fileStabilityRetryTask = nil
+                return
+            }
+            self.fileStabilityRetryTask = nil
+            await self.scanForNewTranscripts()
+        }
+    }
+
     private func scheduleRejectedDeliveryRetry() {
         guard isRunning, rejectedDeliveryRetryTask == nil else { return }
         rejectedDeliveryRetryTask = Task { @MainActor [weak self] in
@@ -231,4 +297,23 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         watchedFolderLogger.error("Transcript folder watch failed: \(String(describing: error))")
         onError?(error)
     }
+}
+
+private struct FileSnapshot: Equatable {
+    var fileSize: Int
+    var modificationDate: Date?
+
+    init?(url: URL) {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+              let fileSize = values.fileSize else {
+            return nil
+        }
+        self.fileSize = fileSize
+        modificationDate = values.contentModificationDate
+    }
+}
+
+private struct PendingFileStability {
+    var snapshot: FileSnapshot
+    var observedAt: Date
 }

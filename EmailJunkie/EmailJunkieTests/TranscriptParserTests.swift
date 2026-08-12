@@ -103,6 +103,29 @@ final class TranscriptParserTests: XCTestCase {
         )
     }
 
+    func testWebVTTPreservesCueIdentifiersStartingWithMetadataWords() {
+        let raw = """
+        WEBVTT
+
+        NOTE-1
+        00:00:00.000 --> 00:00:03.000
+        Dana owns the rollout.
+
+        STYLE-guide
+        00:00:03.000 --> 00:00:06.000
+        The guide is due Friday.
+
+        REGION-a
+        00:00:06.000 --> 00:00:09.000
+        Legal still needs to approve.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+        XCTAssertEqual(
+            parsed.text,
+            "Dana owns the rollout.\nThe guide is due Friday.\nLegal still needs to approve."
+        )
+    }
+
     func testWebVTTStripsInlineTagsAndStylingClasses() {
         let raw = """
         WEBVTT

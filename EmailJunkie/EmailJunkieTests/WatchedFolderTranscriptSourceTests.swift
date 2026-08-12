@@ -15,6 +15,25 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    private func makeSource(folderURL: URL, stabilityDelayNanoseconds: UInt64 = 0)
+        -> WatchedFolderTranscriptSource {
+        let source = WatchedFolderTranscriptSource(folderURL: folderURL)
+        source.fileStabilityDelayNanoseconds = stabilityDelayNanoseconds
+        return source
+    }
+
+    private func scanStable(_ source: WatchedFolderTranscriptSource) async {
+        await source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
+    }
+
+    private func waitFor(_ condition: @escaping @MainActor () -> Bool) async throws {
+        for _ in 0..<100 where !condition() {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(condition())
+    }
+
     private let sampleVTT = """
     WEBVTT
 
@@ -28,7 +47,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         try write("Pre-existing notes.", to: dir.appendingPathComponent("old.txt"))
 
         var delivered: [IngestedTranscript] = []
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { delivered.append($0); return true }
         source.start()
         defer { source.stop() }
@@ -36,7 +55,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
 
         try write(sampleVTT, to: dir.appendingPathComponent("call.vtt"))
         try write("not a transcript", to: dir.appendingPathComponent("video.mp4"))
-        await source.scanForNewTranscripts()
+        await scanStable(source)
 
         XCTAssertEqual(delivered.count, 1)
         XCTAssertEqual(delivered.first?.origin, .watchedFolder)
@@ -48,14 +67,14 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var delivered: [IngestedTranscript] = []
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { delivered.append($0); return true }
         source.start()
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("one.txt"))
-        await source.scanForNewTranscripts()
-        await source.scanForNewTranscripts()
+        await scanStable(source)
+        await scanStable(source)
 
         XCTAssertEqual(delivered.count, 1)
     }
@@ -65,7 +84,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var delivered: [IngestedTranscript] = []
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { delivered.append($0); return true }
         source.start()
         defer { source.stop() }
@@ -73,7 +92,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         let callDir = dir.appendingPathComponent("2026-08-12 14.00.00 Weekly Sync", isDirectory: true)
         try FileManager.default.createDirectory(at: callDir, withIntermediateDirectories: true)
         try write(sampleVTT, to: callDir.appendingPathComponent("call.vtt"))
-        await source.scanForNewTranscripts()
+        await scanStable(source)
 
         XCTAssertEqual(delivered.count, 1)
         XCTAssertEqual(delivered.first?.parsed().text, "Dana: Hi there.")
@@ -87,15 +106,57 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         try write("Marcus: old recap.", to: callDir.appendingPathComponent("old.txt"))
 
         var delivered: [IngestedTranscript] = []
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { delivered.append($0); return true }
         source.start()
         defer { source.stop() }
 
-        await source.scanForNewTranscripts()
+        await scanStable(source)
 
         XCTAssertTrue(delivered.isEmpty)
     }
+
+    func testPartialWriteWaitsForStableFileBeforeDelivery() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [IngestedTranscript] = []
+        let source = makeSource(folderURL: dir, stabilityDelayNanoseconds: 200_000_000)
+        source.onTranscript = { delivered.append($0); return true }
+        source.start()
+        defer { source.stop() }
+
+        let url = dir.appendingPathComponent("call.txt")
+        try write("Marcus: partial", to: url)
+        await source.scanForNewTranscripts()
+        XCTAssertTrue(delivered.isEmpty, "A newly observed file must not deliver before the stability delay")
+
+        try write("Marcus: complete recap.", to: url)
+        await source.scanForNewTranscripts()
+        try await Task.sleep(nanoseconds: 250_000_000)
+        await source.scanForNewTranscripts()
+
+        XCTAssertEqual(delivered.map(\.rawText), ["Marcus: complete recap."])
+    }
+
+    #if DEBUG
+    func testStartCatchUpDeliversFileCreatedBetweenSeedAndWatchOpen() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [IngestedTranscript] = []
+        let source = makeSource(folderURL: dir)
+        source.onAfterSeedSeenForTesting = {
+            try? self.write("Marcus: startup recap.", to: dir.appendingPathComponent("call.txt"))
+        }
+        source.onTranscript = { delivered.append($0); return true }
+        source.start()
+        defer { source.stop() }
+
+        try await waitFor { delivered.count == 1 }
+        XCTAssertEqual(delivered.first?.rawText, "Marcus: startup recap.")
+    }
+    #endif
 
     // Finding 1(a): a file created empty (mid-write) then gaining content must be
     // delivered exactly once, not permanently dropped.
@@ -104,19 +165,19 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var delivered: [IngestedTranscript] = []
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir, stabilityDelayNanoseconds: 1_000_000)
         source.onTranscript = { delivered.append($0); return true }
         source.start()
         defer { source.stop() }
 
         let url = dir.appendingPathComponent("call.vtt")
         try write("", to: url)             // appears empty first
-        await source.scanForNewTranscripts()
+        await scanStable(source)
         XCTAssertTrue(delivered.isEmpty, "An empty (mid-write) file must not be delivered or marked seen")
 
         try write(sampleVTT, to: url)      // content lands on a later event
-        await source.scanForNewTranscripts()
-        await source.scanForNewTranscripts()     // and never duplicates afterwards
+        try await waitFor { delivered.count == 1 }
+        await scanStable(source)           // and never duplicates afterwards
         XCTAssertEqual(delivered.count, 1)
     }
 
@@ -128,7 +189,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
 
         var ready = false
         var deliveredCount = 0
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { _ in
             guard ready else { return false }
             deliveredCount += 1
@@ -138,12 +199,12 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
-        await source.scanForNewTranscripts()
+        await scanStable(source)
         XCTAssertEqual(deliveredCount, 0, "Not-ready delivery must be rejected, file left unseen")
 
         ready = true
-        await source.scanForNewTranscripts()
-        await source.scanForNewTranscripts()
+        await scanStable(source)
+        await scanStable(source)
         XCTAssertEqual(deliveredCount, 1, "Retried once ready, then never duplicated")
     }
 
@@ -153,7 +214,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
 
         var ready = false
         var deliveredCount = 0
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.rejectedDeliveryRetryDelayNanoseconds = 1_000_000
         source.onTranscript = { _ in
             guard ready else { return false }
@@ -164,14 +225,11 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
-        await source.scanForNewTranscripts()
+        await scanStable(source)
         XCTAssertEqual(deliveredCount, 0)
 
         ready = true
-        for _ in 0..<100 where deliveredCount == 0 {
-            try await Task.sleep(nanoseconds: 1_000_000)
-        }
-        XCTAssertEqual(deliveredCount, 1)
+        try await waitFor { deliveredCount == 1 }
     }
 
     func testInFlightDeliveryIsNotDeliveredTwiceBeforeAccepted() async throws {
@@ -181,7 +239,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         let started = expectation(description: "delivery started")
         var continuation: CheckedContinuation<Bool, Never>?
         var deliveryCount = 0
-        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        let source = makeSource(folderURL: dir)
         source.onTranscript = { _ in
             deliveryCount += 1
             started.fulfill()
@@ -191,6 +249,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         defer { source.stop() }
 
         try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
+        await source.scanForNewTranscripts()
         let firstScan = Task { await source.scanForNewTranscripts() }
         await fulfillment(of: [started], timeout: 1)
         await source.scanForNewTranscripts()
@@ -208,7 +267,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("does-not-exist-\(UUID().uuidString)", isDirectory: true)
         var reported: WatchedFolderError?
-        let source = WatchedFolderTranscriptSource(folderURL: missing)
+        let source = makeSource(folderURL: missing)
         source.onError = { reported = $0 }
         source.start()
 

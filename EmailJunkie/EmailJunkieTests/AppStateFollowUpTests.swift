@@ -315,8 +315,10 @@ final class AppStateFollowUpTests: XCTestCase {
         guard let source = appState.transcriptFolderSource else {
             return XCTFail("Expected transcript folder source")
         }
+        source.fileStabilityDelayNanoseconds = 0
 
         try "Marcus: recap.".write(to: dir.appendingPathComponent("call.txt"), atomically: true, encoding: .utf8)
+        await source.scanForNewTranscripts()
         await source.scanForNewTranscripts()
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(appState.transcriptFolderError)

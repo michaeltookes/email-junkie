@@ -48,10 +48,9 @@ enum TranscriptParser {
                 continue
             }
             if skippingMetadataBlock { continue }
-            if isWebVTT, !isInCuePayload, isWebVTTMetadata(trimmed) {
+            if isWebVTT, !isInCuePayload, let metadataSkipsUntilBlank = webVTTMetadata(trimmed) {
                 // WEBVTT header and NOTE/STYLE/REGION blocks run until a blank line.
-                skippingMetadataBlock = trimmed.hasPrefix("WEBVTT") || trimmed.hasPrefix("NOTE")
-                    || trimmed.hasPrefix("STYLE") || trimmed.hasPrefix("REGION")
+                skippingMetadataBlock = metadataSkipsUntilBlank
                 continue
             }
             if trimmed.contains("-->") {
@@ -72,10 +71,32 @@ enum TranscriptParser {
         return ParsedTranscript(text: text, hasSpeakerLabels: hasLabels)
     }
 
-    private static func isWebVTTMetadata(_ trimmed: String) -> Bool {
-        trimmed == "WEBVTT" || trimmed.hasPrefix("WEBVTT")
-            || trimmed.hasPrefix("NOTE") || trimmed.hasPrefix("STYLE")
-            || trimmed.hasPrefix("REGION") || trimmed.hasPrefix("X-TIMESTAMP-MAP")
+    private static func webVTTMetadata(_ trimmed: String) -> Bool? {
+        if matchesKeyword(trimmed, "WEBVTT", allowsWhitespaceSuffix: true) {
+            return true
+        }
+        if matchesKeyword(trimmed, "NOTE", allowsWhitespaceSuffix: true) {
+            return true
+        }
+        if trimmed == "STYLE" || trimmed == "REGION" {
+            return true
+        }
+        if trimmed == "X-TIMESTAMP-MAP" || trimmed.hasPrefix("X-TIMESTAMP-MAP=") {
+            return false
+        }
+        return nil
+    }
+
+    private static func matchesKeyword(
+        _ trimmed: String,
+        _ keyword: String,
+        allowsWhitespaceSuffix: Bool
+    ) -> Bool {
+        guard trimmed.hasPrefix(keyword) else { return false }
+        guard trimmed.count > keyword.count else { return true }
+        guard allowsWhitespaceSuffix else { return false }
+        let suffixStart = trimmed.index(trimmed.startIndex, offsetBy: keyword.count)
+        return trimmed[suffixStart].unicodeScalars.allSatisfy { CharacterSet.whitespaces.contains($0) }
     }
 
     /// A cue identifier is a bare integer (SubRip index or numeric WebVTT id), or a

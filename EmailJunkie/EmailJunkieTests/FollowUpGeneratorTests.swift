@@ -112,6 +112,33 @@ final class FollowUpGeneratorTests: XCTestCase {
         XCTAssertTrue(summaryRequest.system?.contains("condensing a call transcript") ?? false)
     }
 
+    func testLongTranscriptReducesCombinedSummaryBeforeDrafting() async throws {
+        let recorder = RequestRecorder(
+            responses: Array(repeating: String(repeating: "A", count: 80), count: 4),
+            defaultResponse: "short"
+        )
+        var generator = FollowUpGenerator()
+        generator.maxSinglePassChars = 100
+        generator.maxChunkChars = 50
+
+        let transcript = ParsedTranscript(
+            text: String(repeating: "transcript ", count: 30),
+            hasSpeakerLabels: false
+        )
+
+        _ = try await generator.makeFollowUp(
+            transcript: transcript,
+            voiceProfile: nil,
+            model: "m",
+            complete: recorder.complete
+        )
+
+        let draftContent = try XCTUnwrap(recorder.requests.last?.messages.first?.content)
+        let summary = try XCTUnwrap(draftContent.components(separatedBy: "Call summary:\n\n").last)
+        XCTAssertLessThanOrEqual(summary.count, generator.maxSinglePassChars)
+        XCTAssertGreaterThan(recorder.requests.count, 5)
+    }
+
     func testEmptyTranscriptThrows() async {
         let recorder = RequestRecorder()
         let transcript = ParsedTranscript(text: "   ", hasSpeakerLabels: false)

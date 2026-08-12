@@ -429,4 +429,16 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertEqual(AppState.followUpSubject(nil, suggestedTitle: "Weekly Sync"), "Follow-up: Weekly Sync")
         XCTAssertEqual(AppState.followUpSubject(nil, suggestedTitle: nil), "Post-call follow-up")
     }
+
+    func testFollowUpSubjectStripsHeaderBreakingCharacters() {
+        let subject = AppState.followUpSubject(
+            nil,
+            suggestedTitle: "Weekly Sync\r\nBcc: injected@example.com\u{0000}Q4"
+        )
+
+        XCTAssertEqual(subject, "Follow-up: Weekly Sync Bcc: injected@example.com Q4")
+        XCTAssertFalse(subject.contains("\r"))
+        XCTAssertFalse(subject.contains("\n"))
+        XCTAssertFalse(subject.contains("\u{0000}"))
+    }
 }

@@ -16,6 +16,8 @@ struct FollowUpGenerator {
     var maxSinglePassChars = 12_000
     /// Target size of each chunk when summarizing a long transcript.
     var maxChunkChars = 8_000
+    /// Maximum number of recursive summary-reduction passes before truncating.
+    var maxSummaryReductionPasses = 3
     /// Token ceiling for the follow-up draft itself.
     var maxTokens = 1200
 
@@ -62,12 +64,22 @@ struct FollowUpGenerator {
 
     // MARK: - Long-transcript summarization
 
-    /// Summarizes an over-long transcript chunk-by-chunk, then concatenates the
-    /// per-chunk summaries into a single distilled brief the drafting pass reads.
-    private func summarize(_ text: String, model: String, complete: Complete) async throws -> String {
+    /// Summarizes an over-long transcript chunk-by-chunk, then reduces the joined
+    /// summaries until the drafting pass receives a bounded source.
+    private func summarize(
+        _ text: String,
+        model: String,
+        complete: Complete,
+        reductionPass: Int = 0
+    ) async throws -> String {
         let chunks = TranscriptChunker.chunk(text, maxChars: maxChunkChars)
         guard chunks.count > 1 else {
-            return try await summarizeChunk(chunks.first ?? text, model: model, complete: complete)
+            return try await boundedSummary(
+                try await summarizeChunk(chunks.first ?? text, model: model, complete: complete),
+                model: model,
+                complete: complete,
+                reductionPass: reductionPass
+            )
         }
         var summaries: [String] = []
         for (index, chunk) in chunks.enumerated() {
@@ -83,7 +95,38 @@ struct FollowUpGenerator {
         guard !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DraftError.emptyDraft
         }
-        return combined
+        return try await boundedSummary(
+            combined,
+            model: model,
+            complete: complete,
+            reductionPass: reductionPass
+        )
+    }
+
+    private func boundedSummary(
+        _ summary: String,
+        model: String,
+        complete: Complete,
+        reductionPass: Int
+    ) async throws -> String {
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw DraftError.emptyDraft }
+
+        let maxSummaryChars = max(1, maxSinglePassChars)
+        guard trimmed.count > maxSummaryChars else { return trimmed }
+        guard reductionPass < maxSummaryReductionPasses else {
+            return Self.truncatedSummary(trimmed, maxChars: maxSummaryChars)
+        }
+        return try await summarize(
+            trimmed,
+            model: model,
+            complete: complete,
+            reductionPass: reductionPass + 1
+        )
+    }
+
+    private static func truncatedSummary(_ summary: String, maxChars: Int) -> String {
+        String(summary.prefix(maxChars)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func summarizeChunk(

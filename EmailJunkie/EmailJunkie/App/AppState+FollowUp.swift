@@ -149,13 +149,28 @@ extension AppState {
     }
 
     static func followUpSubject(_ provided: String?, suggestedTitle: String?) -> String {
-        if let provided = provided?.trimmingCharacters(in: .whitespacesAndNewlines), !provided.isEmpty {
+        if let provided = provided.map(sanitizedFollowUpSubjectText), !provided.isEmpty {
             return provided
         }
-        if let title = suggestedTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+        if let title = suggestedTitle.map(sanitizedFollowUpSubjectText), !title.isEmpty {
             return "Follow-up: \(title)"
         }
         return "Post-call follow-up"
+    }
+
+    private static func sanitizedFollowUpSubjectText(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar) {
+                scalars.append(" ")
+            } else {
+                scalars.append(scalar)
+            }
+        }
+        return String(scalars)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     /// Parses a free-form recipients string (comma/semicolon/newline separated,

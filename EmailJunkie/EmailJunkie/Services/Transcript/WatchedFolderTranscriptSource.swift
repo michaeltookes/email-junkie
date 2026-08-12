@@ -107,6 +107,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             let key = WatchedFolderScanner.seenKey(for: url)
             guard !processing.contains(key) else { continue }
             guard isStableForDelivery(url, key: key) else { continue }
+            guard let deliveredSnapshot = pendingFileStability[key]?.snapshot else {
+                scheduleFileStabilityRetry()
+                continue
+            }
             guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
                 // Transient (e.g. a file still being written reads empty): leave
                 // it unseen so a later write event or stability retry can retry.
@@ -117,7 +121,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             let accepted = await onTranscript?(ingested) == true
             processing.remove(key)
             if accepted {
-                seen[key] = WatchedFolderFileSnapshot(url: url)
+                seen[key] = deliveredSnapshot
                 pendingFileStability.removeValue(forKey: key)
             } else {
                 scheduleRejectedDeliveryRetry()

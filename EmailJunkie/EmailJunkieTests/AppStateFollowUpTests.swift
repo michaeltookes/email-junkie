@@ -292,6 +292,12 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertEqual(parsed.map(\.email), ["dana@example.com", "marcus@example.com", "a@b.com"])
     }
 
+    func testParseRecipientsSplitsWindowsLineEndings() {
+        let parsed = AppState.parseRecipients("dana@example.com\r\nmarcus@example.com\r\n")
+
+        XCTAssertEqual(parsed.map(\.email), ["dana@example.com", "marcus@example.com"])
+    }
+
     func testParseRecipientsRejectsNonEmails() {
         XCTAssertTrue(AppState.parseRecipients("not-an-email, also nope").isEmpty)
     }

@@ -163,7 +163,7 @@ extension AppState {
     /// syntactically plausible addresses.
     static func parseRecipients(_ text: String) -> [MailAddress] {
         var addresses: [MailAddress] = []
-        for entry in text.components(separatedBy: CharacterSet(charactersIn: ",;\n")) {
+        for entry in text.components(separatedBy: CharacterSet(charactersIn: ",;\r\n")) {
             addresses.append(contentsOf: emailsInEntry(entry).map { MailAddress(email: $0) })
         }
         return dedupedRecipients(addresses)

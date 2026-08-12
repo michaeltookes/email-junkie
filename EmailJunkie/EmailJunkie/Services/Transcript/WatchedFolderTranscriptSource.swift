@@ -37,6 +37,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     let folderURL: URL
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
+    private var subdirectorySources: [String: DispatchSourceFileSystemObject] = [:]
     private var seen: Set<String> = []
     private var processing: Set<String> = []
     private var isRunning = false
@@ -61,6 +62,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             return
         }
         isRunning = true
+        syncSubdirectoryWatches()
     }
 
     /// Stops watching and releases the folder descriptor. Idempotent.
@@ -73,6 +75,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// is marked processed only once it ingests and the delivery callback accepts
     /// it. Internal so the FS-event handler and tests can trigger a scan.
     func scanForNewTranscripts() async {
+        syncSubdirectoryWatches()
         for url in WatchedFolderScanner.newTranscripts(in: currentContents(), alreadySeen: seen) {
             let key = WatchedFolderScanner.seenKey(for: url)
             guard !processing.contains(key) else { continue }
@@ -93,19 +96,53 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     // MARK: - Mechanism
 
     private func currentContents() -> [URL] {
-        (try? fileManager.contentsOfDirectory(
+        currentRecursiveURLs().filter { !isDirectory($0) }
+    }
+
+    private func currentSubdirectories() -> [URL] {
+        currentRecursiveURLs().filter { isDirectory($0) }
+    }
+
+    private func currentRecursiveURLs() -> [URL] {
+        guard let enumerator = fileManager.enumerator(
             at: folderURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )) ?? []
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        return enumerator.compactMap { $0 as? URL }
+            .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    private func syncSubdirectoryWatches() {
+        let directories = currentSubdirectories()
+        let currentPaths = Set(directories.map { WatchedFolderScanner.seenKey(for: $0) })
+        for path in Array(subdirectorySources.keys) where !currentPaths.contains(path) {
+            teardownSubdirectoryWatch(for: path)
+        }
+        for directory in directories {
+            let path = WatchedFolderScanner.seenKey(for: directory)
+            guard subdirectorySources[path] == nil else { continue }
+            guard let watch = makeWatch(for: directory, isRoot: false) else { continue }
+            subdirectorySources[path] = watch
+        }
     }
 
     /// Opens the folder descriptor and starts the dispatch source. Returns whether
     /// the open succeeded. Each source's cancel handler closes its own captured
     /// descriptor, so a re-open can never race a stale cancel into a wrong close.
     private func openWatch() -> Bool {
-        let descriptor = open(folderURL.path, O_EVTONLY)
-        guard descriptor >= 0 else { return false }
+        guard let watch = makeWatch(for: folderURL, isRoot: true) else { return false }
+        source = watch
+        return true
+    }
+
+    private func makeWatch(for url: URL, isRoot: Bool) -> DispatchSourceFileSystemObject? {
+        let descriptor = open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
         let watch = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
             eventMask: [.write, .extend, .rename, .delete],
@@ -114,24 +151,34 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         watch.setEventHandler { [weak self] in
             let flags = watch.data
             Task { @MainActor in
-                await self?.handleEvent(flags)
+                await self?.handleEvent(flags, for: url, isRoot: isRoot)
             }
         }
         watch.setCancelHandler { close(descriptor) }
-        source = watch
         watch.resume()
-        return true
+        return watch
     }
 
     private func teardownWatch() {
         source?.cancel()
         source = nil
+        for watch in subdirectorySources.values {
+            watch.cancel()
+        }
+        subdirectorySources.removeAll()
     }
 
-    private func handleEvent(_ flags: DispatchSource.FileSystemEvent) async {
-        if flags.contains(.delete) || flags.contains(.rename) {
+    private func teardownSubdirectoryWatch(for path: String) {
+        subdirectorySources.removeValue(forKey: path)?.cancel()
+    }
+
+    private func handleEvent(_ flags: DispatchSource.FileSystemEvent, for watchedURL: URL, isRoot: Bool) async {
+        if isRoot, flags.contains(.delete) || flags.contains(.rename) {
             await handleFolderMoved()
         } else {
+            if !isRoot, flags.contains(.delete) || flags.contains(.rename) {
+                teardownSubdirectoryWatch(for: WatchedFolderScanner.seenKey(for: watchedURL))
+            }
             await scanForNewTranscripts()
         }
     }
@@ -151,6 +198,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             report(.cannotOpenFolder(folderURL.path))
             return
         }
+        syncSubdirectoryWatches()
         await scanForNewTranscripts()
     }
 

@@ -52,6 +52,11 @@ extension AppState {
     func updatePendingDraftRecipients(_ draft: Draft, to recipients: [MailAddress]) -> Draft? {
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return nil }
         guard pendingDrafts[index].isAuthored else { return pendingDrafts[index] }
+        guard pendingDrafts[index].offlineQueuedDispatch == nil,
+              offlineQueuedDispatch[draft.identity] == nil,
+              !isWaitingForNetwork(draft.identity) else {
+            return pendingDrafts[index]
+        }
         let deduped = Self.dedupedRecipients(recipients)
         guard pendingDrafts[index].authoredRecipients != deduped else { return pendingDrafts[index] }
 

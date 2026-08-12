@@ -37,7 +37,11 @@ final class AppStateFollowUpTests: XCTestCase {
         return (appState, provider, notifier, persistence)
     }
 
-    private func authoredDraft(recipients: [MailAddress], id: UInt32 = 7) -> Draft {
+    private func authoredDraft(
+        recipients: [MailAddress],
+        id: UInt32 = 7,
+        offlineQueuedDispatch: OfflineQueuedDraftDispatch? = nil
+    ) -> Draft {
         Draft(
             id: id,
             sourceUIDValidity: nil,
@@ -50,6 +54,7 @@ final class AppStateFollowUpTests: XCTestCase {
             body: "Thanks for the call.",
             model: "claude-sonnet-4-6",
             generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            offlineQueuedDispatch: offlineQueuedDispatch,
             authoredRecipients: recipients
         )
     }
@@ -143,6 +148,24 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertEqual(updated?.authoredRecipients?.map(\.email), ["dana@example.com"])
         XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), ["dana@example.com"])
         XCTAssertEqual(persistence.loadPendingDrafts().first?.authoredRecipients?.map(\.email), ["dana@example.com"])
+    }
+
+    func testUpdatePendingDraftRecipientsIgnoresOfflineQueuedDraft() throws {
+        let intent = OfflineQueuedDraftDispatch(sendBehavior: .autoSend)
+        let draft = authoredDraft(
+            recipients: [MailAddress(email: "approved@example.com")],
+            offlineQueuedDispatch: intent
+        )
+        let (appState, _, _, persistence) = makeAppState(seed: [draft])
+
+        let updated = appState.updatePendingDraftRecipients(
+            draft,
+            to: [MailAddress(email: "changed@example.com")]
+        )
+
+        XCTAssertEqual(updated?.authoredRecipients?.map(\.email), ["approved@example.com"])
+        XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), ["approved@example.com"])
+        XCTAssertEqual(persistence.loadPendingDrafts().first?.authoredRecipients?.map(\.email), ["approved@example.com"])
     }
 
     // MARK: - Dispatch

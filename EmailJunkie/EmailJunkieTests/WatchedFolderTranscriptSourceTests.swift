@@ -60,6 +60,43 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(delivered.count, 1)
     }
 
+    func testRecursiveScanDeliversTranscriptInsideNewSubdirectory() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [IngestedTranscript] = []
+        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        source.onTranscript = { delivered.append($0); return true }
+        source.start()
+        defer { source.stop() }
+
+        let callDir = dir.appendingPathComponent("2026-08-12 14.00.00 Weekly Sync", isDirectory: true)
+        try FileManager.default.createDirectory(at: callDir, withIntermediateDirectories: true)
+        try write(sampleVTT, to: callDir.appendingPathComponent("call.vtt"))
+        await source.scanForNewTranscripts()
+
+        XCTAssertEqual(delivered.count, 1)
+        XCTAssertEqual(delivered.first?.parsed().text, "Dana: Hi there.")
+    }
+
+    func testPreExistingNestedTranscriptIsSeededAsSeen() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let callDir = dir.appendingPathComponent("Existing Call", isDirectory: true)
+        try FileManager.default.createDirectory(at: callDir, withIntermediateDirectories: true)
+        try write("Marcus: old recap.", to: callDir.appendingPathComponent("old.txt"))
+
+        var delivered: [IngestedTranscript] = []
+        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        source.onTranscript = { delivered.append($0); return true }
+        source.start()
+        defer { source.stop() }
+
+        await source.scanForNewTranscripts()
+
+        XCTAssertTrue(delivered.isEmpty)
+    }
+
     // Finding 1(a): a file created empty (mid-write) then gaining content must be
     // delivered exactly once, not permanently dropped.
     func testFileAppearingEmptyThenGainingContentDeliveredExactlyOnce() async throws {

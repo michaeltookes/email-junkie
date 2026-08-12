@@ -17,13 +17,19 @@ struct FollowUpRecipientsField: View {
     }
 
     private var isBusy: Bool { appState.approvingDraftIDs.contains(draft.identity) }
+    private var isQueuedForNetwork: Bool {
+        draft.offlineQueuedDispatch != nil
+            || appState.offlineQueuedDispatch[draft.identity] != nil
+            || appState.isWaitingForNetwork(draft.identity)
+    }
+    private var isLocked: Bool { isBusy || isQueuedForNetwork }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("To").font(.caption).bold().foregroundStyle(.secondary)
             TextField("name@example.com, …", text: $text)
                 .textFieldStyle(.roundedBorder)
-                .disabled(isBusy)
+                .disabled(isLocked)
                 .focused($isFocused)
                 .onSubmit { persistNow() }
                 .onChange(of: text) { _, _ in queuePersist() }
@@ -39,6 +45,7 @@ struct FollowUpRecipientsField: View {
     }
 
     private func queuePersist() {
+        guard !isLocked else { return }
         persistTask?.cancel()
         persistTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -50,6 +57,7 @@ struct FollowUpRecipientsField: View {
     private func persistNow() {
         persistTask?.cancel()
         persistTask = nil
+        guard !isLocked else { return }
         _ = appState.updatePendingDraftRecipients(draft, to: AppState.parseRecipients(text))
     }
 }

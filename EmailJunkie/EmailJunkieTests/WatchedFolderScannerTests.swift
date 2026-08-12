@@ -5,6 +5,13 @@ final class WatchedFolderScannerTests: XCTestCase {
 
     private func url(_ path: String) -> URL { URL(fileURLWithPath: path) }
 
+    private func makeTempFolder() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("watched-scanner-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     func testSeedSeenFiltersToTranscriptFiles() {
         let seen = WatchedFolderScanner.seedSeen(from: [
             url("/calls/a.vtt"),
@@ -36,6 +43,22 @@ final class WatchedFolderScannerTests: XCTestCase {
         let second = WatchedFolderScanner.newTranscripts(in: [url("/calls/one.vtt")], alreadySeen: seen)
         XCTAssertEqual(first.map(\.lastPathComponent), ["one.vtt"])
         XCTAssertEqual(second.map(\.lastPathComponent), ["one.vtt"])
+    }
+
+    func testNewTranscriptsTreatsRecreatedPathAsNewVersion() throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let transcript = dir.appendingPathComponent("transcript.txt")
+
+        try "First call.".write(to: transcript, atomically: true, encoding: .utf8)
+        let seen = WatchedFolderScanner.seedSeenVersions(from: [transcript])
+        try FileManager.default.removeItem(at: transcript)
+        let recreated = dir.appendingPathComponent("transcript.txt")
+        try "Second call with a longer transcript.".write(to: recreated, atomically: true, encoding: .utf8)
+
+        let new = WatchedFolderScanner.newTranscripts(in: [recreated], alreadySeen: seen)
+
+        XCTAssertEqual(new.map(\.lastPathComponent), ["transcript.txt"])
     }
 
     func testSeenKeyStandardizesPath() {

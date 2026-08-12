@@ -1,3 +1,4 @@
+import EmailJunkieMail
 import Foundation
 import os
 
@@ -15,7 +16,7 @@ extension AppState {
     @discardableResult
     func updatePendingDraftBody(_ draft: Draft, to newBody: String) -> Draft? {
         guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
-            clearPendingDraftBodyEdit(identity: draft.identity)
+            clearPendingDraftEdits(identity: draft.identity)
             return nil
         }
         guard pendingDrafts[index].body != newBody else {
@@ -44,7 +45,7 @@ extension AppState {
     /// persisted. Notification approvals check this before dispatching.
     func notePendingDraftBodyEdit(_ draft: Draft, editedBody: String) {
         guard let queued = pendingDrafts.first(where: { $0.identity == draft.identity }) else {
-            clearPendingDraftBodyEdit(identity: draft.identity)
+            clearPendingDraftEdits(identity: draft.identity)
             return
         }
         if queued.body == editedBody {
@@ -52,6 +53,24 @@ extension AppState {
         } else {
             pendingDraftUncommittedEditIDs.insert(draft.identity)
             pendingDraftUncommittedEditBodies[draft.identity] = editedBody
+        }
+    }
+
+    func notePendingDraftRecipientEdit(_ draft: Draft, recipients: [MailAddress]) {
+        guard let queued = pendingDrafts.first(where: { $0.identity == draft.identity }) else {
+            clearPendingDraftEdits(identity: draft.identity)
+            return
+        }
+        guard queued.isAuthored else {
+            clearPendingDraftRecipientEdit(identity: draft.identity)
+            return
+        }
+        let deduped = Self.dedupedRecipients(recipients)
+        if queued.authoredRecipients == deduped {
+            clearPendingDraftRecipientEdit(identity: draft.identity)
+        } else {
+            pendingDraftUncommittedEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditRecipients[draft.identity] = deduped
         }
     }
 
@@ -69,9 +88,52 @@ extension AppState {
         }
     }
 
+    func flushPendingDraftRecipientEdits() {
+        let edits = pendingDraftUncommittedEditRecipients
+        for (identity, recipients) in edits {
+            guard let draft = pendingDrafts.first(where: { $0.identity == identity }) else {
+                clearPendingDraftEdits(identity: identity)
+                continue
+            }
+            updatePendingDraftRecipients(draft, to: recipients)
+        }
+    }
+
+    func flushPendingDraftEdits() {
+        flushPendingDraftBodyEdits()
+        flushPendingDraftRecipientEdits()
+    }
+
     func clearPendingDraftBodyEdit(identity: String) {
-        pendingDraftUncommittedEditIDs.remove(identity)
         pendingDraftUncommittedEditBodies.removeValue(forKey: identity)
+        refreshPendingDraftUncommittedEditID(identity)
+    }
+
+    func clearPendingDraftRecipientEdit(identity: String) {
+        pendingDraftUncommittedEditRecipients.removeValue(forKey: identity)
+        refreshPendingDraftUncommittedEditID(identity)
+    }
+
+    func clearPendingDraftEdits(identity: String) {
+        pendingDraftUncommittedEditBodies.removeValue(forKey: identity)
+        pendingDraftUncommittedEditRecipients.removeValue(forKey: identity)
+        pendingDraftUncommittedEditIDs.remove(identity)
+    }
+
+    private func refreshPendingDraftUncommittedEditID(_ identity: String) {
+        if pendingDraftUncommittedEditBodies[identity] != nil
+            || pendingDraftUncommittedEditRecipients[identity] != nil {
+            pendingDraftUncommittedEditIDs.insert(identity)
+        } else {
+            pendingDraftUncommittedEditIDs.remove(identity)
+        }
+    }
+
+    func flushPendingDraftRecipientEdit(for draft: Draft) -> Draft? {
+        guard let recipients = pendingDraftUncommittedEditRecipients[draft.identity] else {
+            return pendingDrafts.first { $0.identity == draft.identity } ?? draft
+        }
+        return updatePendingDraftRecipients(draft, to: recipients)
     }
 
     /// Applies the current inline editor contents before dispatching. Approval
@@ -79,6 +141,7 @@ extension AppState {
     /// saves a different body from the one shown in the review UI.
     func approvePendingDraft(_ draft: Draft, withEditedBody editedBody: String, force: Bool = false) async {
         guard let updated = updatePendingDraftBody(draft, to: editedBody) else { return }
-        await approveDraft(updated, force: force)
+        guard let withRecipients = flushPendingDraftRecipientEdit(for: updated) else { return }
+        await approveDraft(withRecipients, force: force)
     }
 }

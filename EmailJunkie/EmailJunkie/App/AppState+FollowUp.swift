@@ -54,7 +54,10 @@ extension AppState {
     /// draft when identical, or `nil` if it could not be applied durably.
     @discardableResult
     func updatePendingDraftRecipients(_ draft: Draft, to recipients: [MailAddress]) -> Draft? {
-        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else { return nil }
+        guard let index = pendingDrafts.firstIndex(where: { $0.identity == draft.identity }) else {
+            clearPendingDraftEdits(identity: draft.identity)
+            return nil
+        }
         guard pendingDrafts[index].isAuthored else { return pendingDrafts[index] }
         guard pendingDrafts[index].offlineQueuedDispatch == nil,
               offlineQueuedDispatch[draft.identity] == nil,
@@ -62,7 +65,10 @@ extension AppState {
             return pendingDrafts[index]
         }
         let deduped = Self.dedupedRecipients(recipients)
-        guard pendingDrafts[index].authoredRecipients != deduped else { return pendingDrafts[index] }
+        guard pendingDrafts[index].authoredRecipients != deduped else {
+            clearPendingDraftRecipientEdit(identity: draft.identity)
+            return pendingDrafts[index]
+        }
 
         let previous = pendingDrafts[index]
         pendingDrafts[index].authoredRecipients = deduped
@@ -71,9 +77,12 @@ extension AppState {
             try persistence.savePendingDraftsSync(pendingDrafts)
         } catch {
             pendingDrafts[index] = previous
+            pendingDraftUncommittedEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditRecipients[draft.identity] = deduped
             approvalError = Self.draftMessage(for: error)
             return nil
         }
+        clearPendingDraftRecipientEdit(identity: draft.identity)
         notifier.refreshNotification(for: pendingDrafts[index], sendBehavior: sendBehavior)
         return pendingDrafts[index]
     }

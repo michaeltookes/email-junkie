@@ -1,5 +1,22 @@
 import Foundation
 
+struct WatchedFolderFileSnapshot: Equatable {
+    var fileSize: Int
+    var modificationDate: Date?
+    var creationDate: Date?
+
+    init?(url: URL) {
+        guard let values = try? url.resourceValues(
+            forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey]
+        ), let fileSize = values.fileSize else {
+            return nil
+        }
+        self.fileSize = fileSize
+        modificationDate = values.contentModificationDate
+        creationDate = values.creationDate
+    }
+}
+
 /// Pure bookkeeping for the watched-folder transcript source (item 51): decides
 /// which files in a folder are candidate transcripts not yet processed. The user's
 /// files are never moved or deleted — this only compares paths.
@@ -16,10 +33,30 @@ enum WatchedFolderScanner {
         urls.filter { TranscriptFormat.isSupportedFile($0) && !alreadySeen.contains(seenKey(for: $0)) }
     }
 
+    /// Version-aware candidate detection for a running watcher. A path that was
+    /// already delivered can become new again if a recorder replaces or rewrites
+    /// the file at that path.
+    static func newTranscripts(in urls: [URL], alreadySeen: [String: WatchedFolderFileSnapshot]) -> [URL] {
+        urls.filter { url in
+            guard TranscriptFormat.isSupportedFile(url) else { return false }
+            let key = seenKey(for: url)
+            return alreadySeen[key] != WatchedFolderFileSnapshot(url: url)
+        }
+    }
+
     /// The seen-set to seed a freshly started watcher with, so files that already
     /// existed when watching began are not reprocessed as if they just appeared.
     static func seedSeen(from urls: [URL]) -> Set<String> {
         Set(urls.filter { TranscriptFormat.isSupportedFile($0) }.map(seenKey(for:)))
+    }
+
+    /// Version-aware seen-set for the live watcher.
+    static func seedSeenVersions(from urls: [URL]) -> [String: WatchedFolderFileSnapshot] {
+        urls.reduce(into: [:]) { seen, url in
+            guard TranscriptFormat.isSupportedFile(url),
+                  let snapshot = WatchedFolderFileSnapshot(url: url) else { return }
+            seen[seenKey(for: url)] = snapshot
+        }
     }
 
     /// The stable key used to track a file as processed.

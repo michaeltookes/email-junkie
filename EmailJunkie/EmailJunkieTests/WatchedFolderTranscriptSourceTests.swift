@@ -79,6 +79,28 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(delivered.count, 1)
     }
 
+    func testRecreatedProcessedPathDeliversAgain() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.onTranscript = { delivered.append($0.rawText); return true }
+        source.start()
+        defer { source.stop() }
+
+        let transcript = dir.appendingPathComponent("transcript.txt")
+        try write("First call.", to: transcript)
+        await scanStable(source)
+
+        try FileManager.default.removeItem(at: transcript)
+        await scanStable(source)
+        try write("Second call with a longer transcript.", to: transcript)
+        await scanStable(source)
+
+        XCTAssertEqual(delivered, ["First call.", "Second call with a longer transcript."])
+    }
+
     func testRecursiveScanDeliversTranscriptInsideNewSubdirectory() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }

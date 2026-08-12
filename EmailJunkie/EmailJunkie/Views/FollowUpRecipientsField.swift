@@ -46,6 +46,7 @@ struct FollowUpRecipientsField: View {
 
     private func queuePersist() {
         guard !isLocked else { return }
+        appState.notePendingDraftRecipientEdit(draft, recipients: AppState.parseRecipients(text))
         persistTask?.cancel()
         persistTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)

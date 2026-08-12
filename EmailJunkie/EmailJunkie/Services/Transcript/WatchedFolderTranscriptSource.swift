@@ -41,7 +41,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private var rejectedDeliveryRetryTask: Task<Void, Never>?
     private var fileStabilityRetryTask: Task<Void, Never>?
     private var pendingFileStability: [String: PendingFileStability] = [:]
-    private var seen: Set<String> = []
+    private var seen: [String: WatchedFolderFileSnapshot] = [:]
     private var processing: Set<String> = []
     private var isRunning = false
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
@@ -65,7 +65,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// folder can't be opened, reports the failure and stays inactive. Idempotent.
     func start() {
         guard !isRunning else { return }
-        seen = WatchedFolderScanner.seedSeen(from: currentContents())
+        seen = WatchedFolderScanner.seedSeenVersions(from: currentContents())
         #if DEBUG
         onAfterSeedSeenForTesting?()
         #endif
@@ -97,7 +97,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     func scanForNewTranscripts() async {
         guard isRunning else { return }
         syncSubdirectoryWatches()
-        let candidates = WatchedFolderScanner.newTranscripts(in: currentContents(), alreadySeen: seen)
+        let contents = currentContents()
+        let currentKeys = Set(contents.map(WatchedFolderScanner.seenKey(for:)))
+        seen = seen.filter { currentKeys.contains($0.key) }
+        let candidates = WatchedFolderScanner.newTranscripts(in: contents, alreadySeen: seen)
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
         for url in candidates {
@@ -114,7 +117,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             let accepted = await onTranscript?(ingested) == true
             processing.remove(key)
             if accepted {
-                seen.insert(key)
+                seen[key] = WatchedFolderFileSnapshot(url: url)
                 pendingFileStability.removeValue(forKey: key)
             } else {
                 scheduleRejectedDeliveryRetry()
@@ -202,7 +205,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     }
 
     private func isStableForDelivery(_ url: URL, key: String) -> Bool {
-        guard let snapshot = FileSnapshot(url: url) else {
+        guard let snapshot = WatchedFolderFileSnapshot(url: url) else {
             pendingFileStability.removeValue(forKey: key)
             return false
         }
@@ -299,21 +302,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     }
 }
 
-private struct FileSnapshot: Equatable {
-    var fileSize: Int
-    var modificationDate: Date?
-
-    init?(url: URL) {
-        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
-              let fileSize = values.fileSize else {
-            return nil
-        }
-        self.fileSize = fileSize
-        modificationDate = values.contentModificationDate
-    }
-}
-
 private struct PendingFileStability {
-    var snapshot: FileSnapshot
+    var snapshot: WatchedFolderFileSnapshot
     var observedAt: Date
 }

@@ -290,7 +290,7 @@ extension AppState {
     private func removePendingDraftAfterApproval(_ draft: Draft) {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         pendingDrafts.removeAll { $0.identity == draft.identity }
-        clearPendingDraftBodyEdit(identity: draft.identity)
+        clearPendingDraftEdits(identity: draft.identity)
         pendingDraftCount = pendingDrafts.count
 
         do {
@@ -319,7 +319,7 @@ extension AppState {
         if removeNotification {
             notifier.removeNotification(identity: draft.identity)
         }
-        clearPendingDraftBodyEdit(identity: draft.identity)
+        clearPendingDraftEdits(identity: draft.identity)
         return removalIndex
     }
 
@@ -450,8 +450,8 @@ extension AppState {
 
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         pendingStaleWarnings.removeValue(forKey: replacement.identity)
-        clearPendingDraftBodyEdit(identity: draft.identity)
-        clearPendingDraftBodyEdit(identity: replacement.identity)
+        clearPendingDraftEdits(identity: draft.identity)
+        clearPendingDraftEdits(identity: replacement.identity)
         if let staleReason {
             pendingStaleWarnings[replacement.identity] = staleReason
         }

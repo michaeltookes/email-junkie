@@ -25,6 +25,24 @@ final class AppStateSendCountdownTests: XCTestCase {
         )
     }
 
+    private func authoredDraft(id: UInt32 = 2, recipients: [MailAddress]) -> Draft {
+        Draft(
+            id: id,
+            sourceUIDValidity: nil,
+            sourceAccountEmail: "me@gmail.com",
+            sourceSubject: "Follow-up: Sync",
+            sourceFrom: recipients.first,
+            sourceReplyTo: nil,
+            sourceMessageID: nil,
+            incomingBody: "Call transcript.",
+            replySubject: "Follow-up: Sync",
+            body: "Thanks for the call.",
+            model: "claude-sonnet-4-6",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            authoredRecipients: recipients
+        )
+    }
+
     private func makeAppState(
         provider: MailProvider,
         sendDelaySeconds: Int,
@@ -228,6 +246,29 @@ final class AppStateSendCountdownTests: XCTestCase {
         XCTAssertEqual(decodedBody(from: provider.sentRFC822), "Edited during countdown.")
         XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
         XCTAssertNil(appState.pendingDraftUncommittedEditBodies[draft.identity])
+    }
+
+    func testCountdownFlushesRegisteredRecipientEditBeforeSending() async {
+        let draft = authoredDraft(recipients: [MailAddress(email: "old@example.com")])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 2,
+            tickNanoseconds: 2_000_000,
+            seed: [draft]
+        )
+
+        await appState.approveDraft(draft)
+        appState.notePendingDraftRecipientEdit(
+            draft,
+            recipients: [MailAddress(email: "new@example.com")]
+        )
+        await waitUntil { appState.pendingDrafts.isEmpty }
+
+        XCTAssertEqual(provider.sendCallCount, 1)
+        XCTAssertEqual(provider.sentEnvelope?.recipients, ["new@example.com"])
+        XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNil(appState.pendingDraftUncommittedEditRecipients[draft.identity])
     }
 
     func testCountdownBlocksWhenRegisteredInlineEditCannotPersist() async {

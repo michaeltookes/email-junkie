@@ -210,6 +210,29 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertEqual(persistence.loadPendingDrafts().first?.authoredRecipients?.map(\.email), ["approved@example.com"])
     }
 
+    func testNotificationApprovalOpensReviewWhenRecipientEditIsUncommitted() async {
+        let draft = authoredDraft(recipients: [MailAddress(email: "old@example.com")])
+        let (appState, provider, _, _) = makeAppState(seed: [draft])
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
+        appState.notePendingDraftRecipientEdit(
+            draft,
+            recipients: [MailAddress(email: "new@example.com")]
+        )
+
+        await appState.handleNotificationAction(.approve(.autoSend), identity: draft.identity)
+
+        XCTAssertTrue(openedReview)
+        XCTAssertNil(provider.sentEnvelope)
+        XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), ["old@example.com"])
+        XCTAssertEqual(
+            appState.pendingDraftUncommittedEditRecipients[draft.identity]?.map(\.email),
+            ["new@example.com"]
+        )
+        XCTAssertTrue(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNotNil(appState.approvalError)
+    }
+
     // MARK: - Dispatch
 
     func testApproveAuthoredFollowUpSendsToRecipientsWithoutThreading() async throws {
@@ -223,6 +246,43 @@ final class AppStateFollowUpTests: XCTestCase {
         if let rfc822 = provider.sentRFC822, let text = String(data: rfc822, encoding: .utf8) {
             XCTAssertFalse(text.contains("In-Reply-To"), "Authored follow-ups do not thread")
         }
+    }
+
+    func testApprovePendingDraftFlushesRegisteredRecipientEdit() async {
+        let draft = authoredDraft(recipients: [MailAddress(email: "old@example.com")])
+        let (appState, provider, _, _) = makeAppState(seed: [draft])
+        appState.notePendingDraftRecipientEdit(
+            draft,
+            recipients: [MailAddress(email: "new@example.com")]
+        )
+
+        await appState.approvePendingDraft(draft, withEditedBody: draft.body)
+
+        XCTAssertEqual(provider.sentEnvelope?.recipients, ["new@example.com"])
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNil(appState.pendingDraftUncommittedEditRecipients[draft.identity])
+    }
+
+    func testApprovePendingDraftStopsWhenRecipientPersistenceFails() async {
+        let draft = authoredDraft(recipients: [MailAddress(email: "old@example.com")])
+        let (appState, provider, _, persistence) = makeAppState(seed: [draft])
+        appState.notePendingDraftRecipientEdit(
+            draft,
+            recipients: [MailAddress(email: "new@example.com")]
+        )
+        persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
+
+        await appState.approvePendingDraft(draft, withEditedBody: draft.body)
+
+        XCTAssertNil(provider.sentEnvelope)
+        XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), ["old@example.com"])
+        XCTAssertEqual(
+            appState.pendingDraftUncommittedEditRecipients[draft.identity]?.map(\.email),
+            ["new@example.com"]
+        )
+        XCTAssertTrue(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertNotNil(appState.approvalError)
     }
 
     // MARK: - Recipient parsing

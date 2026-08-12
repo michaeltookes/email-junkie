@@ -72,17 +72,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
     - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
 
-51. **Post-call follow-up workflow: transcript in → next-steps email out** — *v1 of the 2026-08-12 pivot; the flagship workflow*
-    Ingest a finished call's transcript and draft the follow-up email in the user's voice, through the existing approval → send/save pipeline. Deliberately no capture and no platform integrations — the transcript arrives as a file or paste. This validates the core value proposition using ~90% existing plumbing before any investment in transcript acquisition (items 52–54).
-    > **Urgency (2026-08-12):** Fathom's bot-free capture launch shows the capture layer commoditizing fast. The defensible part of the workflow is this item — a send-ready email in the user's learned voice, from their own mailbox — so ship it ahead of everything else in the pivot.
-    *As Marcus, I want my next-steps follow-up drafted from the call transcript before I'm back from getting coffee, so that post-call admin stops eating my selling time.*
-    - Transcript ingestion by **paste** and by **file** (`.txt`, `.vtt`, `.srt`, `.md` — the formats Zoom/Teams/notetakers export), via the menu-bar UI including drag-and-drop.
-    - Optional **watched folder** (e.g. Zoom's local recording directory): a new transcript file appearing there triggers the workflow automatically.
-    - A **`TranscriptSource` abstraction** so future sources (platform APIs — item 53, native capture — item 54) plug in the way LLM providers do.
-    - The LLM reads the full transcript and drafts a follow-up in the user's learned voice: brief recap, agreed next steps / action items with owners, proposed next meeting. Prompting must handle transcripts both with and without speaker labels.
-    - Recipients are user-editable before approval (auto-fill is item 52's job); the draft flows through the existing notification → approve → send/save-as-draft path unchanged.
-    - Works with the managed-inference default and the BYO-key/local escape hatch; long transcripts are handled within model context limits (chunk/summarize as needed) rather than failing.
-
 57. **Landing page / marketing site** — *⚠️ discussion required before building; lives in its own repo*
     The public site where people find the product, understand it in 30 seconds, and pay: positioning, pricing/checkout, download, and the Windows-demand waitlist.
     > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not email-junkie. This item exists so the work isn't forgotten and its requirements are captured.

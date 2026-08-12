@@ -182,6 +182,17 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertEqual(parsed.text, "Alice --> Bob owns the handoff.")
     }
 
+    func testWebVTTPreservesAngleBracketComparisons() {
+        let raw = """
+        WEBVTT
+
+        00:00:00.000 --> 00:00:03.000
+        Keep ARR < $5m and margin > 20%.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+        XCTAssertEqual(parsed.text, "Keep ARR < $5m and margin > 20%.")
+    }
+
     // MARK: - SubRip
 
     func testSubRipStripsIndicesAndTimestampsPreservingLabels() {
@@ -245,5 +256,15 @@ final class TranscriptParserTests: XCTestCase {
         """
         let parsed = TranscriptParser.parse(raw, format: .subRip)
         XCTAssertEqual(parsed.text, "Alice --> Bob owns the handoff.")
+    }
+
+    func testSubRipPreservesAngleBracketComparisons() {
+        let raw = """
+        1
+        00:00:00,000 --> 00:00:03,000
+        Keep ARR < $5m and margin > 20%.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .subRip)
+        XCTAssertEqual(parsed.text, "Keep ARR < $5m and margin > 20%.")
     }
 }

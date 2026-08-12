@@ -7,7 +7,7 @@ import Foundation
 /// - Plain text / Markdown pass through with whitespace normalized.
 /// - WebVTT and SubRip cue blocks have their cue numbers and `-->` timestamps
 ///   stripped; WebVTT `<v Name>` voice tags become `Name:` speaker prefixes and
-///   all other angle-bracket tags are removed.
+///   recognized caption formatting tags are removed.
 enum TranscriptParser {
 
     /// Parses `raw` according to `format`.
@@ -132,15 +132,15 @@ enum TranscriptParser {
         return token.range(of: pattern, options: .regularExpression) != nil
     }
 
-    /// Converts a WebVTT `<v Name>` voice tag into a `Name:` prefix and strips all
-    /// remaining angle-bracket tags. SubRip text only has its tags stripped.
+    /// Converts a WebVTT `<v Name>` voice tag into a `Name:` prefix and strips
+    /// recognized caption tags. Literal angle-bracket text is preserved.
     private static func cleanedCueText(_ line: String, isWebVTT: Bool, sawVoiceTag: inout Bool) -> String {
         var text = line
         if isWebVTT, let voice = extractVoiceTag(text) {
             sawVoiceTag = true
             text = "\(voice.name): \(voice.remainder)"
         }
-        text = stripAngleTags(text)
+        text = stripCaptionTags(text)
         return text.trimmingCharacters(in: .whitespaces)
     }
 
@@ -185,14 +185,18 @@ enum TranscriptParser {
         !text.isEmpty && text.allSatisfy { $0.isNumber }
     }
 
-    private static func stripAngleTags(_ text: String) -> String {
+    private static func stripCaptionTags(_ text: String) -> String {
         guard text.contains("<") else { return text }
-        let stripped = text.replacingOccurrences(
-            of: "<[^>]*>",
-            with: "",
-            options: .regularExpression
-        )
-        return stripped
+        return [
+            #"<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>"#,
+            #"</?(?:b|i|u|ruby|rt)(?:\s+[^>]*)?>"#,
+            #"</?c(?:\.[^ >]+)*(?:\s+[^>]*)?>"#,
+            #"</?lang(?:\s+[^>]*)?>"#,
+            #"</?v(?:\.[^ >]+)*(?:\s+[^>]*)?>"#,
+            #"</?font(?:\s+[^>]*)?>"#
+        ].reduce(text) { partial, pattern in
+            partial.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
     }
 
     private static func extractVoiceTag(_ text: String) -> (name: String, remainder: String)? {

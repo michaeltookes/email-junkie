@@ -87,10 +87,10 @@ extension AppState {
 
     /// Handles a transcript that appeared in the watched folder: drafts a follow-up
     /// and enqueues it with no recipients yet (auto-fill is item 52), so the user
-    /// adds recipients in review before approving. Returns whether the transcript
-    /// was durably accepted for processing — `false` when the app can't yet draft
-    /// or enqueue the pending draft, so the source leaves the file unseen and
-    /// retries it once the app is ready rather than dropping it.
+    /// adds recipients in review before approving. Returns whether the source should
+    /// mark the transcript accepted. Setup and transient failures return `false`;
+    /// permanent failures are treated as handled so the source does not repeat cloud
+    /// generation indefinitely for an unchanged file.
     @discardableResult
     func handleWatchedTranscript(_ ingested: IngestedTranscript) async -> Bool {
         guard canCreateFollowUp else {
@@ -105,7 +105,18 @@ extension AppState {
         } catch {
             transcriptFolderError = Self.draftMessage(for: error)
             transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")
-            return false
+            return !Self.shouldRetryWatchedTranscriptFailure(error)
+        }
+    }
+
+    private static func shouldRetryWatchedTranscriptFailure(_ error: Error) -> Bool {
+        switch error {
+        case DraftError.llmUnavailable,
+             DraftDispatchError.missingCredentials,
+             DraftDispatchError.accountChanged:
+            return true
+        default:
+            return ResilienceClassifier.classify(error) == .transient
         }
     }
 }

@@ -400,6 +400,7 @@ final class AppStateFollowUpTests: XCTestCase {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
         XCTAssertEqual(appState.pendingDrafts.count, 1)
+        XCTAssertNil(appState.transcriptFolderError)
     }
 
     func testInactiveTranscriptFolderSourceIsRebuiltForSameFolder() throws {

@@ -53,7 +53,7 @@ enum TranscriptParser {
                 skippingMetadataBlock = metadataSkipsUntilBlank
                 continue
             }
-            if trimmed.contains("-->") {
+            if !isInCuePayload, isCueTimingLine(trimmed, isWebVTT: isWebVTT) {
                 isInCuePayload = true
                 continue
             }
@@ -105,9 +105,31 @@ enum TranscriptParser {
     /// captions are separated from the next cue's timestamp by a blank line, so they
     /// are not mistaken for identifiers.
     private static func isCueIdentifier(_ trimmed: String, isWebVTT: Bool, immediatelyFollowedBy next: String?) -> Bool {
-        if isAllDigits(trimmed) { return next?.contains("-->") == true }
-        guard isWebVTT, let next, next.contains("-->") else { return false }
+        if isAllDigits(trimmed) {
+            guard let next else { return false }
+            return isCueTimingLine(next, isWebVTT: isWebVTT)
+        }
+        guard isWebVTT, let next, isCueTimingLine(next, isWebVTT: true) else { return false }
         return !trimmed.contains(":") && !trimmed.contains(" ")
+    }
+
+    private static func isCueTimingLine(_ line: String, isWebVTT: Bool) -> Bool {
+        let parts = line.components(separatedBy: "-->")
+        guard parts.count == 2 else { return false }
+        let start = parts[0].trimmingCharacters(in: .whitespaces)
+        let endAndSettings = parts[1].trimmingCharacters(in: .whitespaces)
+        guard let end = endAndSettings.split(whereSeparator: { $0 == " " || $0 == "\t" }).first else {
+            return false
+        }
+        return isTimestamp(start, isWebVTT: isWebVTT)
+            && isTimestamp(String(end), isWebVTT: isWebVTT)
+    }
+
+    private static func isTimestamp(_ token: String, isWebVTT: Bool) -> Bool {
+        let pattern = isWebVTT
+            ? #"^(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}$"#
+            : #"^\d{2,}:[0-5]\d:[0-5]\d,\d{3}$"#
+        return token.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// Converts a WebVTT `<v Name>` voice tag into a `Name:` prefix and strips all

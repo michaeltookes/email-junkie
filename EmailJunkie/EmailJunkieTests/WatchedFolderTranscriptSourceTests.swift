@@ -101,6 +101,28 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(delivered, ["First call.", "Second call with a longer transcript."])
     }
 
+    func testRenamedDirectoryDoesNotRedeliverProcessedFile() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.onTranscript = { delivered.append($0.rawText); return true }
+        source.start()
+        defer { source.stop() }
+
+        let originalDir = dir.appendingPathComponent("Original", isDirectory: true)
+        let renamedDir = dir.appendingPathComponent("Renamed", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalDir, withIntermediateDirectories: true)
+        try write("First call.", to: originalDir.appendingPathComponent("transcript.txt"))
+        await scanStable(source)
+
+        try FileManager.default.moveItem(at: originalDir, to: renamedDir)
+        await scanStable(source)
+
+        XCTAssertEqual(delivered, ["First call."])
+    }
+
     func testAppendDuringAcceptedDeliveryLeavesNewVersionPending() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }

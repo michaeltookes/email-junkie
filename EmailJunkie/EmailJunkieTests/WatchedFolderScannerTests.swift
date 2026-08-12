@@ -61,6 +61,26 @@ final class WatchedFolderScannerTests: XCTestCase {
         XCTAssertEqual(new.map(\.lastPathComponent), ["transcript.txt"])
     }
 
+    func testReconcileSeenVersionsPreservesRenamedDirectoryContents() throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let originalDir = dir.appendingPathComponent("Original", isDirectory: true)
+        let renamedDir = dir.appendingPathComponent("Renamed", isDirectory: true)
+        try FileManager.default.createDirectory(at: originalDir, withIntermediateDirectories: true)
+        let original = originalDir.appendingPathComponent("transcript.txt")
+        try "First call.".write(to: original, atomically: true, encoding: .utf8)
+        let seen = WatchedFolderScanner.seedSeenVersions(from: [original])
+
+        try FileManager.default.moveItem(at: originalDir, to: renamedDir)
+        let renamed = renamedDir.appendingPathComponent("transcript.txt")
+        let reconciled = WatchedFolderScanner.reconcileSeenVersions(seen, with: [renamed])
+        let new = WatchedFolderScanner.newTranscripts(in: [renamed], alreadySeen: reconciled)
+
+        XCTAssertTrue(new.isEmpty)
+        XCTAssertNotNil(reconciled[WatchedFolderScanner.seenKey(for: renamed)])
+        XCTAssertNil(reconciled[WatchedFolderScanner.seenKey(for: original)])
+    }
+
     func testSeenKeyStandardizesPath() {
         XCTAssertEqual(
             WatchedFolderScanner.seenKey(for: url("/calls/one.vtt")),

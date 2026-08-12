@@ -4,22 +4,37 @@ struct WatchedFolderFileSnapshot: Equatable {
     var fileSize: Int
     var modificationDate: Date?
     var creationDate: Date?
+    var fileIdentity: String?
 
     init?(url: URL) {
         guard let values = try? url.resourceValues(
-            forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey]
+            forKeys: [
+                .fileSizeKey,
+                .contentModificationDateKey,
+                .creationDateKey,
+                .fileResourceIdentifierKey
+            ]
         ), let fileSize = values.fileSize else {
             return nil
         }
         self.fileSize = fileSize
         modificationDate = values.contentModificationDate
         creationDate = values.creationDate
+        if let data = values.fileResourceIdentifier as? Data {
+            fileIdentity = data.base64EncodedString()
+        } else if let identifier = values.fileResourceIdentifier {
+            fileIdentity = String(describing: identifier)
+        } else {
+            fileIdentity = nil
+        }
     }
+
 }
 
 /// Pure bookkeeping for the watched-folder transcript source (item 51): decides
 /// which files in a folder are candidate transcripts not yet processed. The user's
-/// files are never moved or deleted — this only compares paths.
+/// files are never moved or deleted — this only compares path, version, and file
+/// identity metadata.
 ///
 /// Committing a file to the "seen" set is deliberately the caller's job, done only
 /// after the file is successfully ingested and accepted, so a file that appears
@@ -41,6 +56,31 @@ enum WatchedFolderScanner {
             guard TranscriptFormat.isSupportedFile(url) else { return false }
             let key = seenKey(for: url)
             return alreadySeen[key] != WatchedFolderFileSnapshot(url: url)
+        }
+    }
+
+    /// Drops seen entries for files that disappeared, but carries the delivered
+    /// version forward when the same file identity is found at a new path.
+    static func reconcileSeenVersions(
+        _ alreadySeen: [String: WatchedFolderFileSnapshot],
+        with urls: [URL]
+    ) -> [String: WatchedFolderFileSnapshot] {
+        let currentSnapshots = urls.compactMap { url -> (String, WatchedFolderFileSnapshot)? in
+            guard TranscriptFormat.isSupportedFile(url),
+                  let snapshot = WatchedFolderFileSnapshot(url: url) else { return nil }
+            return (seenKey(for: url), snapshot)
+        }
+        let seenByIdentity = alreadySeen.values.reduce(into: [String: WatchedFolderFileSnapshot]()) { result, snapshot in
+            guard let identity = snapshot.fileIdentity else { return }
+            result[identity] = snapshot
+        }
+        return currentSnapshots.reduce(into: [:]) { result, current in
+            if let existing = alreadySeen[current.0] {
+                result[current.0] = existing
+            } else if let identity = current.1.fileIdentity,
+                      let moved = seenByIdentity[identity] {
+                result[current.0] = moved
+            }
         }
     }
 

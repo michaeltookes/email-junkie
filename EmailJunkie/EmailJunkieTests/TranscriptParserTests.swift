@@ -171,6 +171,17 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertEqual(parsed.text, "2027\nShip by Friday.")
     }
 
+    func testWebVTTPreservesCaptionTextWithLiteralArrow() {
+        let raw = """
+        WEBVTT
+
+        00:00:00.000 --> 00:00:03.000
+        Alice --> Bob owns the handoff.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+        XCTAssertEqual(parsed.text, "Alice --> Bob owns the handoff.")
+    }
+
     // MARK: - SubRip
 
     func testSubRipStripsIndicesAndTimestampsPreservingLabels() {
@@ -224,5 +235,15 @@ final class TranscriptParserTests: XCTestCase {
         """
         let parsed = TranscriptParser.parse(raw, format: .subRip)
         XCTAssertEqual(parsed.text, "5000\nBudget approved.")
+    }
+
+    func testSubRipPreservesCaptionTextWithLiteralArrow() {
+        let raw = """
+        1
+        00:00:00,000 --> 00:00:03,000
+        Alice --> Bob owns the handoff.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .subRip)
+        XCTAssertEqual(parsed.text, "Alice --> Bob owns the handoff.")
     }
 }

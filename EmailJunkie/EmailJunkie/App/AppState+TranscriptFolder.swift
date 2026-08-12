@@ -100,6 +100,7 @@ extension AppState {
         }
         do {
             _ = try await createFollowUp(from: ingested)
+            transcriptFolderError = nil
             return true
         } catch {
             transcriptFolderError = Self.draftMessage(for: error)

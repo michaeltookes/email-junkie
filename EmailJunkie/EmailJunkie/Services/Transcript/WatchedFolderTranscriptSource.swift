@@ -98,8 +98,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         guard isRunning else { return }
         syncSubdirectoryWatches()
         let contents = currentContents()
-        let currentKeys = Set(contents.map(WatchedFolderScanner.seenKey(for:)))
-        seen = seen.filter { currentKeys.contains($0.key) }
+        seen = WatchedFolderScanner.reconcileSeenVersions(seen, with: contents)
         let candidates = WatchedFolderScanner.newTranscripts(in: contents, alreadySeen: seen)
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }

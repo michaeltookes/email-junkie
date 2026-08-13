@@ -175,7 +175,11 @@ final class GmailLiveSendTests: XCTestCase {
         marker: String
     ) async {
         do {
-            try await cleanUpTestMessages(provider: provider, credentials: credentials, marker: marker)
+            try await cleanUpTestMessagesAfterDeliveryWindow(
+                provider: provider,
+                credentials: credentials,
+                marker: marker
+            )
         } catch {
             XCTFail("Failed to clean up Gmail live test messages after test error: \(error.localizedDescription)")
         }
@@ -185,6 +189,30 @@ final class GmailLiveSendTests: XCTestCase {
     /// left clean, then asserts both folders no longer show the marker. (Trash
     /// keeps them recoverable, matching item 42's non-destructive delete.)
     private func cleanUpTestMessages(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String
+    ) async throws {
+        try await moveTestMessagesToTrash(provider: provider, credentials: credentials, marker: marker)
+        try await assertTestMessagesRemoved(provider: provider, credentials: credentials, marker: marker)
+    }
+
+    private func cleanUpTestMessagesAfterDeliveryWindow(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String
+    ) async throws {
+        for attempt in 0..<deliveryPollAttempts {
+            try await moveTestMessagesToTrash(provider: provider, credentials: credentials, marker: marker)
+            if attempt < deliveryPollAttempts - 1 {
+                try await Task.sleep(nanoseconds: deliveryPollInterval)
+            }
+        }
+
+        try await assertTestMessagesRemoved(provider: provider, credentials: credentials, marker: marker)
+    }
+
+    private func moveTestMessagesToTrash(
         provider: IMAPMailProvider,
         credentials: MailAccountCredentials,
         marker: String
@@ -202,7 +230,13 @@ final class GmailLiveSendTests: XCTestCase {
                 onProgress: nil
             )
         }
+    }
 
+    private func assertTestMessagesRemoved(
+        provider: IMAPMailProvider,
+        credentials: MailAccountCredentials,
+        marker: String
+    ) async throws {
         for mailbox in [Mailbox.inbox, Mailbox.sent] {
             let after = try await provider.searchMessages(
                 credentials,

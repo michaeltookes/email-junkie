@@ -68,6 +68,21 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertTrue(parsed.hasSpeakerLabels)
     }
 
+    func testWebVTTMultipleVoiceSpansBecomeSeparateSpeakerLines() {
+        let raw = """
+        WEBVTT
+
+        00:00:00.000 --> 00:00:04.000
+        <v Alice>I'll prepare the deck.</v> <v Bob>I'll send pricing.</v>
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+        XCTAssertEqual(
+            parsed.text,
+            "Alice: I'll prepare the deck.\nBob: I'll send pricing."
+        )
+        XCTAssertTrue(parsed.hasSpeakerLabels)
+    }
+
     func testWebVTTStripsHeaderNotesAndTimestampsWithoutLabels() {
         let raw = """
         WEBVTT

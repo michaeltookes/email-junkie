@@ -271,6 +271,30 @@ final class AppStateSendCountdownTests: XCTestCase {
         XCTAssertNil(appState.pendingDraftUncommittedEditRecipients[draft.identity])
     }
 
+    func testCountdownBlocksWhenRecipientEditClearsAuthoredRecipients() async {
+        let draft = authoredDraft(recipients: [MailAddress(email: "old@example.com")])
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(
+            provider: provider,
+            sendDelaySeconds: 2,
+            tickNanoseconds: 2_000_000,
+            seed: [draft]
+        )
+        var openedReview = false
+        appState.openReviewHandler = { openedReview = true }
+
+        await appState.approveDraft(draft)
+        appState.notePendingDraftRecipientEdit(draft, recipients: [])
+        await waitUntil { appState.pendingSendCountdowns.isEmpty }
+
+        XCTAssertEqual(provider.sendCallCount, 0)
+        XCTAssertEqual(appState.pendingDrafts.map(\.identity), [draft.identity])
+        XCTAssertEqual(appState.pendingDrafts.first?.authoredRecipients?.map(\.email), [])
+        XCTAssertFalse(appState.pendingDraftUncommittedEditIDs.contains(draft.identity))
+        XCTAssertTrue(openedReview)
+        XCTAssertNotNil(appState.approvalError)
+    }
+
     func testCountdownBlocksWhenRegisteredInlineEditCannotPersist() async {
         let draft = pendingDraft()
         let provider = FakeAppMailProvider(result: .success(()))

@@ -167,6 +167,11 @@ extension AppState {
             openReviewHandler?()
             return nil
         }
+        guard !current.isAuthored || current.hasAuthoredRecipients else {
+            approvalError = Self.draftMessage(for: DraftDispatchError.noRecipient)
+            openReviewHandler?()
+            return nil
+        }
         return current
     }
 

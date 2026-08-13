@@ -136,6 +136,16 @@ enum TranscriptParser {
     /// recognized caption tags. Literal angle-bracket text is preserved.
     private static func cleanedCueText(_ line: String, isWebVTT: Bool, sawVoiceTag: inout Bool) -> String {
         var text = line
+        if isWebVTT {
+            let voiceSpans = extractCompleteVoiceSpans(text)
+            if voiceSpans.count > 1 {
+                sawVoiceTag = true
+                return voiceSpans
+                    .map { "\($0.name): \($0.text)" }
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
         if isWebVTT, let voice = extractVoiceTag(text) {
             sawVoiceTag = true
             text = "\(voice.name): \(voice.remainder)"
@@ -199,6 +209,25 @@ enum TranscriptParser {
         }
     }
 
+    private static func extractCompleteVoiceSpans(_ text: String) -> [(name: String, text: String)] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<v(?:\.[^ >]+)*\s+([^>]*)>(.*?)</v>"#
+        ) else { return [] }
+        let fullRange = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: fullRange).compactMap { match in
+            guard match.numberOfRanges == 3,
+                  let nameRange = Range(match.range(at: 1), in: text),
+                  let cueTextRange = Range(match.range(at: 2), in: text) else {
+                return nil
+            }
+            let name = normalizedVoiceName(String(text[nameRange]))
+            let cueText = stripCaptionTags(String(text[cueTextRange]))
+                .trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !cueText.isEmpty else { return nil }
+            return (name: name, text: cueText)
+        }
+    }
+
     private static func extractVoiceTag(_ text: String) -> (name: String, remainder: String)? {
         guard let range = text.range(
             of: "<v(?:\\.[^ >]+)*\\s+([^>]*)>",
@@ -207,18 +236,22 @@ enum TranscriptParser {
         var inner = String(text[range])
         inner.removeFirst(2)   // drop "<v"
         inner.removeLast()     // drop ">"
-        inner = inner.trimmingCharacters(in: .whitespaces)
-        // `inner` is either "Name" or a ".class.tokens Name" styling group.
-        let name = inner.hasPrefix(".")
-            ? inner.split(separator: " ", maxSplits: 1).dropFirst().first.map(String.init)?
-                .trimmingCharacters(in: .whitespaces) ?? inner
-            : inner
+        let name = normalizedVoiceName(inner)
         var remainder = text
         remainder.replaceSubrange(range, with: "")
         remainder = remainder
             .replacingOccurrences(of: "</v>", with: "")
             .trimmingCharacters(in: .whitespaces)
         return (name, remainder)
+    }
+
+    private static func normalizedVoiceName(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        // `trimmed` is either "Name" or a ".class.tokens Name" styling group.
+        return trimmed.hasPrefix(".")
+            ? trimmed.split(separator: " ", maxSplits: 1).dropFirst().first.map(String.init)?
+                .trimmingCharacters(in: .whitespaces) ?? trimmed
+            : trimmed
     }
 
     /// Whether any line looks like `Speaker Name: said something` — the label

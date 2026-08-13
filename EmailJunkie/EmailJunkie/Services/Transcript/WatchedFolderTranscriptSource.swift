@@ -23,6 +23,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     let kind: TranscriptSourceKind = .watchedFolder
     var onTranscript: ((IngestedTranscript) async -> Bool)?
     var onTranscriptDelivery: ((IngestedTranscript) async -> WatchedTranscriptDeliveryResult)?
+    var onTranscriptValidatedDelivery: WatchedTranscriptValidatedDelivery?
 
     /// Reports a watch-start or watch-loss failure so the owner can surface it.
     var onError: ((WatchedFolderError) -> Void)?
@@ -234,13 +235,6 @@ extension WatchedFolderTranscriptSource {
         try await TranscriptIngest.fromFileDetached(url, origin: .watchedFolder)
     }
 
-    private func transcriptDeliveryResult(for ingested: IngestedTranscript) async -> WatchedTranscriptDeliveryResult {
-        if let onTranscriptDelivery {
-            return await onTranscriptDelivery(ingested)
-        }
-        return await onTranscript?(ingested) == true ? .accepted : .deferred
-    }
-
     private func processCandidate(_ url: URL) async {
         let key = WatchedFolderScanner.seenKey(for: url)
         guard !processing.contains(key) else { return }
@@ -271,11 +265,23 @@ extension WatchedFolderTranscriptSource {
             scheduleFileStabilityRetry()
             return
         }
+        let shouldCommitDelivery = { [weak self] in
+            self?.isCurrentDeliverySnapshot(url, snapshot: deliveredSnapshot) == true
+        }
         processing.insert(key)
-        let result = await transcriptDeliveryResult(for: ingested)
+        let result = await transcriptDeliveryResult(for: ingested, shouldCommit: shouldCommitDelivery)
         processing.remove(key)
         guard isRunning else { return }
+        guard shouldCommitDelivery() else {
+            pendingFileStability.removeValue(forKey: key)
+            scheduleFileStabilityRetry()
+            return
+        }
         handleDeliveryResult(result, forKey: key, snapshot: deliveredSnapshot)
+    }
+
+    private func isCurrentDeliverySnapshot(_ url: URL, snapshot: WatchedFolderFileSnapshot) -> Bool {
+        isRunning && WatchedFolderFileSnapshot(url: url) == snapshot
     }
 
     private func currentContents() async -> WatchedFolderDiscoveryResult {

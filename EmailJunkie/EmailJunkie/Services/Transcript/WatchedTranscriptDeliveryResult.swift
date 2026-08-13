@@ -11,6 +11,12 @@ enum WatchedTranscriptDeliveryResult: Equatable {
     case deferred
 }
 
+typealias WatchedTranscriptShouldCommit = () -> Bool
+typealias WatchedTranscriptValidatedDelivery = (
+    IngestedTranscript,
+    @escaping WatchedTranscriptShouldCommit
+) async -> WatchedTranscriptDeliveryResult
+
 struct WatchedFolderRejectedDeliveryState: Equatable {
     var snapshot: WatchedFolderFileSnapshot
     var attempts: Int

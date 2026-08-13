@@ -211,6 +211,32 @@ final class AppStateWatchedTranscriptRetryTests: XCTestCase {
         XCTAssertNil(appState.transcriptWatchedFolderSeenSnapshots)
     }
 
+    func testWatchedTranscriptCommitValidationPreventsPendingDraft() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llm-stale-transcript-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let persistence = AppStateMemoryPersistence(settings: watchedFolderSettings(dir: dir))
+        let appState = makeAppState(
+            persistence: persistence,
+            secrets: connectedSecrets(),
+            llm: WatchedTranscriptRetryLLMProvider(completions: [
+                .success(LLMResponse(text: "Follow up."))
+            ])
+        )
+        let ingested = try TranscriptIngest.fromPaste("Marcus: recap.")
+
+        let result = await appState.handleWatchedTranscriptDelivery(
+            ingested,
+            shouldCommit: { false }
+        )
+
+        XCTAssertEqual(result, .retry)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+    }
+
     private func watchedFolderSettings(dir: URL) -> Settings {
         Settings(
             schemaVersion: Settings.currentSchemaVersion,

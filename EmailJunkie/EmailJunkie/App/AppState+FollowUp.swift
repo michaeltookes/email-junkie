@@ -1,6 +1,10 @@
 import EmailJunkieMail
 import Foundation
 
+enum FollowUpCommitError: Error {
+    case sourceChanged
+}
+
 /// Post-call follow-up actions on `AppState` (item 51): ingest a transcript,
 /// draft a follow-up in the user's voice, and route it through the existing
 /// approval → send/save pipeline as an *authored* draft (no source message).
@@ -20,7 +24,8 @@ extension AppState {
     func createFollowUp(
         from ingested: IngestedTranscript,
         recipients: [MailAddress] = [],
-        subject: String? = nil
+        subject: String? = nil,
+        shouldCommit: (() -> Bool)? = nil
     ) async throws -> Draft {
         guard let llmConfiguration = currentDraftLLMConfiguration else {
             throw DraftError.llmUnavailable
@@ -36,6 +41,9 @@ extension AppState {
         guard mailCredentials == credentials,
               currentDraftLLMConfiguration == llmConfiguration else {
             throw DraftDispatchError.accountChanged
+        }
+        if let shouldCommit, !shouldCommit() {
+            throw FollowUpCommitError.sourceChanged
         }
         let draft = makeAuthoredDraft(
             body: body,

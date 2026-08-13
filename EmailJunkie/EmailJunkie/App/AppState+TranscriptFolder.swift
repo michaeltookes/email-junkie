@@ -47,8 +47,11 @@ extension AppState {
             guard let self, let source, self.transcriptFolderSource === source else { return false }
             return self.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
         }
-        source.onTranscriptDelivery = { [weak self] ingested in
-            await self?.handleWatchedTranscriptDelivery(ingested) ?? .deferred
+        source.onTranscriptValidatedDelivery = { [weak self] ingested, shouldCommit in
+            await self?.handleWatchedTranscriptDelivery(
+                ingested,
+                shouldCommit: shouldCommit
+            ) ?? .deferred
         }
         source.onError = { [weak self] error in
             self?.transcriptFolderError = Self.watchedFolderMessage(for: error)
@@ -125,7 +128,8 @@ extension AppState {
     }
 
     func handleWatchedTranscriptDelivery(
-        _ ingested: IngestedTranscript
+        _ ingested: IngestedTranscript,
+        shouldCommit: (() -> Bool)? = nil
     ) async -> WatchedTranscriptDeliveryResult {
         guard canCreateFollowUp else {
             transcriptFolderError =
@@ -133,9 +137,11 @@ extension AppState {
             return .deferred
         }
         do {
-            _ = try await createFollowUp(from: ingested)
+            _ = try await createFollowUp(from: ingested, shouldCommit: shouldCommit)
             transcriptFolderError = nil
             return .accepted
+        } catch FollowUpCommitError.sourceChanged {
+            return .retry
         } catch {
             transcriptFolderError = Self.draftMessage(for: error)
             transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")

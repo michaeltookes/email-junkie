@@ -6,6 +6,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 - **Flagship workflow:** transcript in → next-steps follow-up email out, in the user's voice (items 51–55). The existing drafting → approval → send plumbing is reused; transcript acquisition is the new subsystem, phased: file/paste ingestion first (51), calendar awareness (52), platform APIs (53), native no-bot capture last (54).
 - **Primary commercial ICP:** Account Executives / salespeople in high-velocity roles (see **Marcus** persona). Priya remains the persona for the inbox-reply workflow.
 - **No bot, no storage, no training:** calls are never joined by a bot; audio and (future) capture/transcription stay on-device; call content is never stored on our servers or used as training data. Drafting inference runs through a **stateless zero-retention proxy** by default (see Monetization), or entirely under the user's control via the BYO-key / local-model escape hatch. **Competitive note (2026-08-12):** Fathom ships bot-free desktop capture and Granola always has — and cloud notetakers store calls indefinitely and train on (de-identified) customer data per their own policies. The durable differentiators are (a) privacy that's minimized *and* guaranteed — nothing stored, nothing trained on, plus a BYO/local tier where we're not in the loop at all — and (b) the workflow's back half: a **send-ready email in the user's learned voice, sent from their own mailbox**, not a summary stranded in a notetaker app.
+- **Non-goals (2026-08-13, from the momentum.io teardown):** manager/exec-facing surfaces — coaching scorecards, team dashboards, CRO briefings, churn signals, call-clip libraries. Momentum.io (now Salesforce) owns that org-facing lane; our value flows to the **individual rep**, and the org benefits only indirectly via CRM logging (item 55). Agents should not drift features toward the manager persona.
 - **Monetization (updated 2026-08-12, second revision — supersedes both "no subscription" and BYO-key-as-default):** subscription with **managed inference bundled** — the user never touches an API key or provider billing. Unit economics support it: a follow-up costs single-digit cents, so ~175 follow-ups/month ≈ $2–8 against a ~$15–20/mo subscription. Open core / paid binary — source stays public, signed auto-updating binaries are licensed; the license is an **account/sign-in** (needed for inference metering anyway). Trial → Individual → Team with CRM logging (items 55–56); Enterprise explicitly parked. **BYO-key / local-model remains as the power/privacy option** (items 58–59) — the plumbing exists, it serves Sam and heavy users, and it's the tier where call content never touches any server.
 
 **v1 design decisions:**
@@ -173,6 +174,22 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Individual** tier ~$15–20/mo or annual equivalent, **inference included** (unit cost is single-digit cents per follow-up); **Team** tier (3+ seats, adds CRM logging — item 55 — and centralized billing) as a follow-on; Enterprise explicitly parked.
     - Checkout via a **merchant-of-record** (Paddle / Lemon Squeezy class) so a solo maintainer isn't handling global sales tax; in-app license validation with an offline grace period (drafting may need the network; the app must not brick offline).
     - Final pricing, trial mechanics, and provider choices to be settled in the item 57 pre-build discussion.
+
+62. **Cross-call deal memory (local) — continuity across follow-ups**
+    Inspired by the momentum.io teardown (their "Deep Research" analyzes deal data across conversations — cloud-side, org-facing); ours is the local-first, rep-facing translation. Past transcripts and sent follow-ups already live on the user's machine — use them, so the third call with a prospect drafts like a third call, not a first.
+    *As Marcus, I want the follow-up to a repeat call to reference what we agreed last time and carry forward unfinished action items, so that my emails read like a relationship, not a transaction.*
+    - Ingested transcripts and their sent follow-ups are retained locally (bounded, user-clearable) and matched to a contact/deal by recipient email.
+    - When a new transcript matches a prior contact, the drafting prompt receives a compact brief of the last call's agreed next steps and the sent follow-up.
+    - Open action items from prior follow-ups that the new transcript doesn't resolve are surfaced ("still open from last time") for the user to keep or drop in review.
+    - Everything stays on-device; the brief goes to the LLM only as part of the normal drafting call. No new server anything.
+    - Foundation for a future pre-call brief (item 63).
+
+63. **Pre-call brief (local)**
+    The other half of item 62's memory: before a calendar-matched call (item 52), surface a one-glance brief — who, last call's outcomes, open action items, the last follow-up sent. Granola and momentum.io both validate the feature; ours is assembled entirely on-device.
+    *As Marcus, I want a 30-second refresher before the call starts, so that I walk in remembering what we promised.*
+    - A notification or menu-bar surface shortly before a calendar event whose attendees match a known contact (items 52 + 62).
+    - Brief contains prior-call summary, open action items, and the last sent follow-up; nothing is fetched from any cloud.
+    - Silent for first-time meetings or when no local history matches.
 
 60. **Security-scoped bookmark for the watched transcript folder (if sandboxing lands)**
     The app is currently not sandboxed, so the item 51 watched folder works from a plain stored path. If the App Sandbox is enabled at distribution time (an item 11 decision), a stored path is no longer enough — the user's folder choice must persist as a security-scoped bookmark or watching silently breaks on relaunch. Flagged during the item 51 build (see `docs/post-call-followups.md`).

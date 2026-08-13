@@ -41,16 +41,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
    - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
-9. **Send / save-as-draft (user-configurable)** — *in progress (send + save-as-draft + toggle done; live-verify remaining)*
-   On approval, either send immediately or create a Gmail draft, per a setting.
-   *As Priya, I want to choose whether approval sends immediately or just saves a Gmail draft, so that I can match my own comfort/trust level.*
-   - ✅ **Draft-only:** a native Gmail draft is created via IMAP `APPEND` to `[Gmail]/Drafts` (`\Draft` flag), addressed to `Reply-To` when present, and threaded via `In-Reply-To`/`References` from the captured source Message-ID. RFC 822 builder (base64 body, RFC 2047 subject) + APPEND state machine covered by unit + EmbeddedChannel tests.
-   - ✅ **Auto-send:** reply submitted over a hand-rolled **SMTP** client on NIO (implicit TLS on 465, `AUTH LOGIN`, `MAIL FROM`/`RCPT TO`/`DATA` with dot-stuffing). Reuses the same RFC 822 builder for correct subject/threading; SMTP host derived from the IMAP host (`imap.` → `smtp.`). Response decoder + send state machine covered by EmbeddedChannel tests.
-   - ✅ **Toggle:** `SendBehavior` setting (save-as-draft vs auto-send, schema v5) with a "On approve" picker in Settings; `approveGeneratedDraft()` dispatches to send or save. The draft preview's action reflects the choice ("Send now" vs "Save to Drafts").
-   - ✅ The approval UI indicates what "Approve" will do — the Review Drafts window (item 8) shows "Approve will send/save" and labels the button accordingly; the Settings preview also reflects it.
-   - ✅ **Save-as-draft live-verified end-to-end against real Gmail (2026-07-19):** an approved reply appeared in Gmail → Drafts, correctly addressed and threaded under the original message.
-   - ⬜ **Remaining (deferred by user for a later, self-addressed test):** live-verify the **auto-send (SMTP)** path against real Gmail, and exercise the watcher → notification → approve path with a real watcher-produced draft (item 8) once a fresh message arrives.
-
 11. **Distribution: signed DMG + Sparkle + Homebrew cask** — *scaffolding built (branch `distribution-pipeline`); live signed release remaining*
     Reuse the Prompter shipping pipeline.
     > **Scaffolding landed 2026-08-03 (branch `distribution-pipeline`):** the code/asset half is in the repo — branded app icon, DMG assets, a credential-parameterized release pipeline with a proven unsigned dry-run, Sparkle wiring (placeholder key), the cask template, and the release runbook. The ⬜ items below can only be met by an actual signed release using the user's Developer ID cert, notarytool profile, and a real EdDSA keypair — done later via the release-prep skill (see [`releasing.md`](./releasing.md)). CI automation of this pipeline is item 29.
@@ -62,15 +52,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ⬜ Signed, notarized DMG installs without Gatekeeper "unidentified developer" warnings — needs the Developer ID cert + notarytool profile at release time.
     - ⬜ Homebrew cask published live in the tap with the real DMG `sha256`.
     - ⬜ Sparkle auto-update verified against a published appcast — needs the real EdDSA keypair (replace the placeholder `SUPublicEDKey`).
-
-44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
-    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
-    *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*
-    - ✅ **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` passes "Test Connection". *(Verified live, branch `attnet-verify`.)*
-    - ✅ **Inbox browsing:** the mailbox browser loads and pages a genuinely huge, unread-heavy Inbox without loading it whole — the crash that motivated items 45/49. *(Verified live.)*
-    - ✅ **Folder resolution:** Sent/Drafts load; "All Mail" correctly hidden; live **Trash** and **Archive** folder names confirmed by successful moves during the item-49 sweep verification. *(Verified live.)*
-    - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
-    - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
 
 29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
     Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything.
@@ -222,7 +203,8 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ✅ Recent-message fetch (LOGIN → SELECT → FETCH UID+ENVELOPE → LOGOUT), newest first; sender/subject/date parsed; "Preview inbox" action in Settings. State machine + envelope parsing covered by EmbeddedChannel tests.
     - ✅ Body-text fetch (`UID FETCH BODY.PEEK[TEXT]`, streaming assembly over NIO, no `\Seen` flag set) + `MailBodyText` readable-text reduction (multipart, quoted-printable/base64, HTML-strip fallback). "View body" preview sheet in Settings. Covered by EmbeddedChannel + pure unit tests.
     - ✅ **Fetch + body live-verified** against real Gmail incl. `[Gmail]/Sent Mail` (2026-07-19).
-   - ⬜ **Remaining:** live-verify **SMTP send** against real Gmail (built; deferred with item 9's auto-send test); efficient `BODYSTRUCTURE`-guided fetch of just the `text/plain` part (avoids downloading attachments; also fixes single-part transfer-encoding decoding); handle missing provider-native features (push, labels) gracefully.
+   - ✅ **SMTP send live-verified against real Gmail (2026-08-13, branch `send-path-verify`):** the credential-gated `GmailLiveSendTests` dispatched a self-addressed reply through the production auto-send path and asserted delivery, addressing, threading, and the Sent Mail copy (see item 9 in `resolved.md`).
+   - ⬜ **Remaining:** efficient `BODYSTRUCTURE`-guided fetch of just the `text/plain` part (avoids downloading attachments; also fixes single-part transfer-encoding decoding); handle missing provider-native features (push, labels) gracefully.
 
 33. **Multiple-account support**
     Watch more than one mailbox.
@@ -287,3 +269,10 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Uses the user's own CRM credentials; calls go directly Mac → CRM, keeping the local-first promise.
     - Off by default, per-call opt-out; failures never block the email send itself.
     - Positioned as the **Team-tier** feature in the item 56 pricing model — the follow-up email sells to the rep, CRM hygiene sells to the manager who holds budget.
+
+61. **Live exercise of the watcher → notification → approve loop**
+    The one check split out of item 9 when it closed (2026-08-13): the full autonomous loop — a real fresh inbound message triggers watch → draft → native notification → approve → dispatch — has never been observed end-to-end on a live account with a watcher-produced draft. Both dispatch paths are now individually live-verified (items 9/44); this is about the loop as a whole, and daily dogfooding of the app will likely cover it naturally.
+    *As the maintainer, I want the autonomous loop observed working end-to-end at least once on a live account, so that the core product promise is verified as a system, not just as parts.*
+    - A fresh inbound message on a connected account produces a draft and a native notification without any manual triggering.
+    - Approving from the notification dispatches per the configured send behavior (both settings observed, or the second covered by the item 9/44 live tests).
+    - The observation is recorded (activity-history entries or a note here), then this item closes.

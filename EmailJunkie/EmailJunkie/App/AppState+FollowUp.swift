@@ -53,6 +53,10 @@ extension AppState {
             credentials: credentials
         )
         try enqueuePendingDraft(draft)
+        if let shouldCommit, !shouldCommit() {
+            try rollbackPendingFollowUp(draft)
+            throw FollowUpCommitError.sourceChanged
+        }
         return draft
     }
 
@@ -146,6 +150,22 @@ extension AppState {
             generatedAt: Date(),
             authoredRecipients: recipients
         )
+    }
+
+    private func rollbackPendingFollowUp(_ draft: Draft) throws {
+        let previousDrafts = pendingDrafts
+        guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
+        pendingDrafts.removeAll { $0.identity == draft.identity }
+        pendingDraftCount = pendingDrafts.count
+        do {
+            try persistence.savePendingDraftsSync(pendingDrafts)
+        } catch {
+            pendingDrafts = previousDrafts
+            pendingDraftCount = previousDrafts.count
+            throw error
+        }
+        notifier.removeNotification(identity: draft.identity)
+        clearPendingDraftEdits(identity: draft.identity)
     }
 
     /// A synthetic id that doesn't collide with any queued draft. Authored drafts

@@ -226,13 +226,18 @@ final class AppStateWatchedTranscriptRetryTests: XCTestCase {
             ])
         )
         let ingested = try TranscriptIngest.fromPaste("Marcus: recap.")
+        var validationCount = 0
 
         let result = await appState.handleWatchedTranscriptDelivery(
             ingested,
-            shouldCommit: { false }
+            shouldCommit: {
+                validationCount += 1
+                return validationCount == 1
+            }
         )
 
         XCTAssertEqual(result, .retry)
+        XCTAssertEqual(validationCount, 2)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
     }

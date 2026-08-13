@@ -116,7 +116,12 @@ extension AppState {
              DraftDispatchError.accountChanged:
             return true
         default:
-            return ResilienceClassifier.classify(error) == .transient
+            switch ResilienceClassifier.classify(error) {
+            case .transient, .authentication:
+                return true
+            case .ambiguousSend, .permanent:
+                return false
+            }
         }
     }
 }

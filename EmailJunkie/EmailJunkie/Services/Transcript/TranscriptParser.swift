@@ -136,15 +136,11 @@ enum TranscriptParser {
     /// recognized caption tags. Literal angle-bracket text is preserved.
     private static func cleanedCueText(_ line: String, isWebVTT: Bool, sawVoiceTag: inout Bool) -> String {
         var text = line
-        if isWebVTT {
-            let voiceSpans = extractCompleteVoiceSpans(text)
-            if voiceSpans.count > 1 {
-                sawVoiceTag = true
-                return voiceSpans
-                    .map { "\($0.name): \($0.text)" }
-                    .joined(separator: "\n")
-                    .trimmingCharacters(in: .whitespaces)
-            }
+        if isWebVTT, let voiceSpanLines = completeVoiceSpanLines(text) {
+            sawVoiceTag = true
+            return voiceSpanLines
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if isWebVTT, let voice = extractVoiceTag(text) {
             sawVoiceTag = true
@@ -209,22 +205,41 @@ enum TranscriptParser {
         }
     }
 
-    private static func extractCompleteVoiceSpans(_ text: String) -> [(name: String, text: String)] {
+    private static func completeVoiceSpanLines(_ text: String) -> [String]? {
         guard let regex = try? NSRegularExpression(
             pattern: #"<v(?:\.[^ >]+)*\s+([^>]*)>(.*?)</v>"#
-        ) else { return [] }
+        ) else { return nil }
         let fullRange = NSRange(text.startIndex..., in: text)
-        return regex.matches(in: text, range: fullRange).compactMap { match in
+        let matches = regex.matches(in: text, range: fullRange)
+        guard matches.count > 1 else { return nil }
+
+        var lines: [String] = []
+        var cursor = text.startIndex
+        for match in matches {
             guard match.numberOfRanges == 3,
+                  let fullMatchRange = Range(match.range, in: text),
                   let nameRange = Range(match.range(at: 1), in: text),
                   let cueTextRange = Range(match.range(at: 2), in: text) else {
-                return nil
+                continue
             }
+            appendUntaggedCueFragment(String(text[cursor..<fullMatchRange.lowerBound]), to: &lines)
             let name = normalizedVoiceName(String(text[nameRange]))
             let cueText = stripCaptionTags(String(text[cueTextRange]))
                 .trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, !cueText.isEmpty else { return nil }
-            return (name: name, text: cueText)
+            if !name.isEmpty && !cueText.isEmpty {
+                lines.append("\(name): \(cueText)")
+            }
+            cursor = fullMatchRange.upperBound
+        }
+        appendUntaggedCueFragment(String(text[cursor...]), to: &lines)
+        return lines.isEmpty ? nil : lines
+    }
+
+    private static func appendUntaggedCueFragment(_ fragment: String, to lines: inout [String]) {
+        let cleaned = stripCaptionTags(fragment)
+            .trimmingCharacters(in: .whitespaces)
+        if !cleaned.isEmpty {
+            lines.append(cleaned)
         }
     }
 

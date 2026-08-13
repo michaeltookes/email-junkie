@@ -72,6 +72,14 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
     - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
 
+29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
+    Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything.
+    *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*
+    - On a version tag, a workflow builds, signs, and notarizes the app and produces the DMG.
+    - It publishes a GitHub release, updates the Sparkle appcast, and bumps the Homebrew cask.
+    - Signing secrets are handled securely via encrypted CI secrets.
+    - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
+
 57. **Landing page / marketing site** — *⚠️ discussion required before building; lives in its own repo*
     The public site where people find the product, understand it in 30 seconds, and pay: positioning, pricing/checkout, download, and the Windows-demand waitlist.
     > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not email-junkie. This item exists so the work isn't forgotten and its requirements are captured.
@@ -126,14 +134,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Popover and approval UI are fully VoiceOver-labeled and keyboard-navigable.
     - Approve/deny/edit actions have keyboard shortcuts.
     - Respects system Dynamic Type, contrast, and reduce-motion settings.
-
-29. **CD release automation**
-    Automate the item 11 release pipeline via GitHub Actions on tagged releases.
-    *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*
-    - On a version tag, a workflow builds, signs, and notarizes the app and produces the DMG.
-    - It publishes a GitHub release, updates the Sparkle appcast, and bumps the Homebrew cask.
-    - Signing secrets are handled securely via encrypted CI secrets.
-    - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
 
 46. **Mailbox monitoring view (clutter breakdown by sender and age)**
     A summary of what is actually piling up in a mailbox, so the biggest sources of clutter are obvious before cleaning. Split out of item 42, which delivered the bulk-cleanup engine but deliberately deferred this reporting view.
@@ -192,6 +192,13 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - **Individual** tier ~$15–20/mo or annual equivalent, **inference included** (unit cost is single-digit cents per follow-up); **Team** tier (3+ seats, adds CRM logging — item 55 — and centralized billing) as a follow-on; Enterprise explicitly parked.
     - Checkout via a **merchant-of-record** (Paddle / Lemon Squeezy class) so a solo maintainer isn't handling global sales tax; in-app license validation with an offline grace period (drafting may need the network; the app must not brick offline).
     - Final pricing, trial mechanics, and provider choices to be settled in the item 57 pre-build discussion.
+
+60. **Security-scoped bookmark for the watched transcript folder (if sandboxing lands)**
+    The app is currently not sandboxed, so the item 51 watched folder works from a plain stored path. If the App Sandbox is enabled at distribution time (an item 11 decision), a stored path is no longer enough — the user's folder choice must persist as a security-scoped bookmark or watching silently breaks on relaunch. Flagged during the item 51 build (see `docs/post-call-followups.md`).
+    *As Marcus, I want the watched folder to keep working across app updates and relaunches, so that auto-drafting doesn't silently die if the app hardens its sandbox.*
+    - Decide at item 11 release time whether the distributed app enables the App Sandbox; record the decision here.
+    - If sandboxed: the folder picker persists a security-scoped bookmark; launch resolves it and calls `startAccessingSecurityScopedResource`; a stale bookmark is detected and surfaced through the existing `transcriptFolderError` state ("choose the folder again in Settings").
+    - If not sandboxed: close this item by documenting that decision.
 
 ## Low Priority
 

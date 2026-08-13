@@ -23,6 +23,9 @@ struct FollowUpRecipientsField: View {
             || appState.isWaitingForNetwork(draft.identity)
     }
     private var isLocked: Bool { isBusy || isQueuedForNetwork }
+    private var recipientEdit: AppState.RecipientParseResult {
+        AppState.parseRecipientEdit(text)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -35,7 +38,11 @@ struct FollowUpRecipientsField: View {
                 .onChange(of: text) { _, _ in queuePersist() }
                 .onChange(of: isFocused) { _, focused in if !focused { persistNow() } }
                 .accessibilityLabel("Follow-up recipients")
-            if AppState.parseRecipients(text).isEmpty {
+            if recipientEdit.hasInvalidEntries {
+                Text("Fix invalid recipient addresses before approving this follow-up.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else if recipientEdit.recipients.isEmpty {
                 Text("Add at least one recipient to send this follow-up.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
@@ -46,7 +53,7 @@ struct FollowUpRecipientsField: View {
 
     private func queuePersist() {
         guard !isLocked else { return }
-        appState.notePendingDraftRecipientEdit(draft, recipients: AppState.parseRecipients(text))
+        appState.notePendingDraftRecipientEdit(draft, recipientEdit: recipientEdit)
         persistTask?.cancel()
         persistTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -59,6 +66,11 @@ struct FollowUpRecipientsField: View {
         persistTask?.cancel()
         persistTask = nil
         guard !isLocked else { return }
-        _ = appState.updatePendingDraftRecipients(draft, to: AppState.parseRecipients(text))
+        let parsed = recipientEdit
+        guard !parsed.hasInvalidEntries else {
+            appState.notePendingDraftRecipientEdit(draft, recipientEdit: parsed)
+            return
+        }
+        _ = appState.updatePendingDraftRecipients(draft, to: parsed.recipients)
     }
 }

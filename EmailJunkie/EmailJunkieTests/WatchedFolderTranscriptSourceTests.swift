@@ -352,6 +352,29 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(deliveryCount, 1, "Accepted files are marked seen only after the async callback completes")
     }
 
+    func testStopDuringDeliveryPreventsFurtherCandidateProcessing() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.onTranscript = { ingested in
+            delivered.append(ingested.rawText)
+            if delivered.count == 1 {
+                source.stop()
+            }
+            return true
+        }
+        source.start()
+        defer { source.stop() }
+        try write("Marcus: first.", to: dir.appendingPathComponent("a.txt"))
+        try write("Dana: second.", to: dir.appendingPathComponent("b.txt"))
+        await source.scanForNewTranscripts()
+        await source.scanForNewTranscripts()
+
+        XCTAssertEqual(delivered, ["Marcus: first."])
+    }
+
     // Finding 2: a folder that can't be opened must surface an error and leave the
     // source inactive rather than silently claiming to watch.
     func testStartOnMissingFolderSurfacesErrorAndStaysInactive() {

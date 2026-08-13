@@ -100,6 +100,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
         for url in candidates {
+            guard isRunning else { return }
             let key = WatchedFolderScanner.seenKey(for: url)
             guard !processing.contains(key) else { continue }
             guard isStableForDelivery(url, key: key) else { continue }
@@ -116,6 +117,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             processing.insert(key)
             let accepted = await onTranscript?(ingested) == true
             processing.remove(key)
+            guard isRunning else { return }
             if accepted {
                 seen[key] = deliveredSnapshot
                 pendingFileStability.removeValue(forKey: key)

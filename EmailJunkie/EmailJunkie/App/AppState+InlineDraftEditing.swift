@@ -57,6 +57,13 @@ extension AppState {
     }
 
     func notePendingDraftRecipientEdit(_ draft: Draft, recipients: [MailAddress]) {
+        notePendingDraftRecipientEdit(
+            draft,
+            recipientEdit: RecipientParseResult(recipients: recipients, hasInvalidEntries: false)
+        )
+    }
+
+    func notePendingDraftRecipientEdit(_ draft: Draft, recipientEdit: RecipientParseResult) {
         guard let queued = pendingDrafts.first(where: { $0.identity == draft.identity }) else {
             clearPendingDraftEdits(identity: draft.identity)
             return
@@ -65,7 +72,14 @@ extension AppState {
             clearPendingDraftRecipientEdit(identity: draft.identity)
             return
         }
-        let deduped = Self.dedupedRecipients(recipients)
+        let deduped = Self.dedupedRecipients(recipientEdit.recipients)
+        if recipientEdit.hasInvalidEntries {
+            pendingDraftInvalidRecipientEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditIDs.insert(draft.identity)
+            pendingDraftUncommittedEditRecipients.removeValue(forKey: draft.identity)
+            return
+        }
+        pendingDraftInvalidRecipientEditIDs.remove(draft.identity)
         if queued.authoredRecipients == deduped {
             clearPendingDraftRecipientEdit(identity: draft.identity)
         } else {
@@ -97,6 +111,10 @@ extension AppState {
             }
             updatePendingDraftRecipients(draft, to: recipients)
         }
+        for identity in Array(pendingDraftInvalidRecipientEditIDs)
+            where !pendingDrafts.contains(where: { $0.identity == identity }) {
+            clearPendingDraftEdits(identity: identity)
+        }
     }
 
     func flushPendingDraftEdits() {
@@ -111,18 +129,21 @@ extension AppState {
 
     func clearPendingDraftRecipientEdit(identity: String) {
         pendingDraftUncommittedEditRecipients.removeValue(forKey: identity)
+        pendingDraftInvalidRecipientEditIDs.remove(identity)
         refreshPendingDraftUncommittedEditID(identity)
     }
 
     func clearPendingDraftEdits(identity: String) {
         pendingDraftUncommittedEditBodies.removeValue(forKey: identity)
         pendingDraftUncommittedEditRecipients.removeValue(forKey: identity)
+        pendingDraftInvalidRecipientEditIDs.remove(identity)
         pendingDraftUncommittedEditIDs.remove(identity)
     }
 
     private func refreshPendingDraftUncommittedEditID(_ identity: String) {
         if pendingDraftUncommittedEditBodies[identity] != nil
-            || pendingDraftUncommittedEditRecipients[identity] != nil {
+            || pendingDraftUncommittedEditRecipients[identity] != nil
+            || pendingDraftInvalidRecipientEditIDs.contains(identity) {
             pendingDraftUncommittedEditIDs.insert(identity)
         } else {
             pendingDraftUncommittedEditIDs.remove(identity)
@@ -130,6 +151,10 @@ extension AppState {
     }
 
     func flushPendingDraftRecipientEdit(for draft: Draft) -> Draft? {
+        guard !pendingDraftInvalidRecipientEditIDs.contains(draft.identity) else {
+            approvalError = "Fix invalid recipient addresses before approving this follow-up."
+            return nil
+        }
         guard let recipients = pendingDraftUncommittedEditRecipients[draft.identity] else {
             return pendingDrafts.first { $0.identity == draft.identity } ?? draft
         }

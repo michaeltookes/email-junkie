@@ -149,7 +149,12 @@ struct FollowUpComposerView: View {
         defer { isBusy = false }
         do {
             let ingested = try makeIngested()
-            let recipientList = AppState.parseRecipients(recipients)
+            let recipientEdit = AppState.parseRecipientEdit(recipients)
+            guard !recipientEdit.hasInvalidEntries else {
+                errorMessage = "Fix invalid recipient addresses before drafting this follow-up."
+                return
+            }
+            let recipientList = recipientEdit.recipients
             let trimmedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
             _ = try await appState.createFollowUp(
                 from: ingested,

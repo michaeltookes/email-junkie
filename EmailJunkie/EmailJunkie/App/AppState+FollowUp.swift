@@ -79,6 +79,7 @@ extension AppState {
             pendingDrafts[index] = previous
             pendingDraftUncommittedEditIDs.insert(draft.identity)
             pendingDraftUncommittedEditRecipients[draft.identity] = deduped
+            pendingDraftInvalidRecipientEditIDs.remove(draft.identity)
             approvalError = Self.draftMessage(for: error)
             return nil
         }
@@ -180,11 +181,26 @@ extension AppState {
     /// tolerating `Name <email>` and space-separated addresses) into unique,
     /// syntactically plausible addresses.
     static func parseRecipients(_ text: String) -> [MailAddress] {
+        parseRecipientEdit(text).recipients
+    }
+
+    struct RecipientParseResult: Equatable {
+        var recipients: [MailAddress]
+        var hasInvalidEntries: Bool
+    }
+
+    static func parseRecipientEdit(_ text: String) -> RecipientParseResult {
         var addresses: [MailAddress] = []
+        var hasInvalidEntries = false
         for entry in text.components(separatedBy: CharacterSet(charactersIn: ",;\r\n")) {
-            addresses.append(contentsOf: emailsInEntry(entry).map { MailAddress(email: $0) })
+            let parsed = parseRecipientEntry(entry)
+            addresses.append(contentsOf: parsed.emails.map { MailAddress(email: $0) })
+            hasInvalidEntries = hasInvalidEntries || parsed.isInvalid
         }
-        return dedupedRecipients(addresses)
+        return RecipientParseResult(
+            recipients: dedupedRecipients(addresses),
+            hasInvalidEntries: hasInvalidEntries
+        )
     }
 
     static func dedupedRecipients(_ recipients: [MailAddress]) -> [MailAddress] {
@@ -192,16 +208,27 @@ extension AppState {
         return recipients.filter { seen.insert($0.email.lowercased()).inserted }
     }
 
-    private static func emailsInEntry(_ entry: String) -> [String] {
+    private static func parseRecipientEntry(_ entry: String) -> (emails: [String], isInvalid: Bool) {
         let trimmed = entry.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return ([], false) }
         if let start = trimmed.lastIndex(of: "<"), let end = trimmed.lastIndex(of: ">"), start < end {
             let inner = String(trimmed[trimmed.index(after: start)..<end])
-            return isLikelyEmail(inner) ? [inner] : []
+            let trailingText = trimmed[trimmed.index(after: end)...].trimmingCharacters(in: .whitespaces)
+            return isLikelyEmail(inner) && trailingText.isEmpty ? ([inner], false) : ([], true)
         }
-        return trimmed
-            .split(whereSeparator: { $0 == " " || $0 == "\t" })
-            .map(String.init)
-            .filter(isLikelyEmail)
+        if trimmed.contains("<") || trimmed.contains(">") {
+            return ([], true)
+        }
+        var emails: [String] = []
+        var isInvalid = false
+        for token in trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init) {
+            if isLikelyEmail(token) {
+                emails.append(token)
+            } else {
+                isInvalid = true
+            }
+        }
+        return (emails, isInvalid)
     }
 
     static func isLikelyEmail(_ token: String) -> Bool {

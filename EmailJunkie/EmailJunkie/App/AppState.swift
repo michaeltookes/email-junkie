@@ -178,6 +178,7 @@ final class AppState: ObservableObject {
     var pendingDraftUncommittedEditIDs: Set<String> = []
     var pendingDraftUncommittedEditBodies: [String: String] = [:]
     var pendingDraftUncommittedEditRecipients: [String: [MailAddress]] = [:]
+    var pendingDraftInvalidRecipientEditIDs: Set<String> = []
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 

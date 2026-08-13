@@ -62,6 +62,10 @@ xcodebuild test -project EmailJunkie.xcodeproj -scheme EmailJunkie \
   -destination 'platform=macOS'
 ```
 
+A few integration tests verify the real IMAP/SMTP path against a live mailbox.
+They are credential-gated and skip by default; see
+[`docs/live-verification.md`](docs/live-verification.md) to run them.
+
 Signed DMG and Homebrew distribution are added at the distribution milestone
 (see the backlog).
 

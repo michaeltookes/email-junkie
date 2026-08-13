@@ -151,6 +151,11 @@ extension AppState {
 
     private static func watchedTranscriptDeliveryResult(for error: Error) -> WatchedTranscriptDeliveryResult {
         switch error {
+        case let error as FollowUpCommitError:
+            switch error {
+            case .sourceChanged, .pendingDraftPersistenceFailed:
+                return .retry
+            }
         case DraftError.llmUnavailable,
              DraftDispatchError.missingCredentials,
              DraftDispatchError.accountChanged:

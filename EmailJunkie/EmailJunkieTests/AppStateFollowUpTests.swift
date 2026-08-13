@@ -394,15 +394,15 @@ final class AppStateFollowUpTests: XCTestCase {
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
     }
 
-    func testWatchedTranscriptAcceptsPermanentPendingDraftPersistenceFailure() async throws {
+    func testWatchedTranscriptRetriesPendingDraftPersistenceFailure() async throws {
         let (appState, _, _, persistence) = makeAppState()
         persistence.pendingDraftSaveError = AppStatePersistenceError.writeDenied
 
-        let accepted = await appState.handleWatchedTranscript(
+        let result = await appState.handleWatchedTranscriptDelivery(
             try TranscriptIngest.fromPaste("Marcus: recap.")
         )
 
-        XCTAssertTrue(accepted)
+        XCTAssertEqual(result, .retry)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(appState.transcriptFolderError)
     }

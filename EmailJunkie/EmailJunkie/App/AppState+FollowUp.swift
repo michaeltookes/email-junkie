@@ -1,8 +1,18 @@
 import EmailJunkieMail
 import Foundation
 
-enum FollowUpCommitError: Error {
+enum FollowUpCommitError: LocalizedError {
     case sourceChanged
+    case pendingDraftPersistenceFailed(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .sourceChanged:
+            return "The transcript changed before the follow-up could be queued."
+        case .pendingDraftPersistenceFailed(let error):
+            return "Couldn't save the generated follow-up. \(error.localizedDescription)"
+        }
+    }
 }
 
 /// Post-call follow-up actions on `AppState` (item 51): ingest a transcript,
@@ -52,7 +62,11 @@ extension AppState {
             model: llmConfiguration.model,
             credentials: credentials
         )
-        try enqueuePendingDraft(draft)
+        do {
+            try enqueuePendingDraft(draft)
+        } catch {
+            throw FollowUpCommitError.pendingDraftPersistenceFailed(error)
+        }
         if let shouldCommit, !shouldCommit() {
             try rollbackPendingFollowUp(draft)
             throw FollowUpCommitError.sourceChanged

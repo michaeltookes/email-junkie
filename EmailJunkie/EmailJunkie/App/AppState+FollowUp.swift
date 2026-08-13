@@ -233,6 +233,8 @@ extension AppState {
     }
 
     static func isLikelyEmail(_ token: String) -> Bool {
+        let invalidCharacters = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard token.rangeOfCharacter(from: invalidCharacters) == nil else { return false }
         let parts = token.split(separator: "@", omittingEmptySubsequences: false)
         guard parts.count == 2, !parts[0].isEmpty else { return false }
         let domain = parts[1]

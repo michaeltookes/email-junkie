@@ -132,6 +132,19 @@ final class TranscriptParserTests: XCTestCase {
         XCTAssertFalse(parsed.hasSpeakerLabels)
     }
 
+    func testWebVTTStripsCueIdentifiersWithSpacesAndColons() {
+        let raw = """
+        WEBVTT
+
+        Chapter 1: kickoff
+        00:00:00.000 --> 00:00:02.000
+        Dana owns the rollout.
+        """
+        let parsed = TranscriptParser.parse(raw, format: .webVTT)
+
+        XCTAssertEqual(parsed.text, "Dana owns the rollout.")
+    }
+
     func testWebVTTPreservesCueTextStartingWithMetadataWords() {
         let raw = """
         WEBVTT

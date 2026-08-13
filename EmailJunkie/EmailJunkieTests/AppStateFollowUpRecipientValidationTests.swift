@@ -74,6 +74,13 @@ final class AppStateFollowUpRecipientValidationTests: XCTestCase {
         XCTAssertFalse(parsed.hasInvalidEntries)
     }
 
+    func testRecipientEditRejectsWhitespaceInsideDisplayNameBrackets() {
+        let parsed = AppState.parseRecipientEdit("Alice <alice@example.com Bob>")
+
+        XCTAssertEqual(parsed.recipients.map(\.email), [])
+        XCTAssertTrue(parsed.hasInvalidEntries)
+    }
+
     func testMalformedRecipientEditBlocksNotificationApproval() async {
         let draft = authoredDraft(recipients: [MailAddress(email: "alice@example.com")])
         let (appState, provider, _) = makeAppState(seed: [draft])

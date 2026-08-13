@@ -183,18 +183,15 @@ extension WatchedFolderTranscriptSource {
     }
 
     private func existedBeforeStartup(_ url: URL, startedAt startupBoundary: Date) -> Bool {
-        guard let values = try? url.resourceValues(
-            forKeys: [.addedToDirectoryDateKey, .creationDateKey, .contentModificationDateKey]
-        ) else {
+        var url = url
+        url.removeAllCachedResourceValues()
+        guard let values = try? url.resourceValues(forKeys: [.addedToDirectoryDateKey]) else {
             return false
         }
-        let observedDates = [
-            values.addedToDirectoryDate,
-            values.creationDate,
-            values.contentModificationDate
-        ].compactMap { $0 }
-        guard !observedDates.isEmpty else { return true }
-        return observedDates.allSatisfy { $0 <= startupBoundary }
+        return WatchedFolderStartupSeed.existedBeforeStartup(
+            addedToDirectoryDate: values.addedToDirectoryDate,
+            startedAt: startupBoundary
+        )
     }
 
     func updateSeenVersion(_ snapshot: WatchedFolderFileSnapshot, forKey key: String) {

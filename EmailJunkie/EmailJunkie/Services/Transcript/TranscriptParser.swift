@@ -99,18 +99,15 @@ enum TranscriptParser {
         return trimmed[suffixStart].unicodeScalars.allSatisfy { CharacterSet.whitespaces.contains($0) }
     }
 
-    /// A cue identifier is a bare integer (SubRip index or numeric WebVTT id), or a
-    /// single-token WebVTT id line, only when the *immediately* following line is
-    /// the cue's timestamp. The immediacy check matters: one-word or numeric
-    /// captions are separated from the next cue's timestamp by a blank line, so they
-    /// are not mistaken for identifiers.
+    /// A cue identifier is a bare integer for SubRip, or any valid WebVTT
+    /// identifier line immediately followed by the cue's timestamp.
     private static func isCueIdentifier(_ trimmed: String, isWebVTT: Bool, immediatelyFollowedBy next: String?) -> Bool {
         if isAllDigits(trimmed) {
             guard let next else { return false }
             return isCueTimingLine(next, isWebVTT: isWebVTT)
         }
         guard isWebVTT, let next, isCueTimingLine(next, isWebVTT: true) else { return false }
-        return !trimmed.contains(":") && !trimmed.contains(" ")
+        return !trimmed.contains("-->")
     }
 
     private static func isCueTimingLine(_ line: String, isWebVTT: Bool) -> Bool {

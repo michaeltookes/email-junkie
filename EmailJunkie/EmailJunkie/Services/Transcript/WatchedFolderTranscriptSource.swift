@@ -123,10 +123,14 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     private func scanForNewTranscriptsOnce() async {
         guard isRunning else { return }
-        let contents = await currentContents()
-        let reconciledSeen = WatchedFolderScanner.reconcileSeenVersions(seen, with: contents)
+        let discovery = await currentContents()
+        let reconciledSeen = WatchedFolderScanner.reconcileSeenVersions(
+            seen,
+            with: discovery.urls,
+            pruneMissing: discovery.isComplete
+        )
         updateSeenVersions(reconciledSeen)
-        let candidates = WatchedFolderScanner.newTranscripts(in: contents, alreadySeen: seen)
+        let candidates = WatchedFolderScanner.newTranscripts(in: discovery.urls, alreadySeen: seen)
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
         for url in candidates {
@@ -161,9 +165,9 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     // MARK: - Mechanism
 
     private func finishStartupSeed(startedAt startupBoundary: Date) async {
-        let contents = await currentContents()
+        let discovery = await currentContents()
         guard isRunning, !Task.isCancelled else { return }
-        seen = startupSeenVersions(from: contents, startedAt: startupBoundary)
+        seen = startupSeenVersions(from: discovery, startedAt: startupBoundary)
         persistSeenVersions()
         startupSeedTask = nil
         #if DEBUG
@@ -174,16 +178,20 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     }
 
     private func startupSeenVersions(
-        from contents: [URL],
+        from discovery: WatchedFolderDiscoveryResult,
         startedAt startupBoundary: Date
     ) -> [String: WatchedFolderFileSnapshot] {
         guard let persisted = loadSeenVersions?() else {
-            let baselineContents = contents.filter {
+            let baselineContents = discovery.urls.filter {
                 existedBeforeStartup($0, startedAt: startupBoundary)
             }
             return WatchedFolderScanner.seedSeenVersions(from: baselineContents)
         }
-        return WatchedFolderScanner.reconcileSeenVersions(persisted, with: contents)
+        return WatchedFolderScanner.reconcileSeenVersions(
+            persisted,
+            with: discovery.urls,
+            pruneMissing: discovery.isComplete
+        )
     }
 
     private func existedBeforeStartup(_ url: URL, startedAt startupBoundary: Date) -> Bool {
@@ -217,7 +225,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         onSeenVersionsChanged?(seen)
     }
 
-    private func currentContents() async -> [URL] {
+    private func currentContents() async -> WatchedFolderDiscoveryResult {
         await WatchedFolderDiscovery.currentContents(folderURL: folderURL, fileManager: fileManager)
     }
 
@@ -431,29 +439,57 @@ private struct PendingFileStability {
     var observedAt: Date
 }
 
+private struct WatchedFolderDiscoveryResult {
+    var urls: [URL]
+    var isComplete: Bool
+}
+
 private enum WatchedFolderDiscovery {
 
-    static func currentContents(folderURL: URL, fileManager: FileManager) async -> [URL] {
+    static func currentContents(folderURL: URL, fileManager: FileManager) async -> WatchedFolderDiscoveryResult {
         await Task.detached(priority: .utility) {
             currentContentsSync(folderURL: folderURL, fileManager: fileManager)
         }.value
     }
 
-    static func currentContentsSync(folderURL: URL, fileManager: FileManager) -> [URL] {
-        currentRecursiveURLs(folderURL: folderURL, fileManager: fileManager).filter { !isDirectory($0) }
+    static func currentContentsSync(folderURL: URL, fileManager: FileManager) -> WatchedFolderDiscoveryResult {
+        let recursive = currentRecursiveURLs(folderURL: folderURL, fileManager: fileManager)
+        var isComplete = recursive.isComplete
+        let urls = recursive.urls.filter { url in
+            guard let isDirectory = isDirectory(url) else {
+                isComplete = false
+                return false
+            }
+            return !isDirectory
+        }
+        return WatchedFolderDiscoveryResult(urls: urls, isComplete: isComplete)
     }
 
-    private static func currentRecursiveURLs(folderURL: URL, fileManager: FileManager) -> [URL] {
+    private static func currentRecursiveURLs(
+        folderURL: URL,
+        fileManager: FileManager
+    ) -> WatchedFolderDiscoveryResult {
+        var isComplete = true
         guard let enumerator = fileManager.enumerator(
             at: folderURL,
             includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
-        return enumerator.compactMap { $0 as? URL }
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: { _, _ in
+                isComplete = false
+                return true
+            }
+        ) else {
+            return WatchedFolderDiscoveryResult(urls: [], isComplete: false)
+        }
+        let urls = enumerator.compactMap { $0 as? URL }
             .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
+        return WatchedFolderDiscoveryResult(urls: urls, isComplete: isComplete)
     }
 
-    private static func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    private static func isDirectory(_ url: URL) -> Bool? {
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else {
+            return nil
+        }
+        return values.isDirectory == true
     }
 }

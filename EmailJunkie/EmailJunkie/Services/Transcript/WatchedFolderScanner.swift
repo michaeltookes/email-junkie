@@ -67,26 +67,33 @@ enum WatchedFolderScanner {
     }
 
     /// Drops seen entries for files that disappeared, but carries the delivered
-    /// version forward when the same file identity is found at a new path.
+    /// version forward when the same file identity is found at a new path. When
+    /// discovery is incomplete, missing entries are preserved because the scan
+    /// cannot prove those files disappeared.
     static func reconcileSeenVersions(
         _ alreadySeen: [String: WatchedFolderFileSnapshot],
-        with urls: [URL]
+        with urls: [URL],
+        pruneMissing: Bool = true
     ) -> [String: WatchedFolderFileSnapshot] {
         let currentSnapshots = urls.compactMap { url -> (String, WatchedFolderFileSnapshot)? in
             guard TranscriptFormat.isSupportedFile(url),
                   let snapshot = WatchedFolderFileSnapshot(url: url) else { return nil }
             return (seenKey(for: url), snapshot)
         }
-        let seenByIdentity = alreadySeen.values.reduce(into: [String: WatchedFolderFileSnapshot]()) { result, snapshot in
+        let seenByIdentity = alreadySeen.reduce(
+            into: [String: (key: String, snapshot: WatchedFolderFileSnapshot)]()
+        ) { result, seenEntry in
+            let (key, snapshot) = seenEntry
             guard let identity = snapshot.fileIdentity else { return }
-            result[identity] = snapshot
+            result[identity] = (key, snapshot)
         }
-        return currentSnapshots.reduce(into: [:]) { result, current in
+        return currentSnapshots.reduce(into: pruneMissing ? [:] : alreadySeen) { result, current in
             if let existing = alreadySeen[current.0] {
                 result[current.0] = existing
             } else if let identity = current.1.fileIdentity,
                       let moved = seenByIdentity[identity] {
-                result[current.0] = moved
+                result.removeValue(forKey: moved.key)
+                result[current.0] = moved.snapshot
             }
         }
     }

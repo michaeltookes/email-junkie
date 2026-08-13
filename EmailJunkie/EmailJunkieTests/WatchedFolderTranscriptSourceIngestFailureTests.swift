@@ -52,4 +52,39 @@ final class WatchedFolderIngestFailureTests: XCTestCase {
 
         XCTAssertEqual(delivered, ["Marcus: recap."])
     }
+
+    func testIncompleteDiscoveryKeepsPersistedSeenSnapshots() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let archive = dir.appendingPathComponent("Archive", isDirectory: true)
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let transcript = archive.appendingPathComponent("old.txt")
+        try write("Marcus: old recap.", to: transcript)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: archive.path)
+        }
+
+        let key = WatchedFolderScanner.seenKey(for: transcript)
+        var storedSeen: [String: WatchedFolderFileSnapshot]? = WatchedFolderScanner.seedSeenVersions(from: [transcript])
+        XCTAssertNotNil(storedSeen?[key])
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: archive.path)
+
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.loadSeenVersions = { storedSeen }
+        source.onSeenVersionsChanged = { storedSeen = $0 }
+        source.onTranscript = { delivered.append($0.rawText); return true }
+        source.start()
+        defer { source.stop() }
+
+        await scanStable(source)
+        XCTAssertNotNil(storedSeen?[key])
+        XCTAssertTrue(delivered.isEmpty)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: archive.path)
+        await scanStable(source)
+
+        XCTAssertNotNil(storedSeen?[key])
+        XCTAssertTrue(delivered.isEmpty)
+    }
 }

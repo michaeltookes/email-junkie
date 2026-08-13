@@ -81,6 +81,30 @@ final class WatchedFolderScannerTests: XCTestCase {
         XCTAssertNil(reconciled[WatchedFolderScanner.seenKey(for: original)])
     }
 
+    func testReconcileSeenVersionsPreservesMissingEntriesWhenDiscoveryIsIncomplete() throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let visible = dir.appendingPathComponent("visible.txt")
+        let missing = dir.appendingPathComponent("missing.txt")
+        try "Visible call.".write(to: visible, atomically: true, encoding: .utf8)
+        try "Missing call.".write(to: missing, atomically: true, encoding: .utf8)
+        let seen = WatchedFolderScanner.seedSeenVersions(from: [visible, missing])
+
+        let complete = WatchedFolderScanner.reconcileSeenVersions(
+            seen,
+            with: [visible],
+            pruneMissing: true
+        )
+        let incomplete = WatchedFolderScanner.reconcileSeenVersions(
+            seen,
+            with: [visible],
+            pruneMissing: false
+        )
+
+        XCTAssertNil(complete[WatchedFolderScanner.seenKey(for: missing)])
+        XCTAssertEqual(incomplete, seen)
+    }
+
     func testSeenKeyStandardizesPath() {
         XCTAssertEqual(
             WatchedFolderScanner.seenKey(for: url("/calls/one.vtt")),

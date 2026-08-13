@@ -206,14 +206,28 @@ final class GmailLiveSendTests: XCTestCase {
         credentials: MailAccountCredentials,
         marker: String
     ) async throws {
+        var latestCleanupError: Error?
+
         for attempt in 0..<deliveryPollAttempts {
-            try await moveTestMessagesToTrash(provider: provider, credentials: credentials, marker: marker)
+            do {
+                try await moveTestMessagesToTrash(provider: provider, credentials: credentials, marker: marker)
+                latestCleanupError = nil
+            } catch {
+                // Keep polling through transient IMAP failures; a later attempt may
+                // still catch an ambiguously accepted SMTP submission once visible.
+                latestCleanupError = error
+            }
+
             if attempt < deliveryPollAttempts - 1 {
                 try await Task.sleep(nanoseconds: deliveryPollInterval)
             }
         }
 
-        try await assertTestMessagesRemoved(provider: provider, credentials: credentials, marker: marker)
+        do {
+            try await assertTestMessagesRemoved(provider: provider, credentials: credentials, marker: marker)
+        } catch {
+            throw latestCleanupError ?? error
+        }
     }
 
     private func moveTestMessagesToTrash(

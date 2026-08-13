@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 12
+    static let currentSchemaVersion = 14
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -45,6 +45,14 @@ struct Settings: Codable, Equatable {
     /// Schema version that introduced the sender allow/blocklist rules (item 18).
     /// Purely additive: older files decode the two lists as empty.
     static let senderRulesSchemaVersion = 12
+
+    /// Schema version that introduced the optional transcript watched folder
+    /// (item 51). Purely additive: older files decode it as off with no path.
+    static let transcriptWatchedFolderSchemaVersion = 13
+
+    /// Schema version that introduced the watched-folder seen-version baseline.
+    /// Purely additive: older files decode it as unestablished and seed once.
+    static let transcriptWatchedFolderSeenSnapshotsSchemaVersion = 14
 
     /// The default auto-send undo window, in seconds (item 23). Zero disables it.
     static let defaultSendDelaySeconds = 10
@@ -117,6 +125,18 @@ struct Settings: Codable, Equatable {
     /// reason (item 18). Each entry is a full address or a whole domain.
     var senderBlocklist: [SenderRule]
 
+    /// Whether the transcript watched folder is active (item 51). Off by default.
+    var transcriptWatchedFolderEnabled: Bool
+
+    /// The folder watched for new transcript files (e.g. Zoom's local recording
+    /// directory). Empty when unset. Only meaningful while the feature is enabled.
+    var transcriptWatchedFolderPath: String
+
+    /// Version snapshots the watched-folder source has accepted or explicitly
+    /// seeded as pre-existing. `nil` means the baseline has not been established
+    /// for the currently configured folder.
+    var transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]?
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -134,7 +154,10 @@ struct Settings: Codable, Equatable {
         sendDelaySeconds: Int = Settings.defaultSendDelaySeconds,
         onboardingCompleted: Bool = false,
         senderAllowlist: [SenderRule] = [],
-        senderBlocklist: [SenderRule] = []
+        senderBlocklist: [SenderRule] = [],
+        transcriptWatchedFolderEnabled: Bool = false,
+        transcriptWatchedFolderPath: String = "",
+        transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -153,6 +176,9 @@ struct Settings: Codable, Equatable {
         self.onboardingCompleted = onboardingCompleted
         self.senderAllowlist = senderAllowlist
         self.senderBlocklist = senderBlocklist
+        self.transcriptWatchedFolderEnabled = transcriptWatchedFolderEnabled
+        self.transcriptWatchedFolderPath = transcriptWatchedFolderPath
+        self.transcriptWatchedFolderSeenSnapshots = transcriptWatchedFolderSeenSnapshots
     }
 
     /// Default settings for a fresh install.
@@ -166,6 +192,7 @@ struct Settings: Codable, Equatable {
         case mailHostGuidancePendingEmail, mailPort, savedAccounts
         case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
         case senderAllowlist, senderBlocklist
+        case transcriptWatchedFolderEnabled, transcriptWatchedFolderPath, transcriptWatchedFolderSeenSnapshots
     }
 
     init(from decoder: Decoder) throws {
@@ -189,6 +216,15 @@ struct Settings: Codable, Equatable {
         onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? false
         senderAllowlist = try container.decodeIfPresent([SenderRule].self, forKey: .senderAllowlist) ?? []
         senderBlocklist = try container.decodeIfPresent([SenderRule].self, forKey: .senderBlocklist) ?? []
+        transcriptWatchedFolderEnabled =
+            try container.decodeIfPresent(Bool.self, forKey: .transcriptWatchedFolderEnabled) ?? false
+        transcriptWatchedFolderPath =
+            try container.decodeIfPresent(String.self, forKey: .transcriptWatchedFolderPath) ?? ""
+        transcriptWatchedFolderSeenSnapshots =
+            try container.decodeIfPresent(
+                [String: WatchedFolderFileSnapshot].self,
+                forKey: .transcriptWatchedFolderSeenSnapshots
+            )
     }
 
     /// Returns a copy with values clamped to sane ranges.
@@ -215,6 +251,10 @@ struct Settings: Codable, Equatable {
         copy.savedAccounts = Self.normalizedSavedAccounts(savedAccounts)
         copy.senderAllowlist = Self.dedupedRules(senderAllowlist)
         copy.senderBlocklist = Self.dedupedRules(senderBlocklist)
+        copy.transcriptWatchedFolderPath = transcriptWatchedFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if copy.transcriptWatchedFolderPath.isEmpty || !copy.transcriptWatchedFolderEnabled {
+            copy.transcriptWatchedFolderSeenSnapshots = nil
+        }
         return copy
     }
 

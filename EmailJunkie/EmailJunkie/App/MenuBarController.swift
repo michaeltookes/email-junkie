@@ -35,6 +35,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var activityWindow: NSWindow?
     private var activityCloseObserver: NSObjectProtocol?
 
+    /// The post-call follow-up composer window (item 51), managed on its own.
+    private let followUpComposer = FollowUpComposerWindow()
+
     // MARK: - Initialization
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -98,6 +101,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// status line and the settings section.
     private func contextualActionItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = []
+
+        // New follow-up from a call transcript (item 51) — the flagship workflow.
+        if appState.isAccountConnected {
+            let followUp = NSMenuItem(
+                title: "New Follow-up from Transcript…",
+                action: #selector(openFollowUpComposerMenu),
+                keyEquivalent: "n"
+            )
+            followUp.target = self
+            items.append(followUp)
+        }
 
         // Review window (pending drafts or skipped messages with override).
         if appState.hasReviewWindowContent {
@@ -222,6 +236,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func openActivityMenu() {
         openActivity()
+    }
+
+    @objc private func openFollowUpComposerMenu() {
+        followUpComposer.present(appState: appState)
     }
 
     func openBrowser() {

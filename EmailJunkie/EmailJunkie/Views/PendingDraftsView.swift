@@ -224,7 +224,33 @@ private struct PendingDraftCard: View {
         draft.isFlagged ? Color.orange.opacity(0.5) : Color.secondary.opacity(0.15)
     }
 
+    @ViewBuilder
     private var incomingColumn: some View {
+        if draft.isAuthored {
+            authoredContextColumn
+        } else {
+            replyingToColumn
+        }
+    }
+
+    /// The left column for an authored follow-up (item 51): recipients editor and
+    /// a note that it was drafted from a call, in place of an inbound message.
+    private var authoredContextColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Post-call follow-up")
+                .font(.caption).bold()
+                .foregroundStyle(.secondary)
+            FollowUpRecipientsField(draft: draft)
+                .environmentObject(appState)
+            Text("Drafted from a call transcript.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var replyingToColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Incoming")
                 .font(.caption).bold()
@@ -262,7 +288,7 @@ private struct PendingDraftCard: View {
                 }
                 .frame(maxHeight: 180)
             } else {
-                if let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
+                if !draft.isAuthored, let recipient = draft.sourceReplyTo?.email ?? draft.sourceFrom?.email {
                     Text("To: \(recipient)").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(draft.replySubject)
@@ -312,12 +338,13 @@ private struct PendingDraftCard: View {
             .disabled(isBusy)
 
             // A flagged draft can't be approved — there is nothing safe to send.
+            // An authored follow-up can't be approved until it has recipients.
             if !draft.isFlagged {
                 Button(appState.approveActionLabel) {
                     Task { await approve() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(isBusy)
+                .disabled(isBusy || (draft.isAuthored && !draft.hasAuthoredRecipients))
             }
         }
     }

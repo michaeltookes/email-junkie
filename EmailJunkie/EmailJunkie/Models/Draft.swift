@@ -102,9 +102,27 @@ struct Draft: Codable, Identifiable, Equatable {
     /// automatically repeat a send whose post-send persistence failed.
     var offlineQueuedDispatch: OfflineQueuedDraftDispatch?
 
+    /// User-supplied recipients for an authored follow-up that has no inbound
+    /// source message (item 51). When non-`nil` this draft is an *authored*
+    /// follow-up rather than a reply: dispatch sends to these addresses and does
+    /// not thread (no `In-Reply-To`/`References`), and `replySubject` is used
+    /// verbatim rather than as a `Re:` reply. `nil` for reply drafts, which derive
+    /// their recipient from the source message. An empty array means the follow-up
+    /// is authored but still needs recipients before it can be sent (the
+    /// watched-folder path enqueues drafts this way for the user to complete).
+    var authoredRecipients: [MailAddress]?
+
     /// Whether this draft is flagged as needing the user's input rather than
     /// carrying a ready-to-send reply.
     var isFlagged: Bool { needsInfo != nil }
+
+    /// Whether this is an authored follow-up (item 51) rather than a reply to an
+    /// incoming message. Authored drafts have no source thread, so freshness and
+    /// regeneration checks don't apply and recipients come from the user.
+    var isAuthored: Bool { authoredRecipients != nil }
+
+    /// Whether an authored follow-up has at least one recipient to dispatch to.
+    var hasAuthoredRecipients: Bool { !(authoredRecipients ?? []).isEmpty }
 
     /// Whether the user edited the reply body away from what the assistant
     /// generated (item 19). True only when an original was captured and the
@@ -145,7 +163,8 @@ struct Draft: Codable, Identifiable, Equatable {
         model: String,
         generatedAt: Date,
         needsInfo: DraftNeedsInfo? = nil,
-        offlineQueuedDispatch: OfflineQueuedDraftDispatch? = nil
+        offlineQueuedDispatch: OfflineQueuedDraftDispatch? = nil,
+        authoredRecipients: [MailAddress]? = nil
     ) {
         self.id = id
         self.sourceUIDValidity = sourceUIDValidity
@@ -165,6 +184,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.generatedAt = generatedAt
         self.needsInfo = needsInfo
         self.offlineQueuedDispatch = offlineQueuedDispatch
+        self.authoredRecipients = authoredRecipients
     }
 
     /// A stable identity across the pending queue and notifications, scoped by

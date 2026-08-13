@@ -64,6 +64,11 @@ extension AppState {
         guard !draft.isFlagged else {
             throw DraftError.needsUserInput
         }
+        // An authored follow-up (item 51) can't dispatch until it has recipients;
+        // the user supplies them in review before approving.
+        guard !draft.isAuthored || draft.hasAuthoredRecipients else {
+            throw DraftDispatchError.noRecipient
+        }
         let credentials = mailCredentials
         guard credentials.isComplete else {
             throw DraftDispatchError.missingCredentials
@@ -285,7 +290,7 @@ extension AppState {
     private func removePendingDraftAfterApproval(_ draft: Draft) {
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         pendingDrafts.removeAll { $0.identity == draft.identity }
-        clearPendingDraftBodyEdit(identity: draft.identity)
+        clearPendingDraftEdits(identity: draft.identity)
         pendingDraftCount = pendingDrafts.count
 
         do {
@@ -314,7 +319,7 @@ extension AppState {
         if removeNotification {
             notifier.removeNotification(identity: draft.identity)
         }
-        clearPendingDraftBodyEdit(identity: draft.identity)
+        clearPendingDraftEdits(identity: draft.identity)
         return removalIndex
     }
 
@@ -445,8 +450,8 @@ extension AppState {
 
         pendingStaleWarnings.removeValue(forKey: draft.identity)
         pendingStaleWarnings.removeValue(forKey: replacement.identity)
-        clearPendingDraftBodyEdit(identity: draft.identity)
-        clearPendingDraftBodyEdit(identity: replacement.identity)
+        clearPendingDraftEdits(identity: draft.identity)
+        clearPendingDraftEdits(identity: replacement.identity)
         if let staleReason {
             pendingStaleWarnings[replacement.identity] = staleReason
         }
@@ -467,15 +472,6 @@ extension AppState {
     private func isReplacementDraftUnavailable(_ replacement: Draft) -> Bool {
         approvingDraftIDs.contains(replacement.identity)
             || persistence.loadApprovedDraftIdentities().contains(replacement.identity)
-    }
-
-    func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
-        guard let sourceAccount = draft.sourceAccountEmail else { return false }
-        return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
-    }
-
-    private func normalizedEmail(_ email: String) -> String {
-        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     func draftDispatchCredentialsStillCurrent(

@@ -144,6 +144,23 @@ final class AppState: ObservableObject {
     /// Used only to keep already-configured installs out of first-run setup.
     let loadedSettingsPredateOnboardingCompletion: Bool
 
+    // MARK: - Transcript Watched Folder (item 51)
+
+    /// Whether the transcript watched folder is active. Off by default.
+    @Published var transcriptWatchedFolderEnabled: Bool
+
+    /// The folder watched for new transcript files (e.g. Zoom's recording dir).
+    @Published var transcriptWatchedFolderPath: String
+
+    /// Persisted accepted/seeded file snapshots for the current watched folder.
+    var transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]?
+
+    /// The live folder watcher, created when watching starts. `nil` while idle.
+    var transcriptFolderSource: WatchedFolderTranscriptSource?
+
+    /// A user-facing message describing the last watched-folder error, if any.
+    @Published var transcriptFolderError: String?
+
     // MARK: - Mailbox Browser (item 40)
 
     /// Search inputs and results for the mailbox browser window.
@@ -163,6 +180,8 @@ final class AppState: ObservableObject {
     @Published var approvingDraftIDs: Set<String> = []
     var pendingDraftUncommittedEditIDs: Set<String> = []
     var pendingDraftUncommittedEditBodies: [String: String] = [:]
+    var pendingDraftUncommittedEditRecipients: [String: [MailAddress]] = [:]
+    var pendingDraftInvalidRecipientEditIDs: Set<String> = []
     /// A user-facing message describing the last approve/deny error, if any.
     @Published var approvalError: String?
 
@@ -328,6 +347,9 @@ final class AppState: ObservableObject {
         self.onboardingCompleted = settings.onboardingCompleted
         self.senderAllowlist = settings.senderAllowlist
         self.senderBlocklist = settings.senderBlocklist
+        self.transcriptWatchedFolderEnabled = settings.transcriptWatchedFolderEnabled
+        self.transcriptWatchedFolderPath = settings.transcriptWatchedFolderPath
+        self.transcriptWatchedFolderSeenSnapshots = settings.transcriptWatchedFolderSeenSnapshots
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()

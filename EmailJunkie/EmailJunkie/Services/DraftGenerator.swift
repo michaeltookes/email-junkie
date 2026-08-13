@@ -12,6 +12,8 @@ struct ReplyContext: Equatable {
 enum DraftError: Error, Equatable {
     /// The model returned no usable reply text.
     case emptyDraft
+    /// No AI provider is connected, so drafting can't run.
+    case llmUnavailable
     /// The selected source mailbox cannot produce a safe reply recipient.
     case unsupportedSourceMailbox
     /// The draft is flagged as needing the user's input, so it cannot be sent or

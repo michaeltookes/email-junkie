@@ -132,6 +132,9 @@ extension AppState {
         resetDraftPreviewForLLMChange()
         saveSettings()
         isLLMConnected = true
+        // Now that drafting is possible, catch up any transcript that arrived in
+        // the watched folder while the provider was disconnected (item 51).
+        startTranscriptFolderWatchingIfEnabled()
     }
 
     /// Disconnects the provider by clearing its stored API key.

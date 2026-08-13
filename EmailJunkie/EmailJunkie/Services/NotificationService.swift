@@ -134,6 +134,9 @@ final class UserNotificationService: NSObject, DraftNotifying {
     /// Category for a flagged "needs input" draft — Deny only, no Approve, since
     /// there is nothing safe to send (item 13).
     static let needsInputCategoryIdentifier = "DRAFT_NEEDS_INPUT"
+    /// Category for authored follow-ups that still need recipients. It deliberately
+    /// has no inline actions: dismissing the banner must not discard the draft.
+    static let recipientNeededCategoryIdentifier = "DRAFT_NEEDS_RECIPIENTS"
     static let approveActionIdentifier = "APPROVE_DRAFT"
     static let denyActionIdentifier = "DENY_DRAFT"
 
@@ -220,17 +223,10 @@ final class UserNotificationService: NSObject, DraftNotifying {
         suppressPresentation: Bool = false
     ) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
-        let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
-        if let needsInfo = draft.needsInfo {
-            content.title = "Reply to \(sender) needs your input"
-            content.subtitle = draft.sourceSubject
-            content.body = Self.snippet(needsInfo.summary)
-            content.categoryIdentifier = Self.needsInputCategoryIdentifier
+        if draft.isAuthored {
+            Self.applyAuthoredFollowUpContent(to: content, draft: draft, sendBehavior: sendBehavior)
         } else {
-            content.title = "Reply ready for \(sender)"
-            content.subtitle = draft.sourceSubject
-            content.body = Self.notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
-            content.categoryIdentifier = Self.categoryIdentifier(for: sendBehavior)
+            Self.applyReplyContent(to: content, draft: draft, sendBehavior: sendBehavior)
         }
         content.userInfo = Self.notificationUserInfo(
             for: draft,
@@ -242,6 +238,50 @@ final class UserNotificationService: NSObject, DraftNotifying {
             content.interruptionLevel = .passive
         }
         return content
+    }
+
+    /// Banner copy for a reply to an incoming message.
+    private static func applyReplyContent(
+        to content: UNMutableNotificationContent,
+        draft: Draft,
+        sendBehavior: SendBehavior
+    ) {
+        let sender = draft.sourceFrom?.name ?? draft.sourceFrom?.email ?? "someone"
+        if let needsInfo = draft.needsInfo {
+            content.title = "Reply to \(sender) needs your input"
+            content.subtitle = draft.sourceSubject
+            content.body = snippet(needsInfo.summary)
+            content.categoryIdentifier = needsInputCategoryIdentifier
+        } else {
+            content.title = "Reply ready for \(sender)"
+            content.subtitle = draft.sourceSubject
+            content.body = notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
+            content.categoryIdentifier = categoryIdentifier(for: sendBehavior)
+        }
+    }
+
+    /// Banner copy for an authored post-call follow-up (item 51). A follow-up with
+    /// no recipients yet uses an open-only category, so dismissing the banner cannot
+    /// discard the draft.
+    private static func applyAuthoredFollowUpContent(
+        to content: UNMutableNotificationContent,
+        draft: Draft,
+        sendBehavior: SendBehavior
+    ) {
+        let subject = draft.replySubject.isEmpty ? "Post-call follow-up" : draft.replySubject
+        guard draft.hasAuthoredRecipients else {
+            content.title = "Follow-up drafted — add recipients"
+            content.subtitle = subject
+            content.body = "Open review to choose who this goes to."
+            content.categoryIdentifier = recipientNeededCategoryIdentifier
+            return
+        }
+        let first = draft.authoredRecipients?.first
+        let recipient = first?.name ?? first?.email ?? "your contact"
+        content.title = "Follow-up ready for \(recipient)"
+        content.subtitle = subject
+        content.body = notificationBody(replyBody: draft.body, sendBehavior: sendBehavior)
+        content.categoryIdentifier = categoryIdentifier(for: sendBehavior)
     }
 
     @discardableResult
@@ -306,6 +346,10 @@ final class UserNotificationService: NSObject, DraftNotifying {
         )]
     }
 
+    static func recipientNeededActions() -> [UNNotificationAction] {
+        []
+    }
+
     private func registerCategory() {
         var categories = Set(SendBehavior.allCases.map { sendBehavior in
             UNNotificationCategory(
@@ -318,6 +362,12 @@ final class UserNotificationService: NSObject, DraftNotifying {
         categories.insert(UNNotificationCategory(
             identifier: Self.needsInputCategoryIdentifier,
             actions: Self.needsInputActions(),
+            intentIdentifiers: [],
+            options: []
+        ))
+        categories.insert(UNNotificationCategory(
+            identifier: Self.recipientNeededCategoryIdentifier,
+            actions: Self.recipientNeededActions(),
             intentIdentifiers: [],
             options: []
         ))

@@ -55,16 +55,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.startWatchingIfReady()
         }
 
+        // Resume watching the transcript folder if it was left enabled (item 51).
+        appState.startTranscriptFolderWatchingIfEnabled()
+
         logger.info("Email Junkie launched")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         // Flush any pending edits/settings to disk before quitting.
-        appState.flushPendingDraftBodyEdits()
+        appState.flushPendingDraftEdits()
         // Outstanding auto-send countdowns (item 23) must not fire during teardown;
         // their drafts remain pending in the persisted queue.
         appState.cancelAllSendCountdowns()
         appState.stopReachabilityMonitoring()
+        appState.stopTranscriptFolderWatching()
         appState.saveSettingsSync()
         logger.info("Email Junkie terminating")
     }

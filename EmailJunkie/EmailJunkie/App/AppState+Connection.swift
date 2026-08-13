@@ -73,6 +73,9 @@ extension AppState {
             }
         }
         resetMessagePreviewForAccountChange(clearSkippedMessages: accountChanged)
+        // Now that mail is connected, catch up any transcript that arrived while
+        // the account was disconnected but the folder watcher was already active.
+        startTranscriptFolderWatchingIfEnabled()
         logger.info("Mailbox connected")
     }
 

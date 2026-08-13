@@ -147,16 +147,28 @@ extension AppState {
 
     private func currentDraftForCountdownDispatch(identity: String) -> Draft? {
         // The draft may have been denied/removed during the window.
-        guard let current = pendingDrafts.first(where: { $0.identity == identity }) else { return nil }
+        guard var current = pendingDrafts.first(where: { $0.identity == identity }) else { return nil }
         if let editedBody = pendingDraftUncommittedEditBodies[identity] {
             guard let updated = updatePendingDraftBody(current, to: editedBody) else {
                 openReviewHandler?()
                 return nil
             }
-            return updated
+            current = updated
+        }
+        if let recipients = pendingDraftUncommittedEditRecipients[identity] {
+            guard let updated = updatePendingDraftRecipients(current, to: recipients) else {
+                openReviewHandler?()
+                return nil
+            }
+            current = updated
         }
         guard !pendingDraftUncommittedEditIDs.contains(identity) else {
             approvalError = "Review this draft before sending; it has unsaved edits."
+            openReviewHandler?()
+            return nil
+        }
+        guard !current.isAuthored || current.hasAuthoredRecipients else {
+            approvalError = Self.draftMessage(for: DraftDispatchError.noRecipient)
             openReviewHandler?()
             return nil
         }

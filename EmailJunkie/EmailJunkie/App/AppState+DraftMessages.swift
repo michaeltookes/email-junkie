@@ -12,6 +12,8 @@ extension AppState {
             return draftDispatchMessage(for: error)
         case DraftError.emptyDraft:
             return "The model returned an empty reply. Try again."
+        case DraftError.llmUnavailable:
+            return "Connect an AI provider first (Test Connection in Settings)."
         case DraftError.unsupportedSourceMailbox:
             return "Draft replies are only available for incoming mail."
         case DraftError.needsUserInput:
@@ -23,6 +25,50 @@ extension AppState {
         default:
             return message(for: error)
         }
+    }
+
+    /// Builds the RFC 5322 message for a draft. An authored follow-up (item 51)
+    /// has no source message, so it sends to the user-supplied recipients with a
+    /// verbatim subject and no reply threading; a reply derives its recipient and
+    /// `In-Reply-To`/`References` from the source message.
+    static func outgoingMessage(for draft: Draft, from: String, date: Date, messageID: String) -> OutgoingMessage {
+        if let recipients = draft.authoredRecipients {
+            return OutgoingMessage(
+                from: from,
+                to: recipients.map(\.email),
+                subject: draft.replySubject,
+                body: draft.body,
+                date: date,
+                messageID: messageID,
+                inReplyTo: nil,
+                references: []
+            )
+        }
+        return OutgoingMessage(
+            from: from,
+            to: [draft.sourceReplyTo?.email ?? draft.sourceFrom?.email].compactMap { $0 },
+            subject: draft.replySubject,
+            body: draft.body,
+            date: date,
+            messageID: messageID,
+            inReplyTo: draft.sourceMessageID,
+            references: [draft.sourceMessageID].compactMap { $0 }
+        )
+    }
+
+    static func generateMessageID(forEmail email: String) -> String {
+        let host = email.split(separator: "@").last.map(String.init) ?? "emailjunkie.local"
+        return "<\(UUID().uuidString)@\(host)>"
+    }
+
+    /// Whether a draft was generated under the currently connected account.
+    func draftMatchesCurrentAccount(_ draft: Draft, credentials: MailAccountCredentials) -> Bool {
+        guard let sourceAccount = draft.sourceAccountEmail else { return false }
+        return normalizedEmail(sourceAccount) == normalizedEmail(credentials.email)
+    }
+
+    func normalizedEmail(_ email: String) -> String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private static func draftDispatchMessage(for error: DraftDispatchError) -> String {

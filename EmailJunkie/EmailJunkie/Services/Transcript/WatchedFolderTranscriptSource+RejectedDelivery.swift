@@ -15,7 +15,7 @@ extension WatchedFolderTranscriptSource {
         snapshot: WatchedFolderFileSnapshot
     ) {
         switch result {
-        case .accepted:
+        case .accepted, .acceptedWithRollback:
             rejectedDeliveries.removeValue(forKey: key)
             updateSeenVersion(snapshot, forKey: key)
             pendingFileStability.removeValue(forKey: key)

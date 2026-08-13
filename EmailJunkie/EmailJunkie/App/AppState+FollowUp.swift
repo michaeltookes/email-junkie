@@ -166,7 +166,7 @@ extension AppState {
         )
     }
 
-    private func rollbackPendingFollowUp(_ draft: Draft) throws {
+    func rollbackPendingFollowUp(_ draft: Draft) throws {
         let previousDrafts = pendingDrafts
         guard pendingDrafts.contains(where: { $0.identity == draft.identity }) else { return }
         pendingDrafts.removeAll { $0.identity == draft.identity }

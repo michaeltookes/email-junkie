@@ -276,6 +276,7 @@ extension WatchedFolderTranscriptSource {
         processing.remove(key)
         guard isRunning else { return }
         guard shouldCommitDelivery() else {
+            await rollbackAcceptedDeliveryIfNeeded(result)
             pendingFileStability.removeValue(forKey: key)
             scheduleFileStabilityRetry()
             return

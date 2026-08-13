@@ -23,4 +23,10 @@ extension WatchedFolderTranscriptSource {
     func isCurrentDeliverySnapshot(_ url: URL, snapshot: WatchedFolderFileSnapshot) -> Bool {
         isRunning && WatchedFolderFileSnapshot(url: url) == snapshot
     }
+
+    func rollbackAcceptedDeliveryIfNeeded(_ result: WatchedTranscriptDeliveryResult) async {
+        if case .acceptedWithRollback(let rollback) = result {
+            await rollback()
+        }
+    }
 }

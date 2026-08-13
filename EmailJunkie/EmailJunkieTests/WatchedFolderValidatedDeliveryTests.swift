@@ -53,4 +53,40 @@ final class WatchedFolderValidatedDeliveryTests: XCTestCase {
         XCTAssertEqual(attempted, ["First half.", "First half.\nSecond half."])
         XCTAssertEqual(committed, ["First half.\nSecond half."])
     }
+
+    func testAcceptedDeliveryRollsBackWhenFileChangesAfterCallbackValidation() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var attempted: [String] = []
+        var rolledBack: [String] = []
+        var didAppend = false
+        let transcriptURL = dir.appendingPathComponent("transcript.txt")
+        let source = WatchedFolderTranscriptSource(folderURL: dir)
+        source.fileStabilityDelayNanoseconds = 0
+        source.onTranscriptValidatedDelivery = { transcript, shouldCommit in
+            attempted.append(transcript.rawText)
+            guard shouldCommit() else { return .retry }
+            if !didAppend {
+                didAppend = true
+                try? self.write(
+                    "\(transcript.rawText)\nSecond half.",
+                    to: transcriptURL
+                )
+                return .acceptedWithRollback {
+                    rolledBack.append(transcript.rawText)
+                }
+            }
+            return .accepted
+        }
+        source.start()
+        defer { source.stop() }
+
+        try write("First half.", to: transcriptURL)
+        await scanStable(source)
+        await scanStable(source)
+
+        XCTAssertEqual(rolledBack, ["First half."])
+        XCTAssertEqual(attempted, ["First half.", "First half.\nSecond half."])
+    }
 }

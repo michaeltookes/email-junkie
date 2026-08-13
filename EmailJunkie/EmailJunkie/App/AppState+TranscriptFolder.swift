@@ -124,7 +124,7 @@ extension AppState {
     /// generation indefinitely for an unchanged file.
     @discardableResult
     func handleWatchedTranscript(_ ingested: IngestedTranscript) async -> Bool {
-        await handleWatchedTranscriptDelivery(ingested) == .accepted
+        await handleWatchedTranscriptDelivery(ingested).isAccepted
     }
 
     func handleWatchedTranscriptDelivery(
@@ -137,9 +137,11 @@ extension AppState {
             return .deferred
         }
         do {
-            _ = try await createFollowUp(from: ingested, shouldCommit: shouldCommit)
+            let draft = try await createFollowUp(from: ingested, shouldCommit: shouldCommit)
             transcriptFolderError = nil
-            return .accepted
+            return .acceptedWithRollback { [weak self] in
+                self?.rollbackWatchedFollowUp(draft)
+            }
         } catch FollowUpCommitError.sourceChanged {
             return .retry
         } catch {
@@ -169,6 +171,17 @@ extension AppState {
             case .ambiguousSend, .permanent:
                 return .accepted
             }
+        }
+    }
+
+    private func rollbackWatchedFollowUp(_ draft: Draft) {
+        do {
+            try rollbackPendingFollowUp(draft)
+        } catch {
+            transcriptFolderError = Self.draftMessage(for: error)
+            transcriptFolderLogger.error(
+                "Failed to roll back changed watched-folder follow-up: \(error.localizedDescription)"
+            )
         }
     }
 }

@@ -98,7 +98,11 @@ final class GmailLiveSendTests: XCTestCase {
                 originalMessageID: originalMessageID
             )
         } catch {
-            await cleanUpAfterTestError(provider: provider, credentials: credentials, marker: marker)
+            await cleanUpAfterPotentialSubmissionError(
+                provider: provider,
+                credentials: credentials,
+                marker: marker
+            )
             throw error
         }
 
@@ -169,7 +173,7 @@ final class GmailLiveSendTests: XCTestCase {
         return nil
     }
 
-    private func cleanUpAfterTestError(
+    private func cleanUpAfterPotentialSubmissionError(
         provider: IMAPMailProvider,
         credentials: MailAccountCredentials,
         marker: String

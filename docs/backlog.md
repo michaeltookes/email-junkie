@@ -63,15 +63,6 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - ⬜ Homebrew cask published live in the tap with the real DMG `sha256`.
     - ⬜ Sparkle auto-update verified against a published appcast — needs the real EdDSA keypair (replace the placeholder `SUPublicEDKey`).
 
-44. **Live end-to-end verification of a non-Gmail (att.net) account** — *mostly verified; only save-as-draft remains*
-    Connect a real `att.net` (Yahoo-backed) account and confirm the whole IMAP path end-to-end, the way Gmail was live-verified (items 6/9).
-    *As Priya with a neglected att.net inbox, I want to connect it and actually see my mail, so that I can trust the app before it acts on that account.*
-    - ✅ **Authenticate:** email + AT&T Secure Mail Key over `imap.mail.att.net` passes "Test Connection". *(Verified live, branch `attnet-verify`.)*
-    - ✅ **Inbox browsing:** the mailbox browser loads and pages a genuinely huge, unread-heavy Inbox without loading it whole — the crash that motivated items 45/49. *(Verified live.)*
-    - ✅ **Folder resolution:** Sent/Drafts load; "All Mail" correctly hidden; live **Trash** and **Archive** folder names confirmed by successful moves during the item-49 sweep verification. *(Verified live.)*
-    - ⬜️ **Save-as-draft:** a reply saved as a draft lands in att.net Drafts, correctly addressed and threaded (mirrors the Gmail check in item 9). **Still to verify** — the one remaining criterion.
-    - Any folder-name mismatch found is fixed in `MailboxNaming`. *(None found; `Trash`/`Archive`/`Sent`/`Draft` all correct.)*
-
 29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
     Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything.
     *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*

@@ -316,6 +316,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(deliveredCount, 0, "Not-ready delivery must be rejected, file left unseen")
 
         ready = true
+        source.releaseDeferredDeliveries()
         await scanStable(source)
         await scanStable(source)
         XCTAssertEqual(deliveredCount, 1, "Retried once ready, then never duplicated")

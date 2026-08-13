@@ -84,12 +84,14 @@ final class WatchedFolderRejectedDeliveryTests: XCTestCase {
         try write("Marcus: recap.", to: url)
         await scanStable(source)
         await scanStable(source)
+        XCTAssertEqual(deliveredCount, 1)
         XCTAssertFalse(storedSeen?.keys.contains(WatchedFolderScanner.seenKey(for: url)) == true)
 
         ready = true
+        source.releaseDeferredDeliveries()
         await scanStable(source)
 
-        XCTAssertGreaterThan(deliveredCount, 1)
+        XCTAssertEqual(deliveredCount, 2)
         XCTAssertTrue(storedSeen?.keys.contains(WatchedFolderScanner.seenKey(for: url)) == true)
     }
 }

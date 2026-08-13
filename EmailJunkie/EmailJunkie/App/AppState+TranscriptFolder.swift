@@ -30,6 +30,7 @@ extension AppState {
                 stopTranscriptFolderWatching()
                 return startTranscriptFolderWatchingIfEnabled()
             }
+            existing.releaseDeferredDeliveries()
             Task { @MainActor in
                 await existing.scanForNewTranscripts()
             }

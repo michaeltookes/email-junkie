@@ -26,9 +26,14 @@ private actor WatchedTranscriptRetryLLMProvider: LLMProviding {
 
 private actor GateableTranscriptLLMProvider: LLMProviding {
     private var succeeds = false
+    private var completeCallCount = 0
 
     func setSucceeds(_ succeeds: Bool) {
         self.succeeds = succeeds
+    }
+
+    func callCount() -> Int {
+        completeCallCount
     }
 
     func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {}
@@ -39,6 +44,7 @@ private actor GateableTranscriptLLMProvider: LLMProviding {
         apiKey: String,
         baseURL: String?
     ) async throws -> LLMResponse {
+        completeCallCount += 1
         guard succeeds else {
             throw LLMError.http(status: 401, message: "bad key")
         }
@@ -70,13 +76,22 @@ final class AppStateWatchedTranscriptRetryTests: XCTestCase {
         await source.scanForNewTranscripts()
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertNotNil(appState.transcriptFolderError)
+        var callCount = await llm.callCount()
+        XCTAssertEqual(callCount, 1)
 
         await source.scanForNewTranscripts()
+        callCount = await llm.callCount()
+        XCTAssertEqual(callCount, 1)
 
         await llm.setSucceeds(true)
-        await source.scanForNewTranscripts()
+        appState.startTranscriptFolderWatchingIfEnabled()
+        for _ in 0..<100 where appState.pendingDrafts.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
 
         XCTAssertEqual(appState.pendingDrafts.count, 1)
+        callCount = await llm.callCount()
+        XCTAssertEqual(callCount, 2)
         XCTAssertNil(appState.transcriptFolderError)
     }
 

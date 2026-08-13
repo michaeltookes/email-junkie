@@ -26,7 +26,7 @@ extension WatchedFolderTranscriptSource {
                 pendingFileStability.removeValue(forKey: key)
             }
         case .deferred:
-            break
+            recordDeferredDelivery(forKey: key, snapshot: snapshot)
         }
     }
 
@@ -39,6 +39,7 @@ extension WatchedFolderTranscriptSource {
             rejectedDeliveries.removeValue(forKey: key)
             return true
         }
+        guard !rejected.isDeferred else { return false }
         guard rejected.nextRetryAt <= Date() else {
             scheduleRejectedDeliveryRetry()
             return false
@@ -67,6 +68,22 @@ extension WatchedFolderTranscriptSource {
         )
         rescheduleRejectedDeliveryRetry()
         return .scheduled
+    }
+
+    func recordDeferredDelivery(
+        forKey key: String,
+        snapshot: WatchedFolderFileSnapshot
+    ) {
+        rejectedDeliveries[key] = WatchedFolderRejectedDeliveryState(
+            snapshot: snapshot,
+            attempts: 0,
+            nextRetryAt: .distantFuture,
+            isDeferred: true
+        )
+    }
+
+    func releaseDeferredDeliveries() {
+        rejectedDeliveries = rejectedDeliveries.filter { !$0.value.isDeferred }
     }
 
     func rejectedDeliveryBackoffDelayNanoseconds(forAttempt attempt: Int) -> UInt64 {

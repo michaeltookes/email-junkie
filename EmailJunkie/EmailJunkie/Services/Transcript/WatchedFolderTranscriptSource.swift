@@ -149,19 +149,27 @@ extension WatchedFolderTranscriptSource {
     // MARK: - Mechanism
 
     private func finishStartupSeed(startedAt startupBoundary: Date) async {
-        let discovery = await currentContents()
-        guard isRunning, !Task.isCancelled else { return }
-        let persisted = loadSeenVersions?()
-        updateSeenVersions(
-            startupSeenVersions(from: discovery, startedAt: startupBoundary, persisted: persisted),
-            forcePersist: persisted == nil
-        )
-        startupSeedTask = nil
-        #if DEBUG
-        onAfterSeedSeenForTesting?()
-        #endif
-        startRecursiveRescanLoop()
-        scheduleStartupCatchUpScan()
+        while isRunning && !Task.isCancelled {
+            let discovery = await currentContents()
+            guard isRunning, !Task.isCancelled else { return }
+            let persisted = loadSeenVersions?()
+            if persisted == nil
+                && !WatchedFolderStartupSeed.canEstablishInitialBaseline(discoveryIsComplete: discovery.isComplete) {
+                try? await Task.sleep(nanoseconds: recursiveRescanDelayNanoseconds)
+                continue
+            }
+            updateSeenVersions(
+                startupSeenVersions(from: discovery, startedAt: startupBoundary, persisted: persisted),
+                forcePersist: persisted == nil
+            )
+            startupSeedTask = nil
+            #if DEBUG
+            onAfterSeedSeenForTesting?()
+            #endif
+            startRecursiveRescanLoop()
+            scheduleStartupCatchUpScan()
+            return
+        }
     }
 
     private func startupSeenVersions(
@@ -171,7 +179,7 @@ extension WatchedFolderTranscriptSource {
     ) -> [String: WatchedFolderFileSnapshot] {
         guard let persisted else {
             let baselineContents = discovery.urls.filter {
-                existedBeforeStartup($0, startedAt: startupBoundary)
+                WatchedFolderStartupSeed.existedBeforeStartup($0, startedAt: startupBoundary)
             }
             return WatchedFolderScanner.seedSeenVersions(from: baselineContents)
         }
@@ -179,18 +187,6 @@ extension WatchedFolderTranscriptSource {
             persisted,
             with: discovery.urls,
             pruneMissing: discovery.isComplete
-        )
-    }
-
-    private func existedBeforeStartup(_ url: URL, startedAt startupBoundary: Date) -> Bool {
-        var url = url
-        url.removeAllCachedResourceValues()
-        guard let values = try? url.resourceValues(forKeys: [.addedToDirectoryDateKey]) else {
-            return false
-        }
-        return WatchedFolderStartupSeed.existedBeforeStartup(
-            addedToDirectoryDate: values.addedToDirectoryDate,
-            startedAt: startupBoundary
         )
     }
 

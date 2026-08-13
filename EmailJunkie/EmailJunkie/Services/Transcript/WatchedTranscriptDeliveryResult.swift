@@ -15,6 +15,7 @@ struct WatchedFolderRejectedDeliveryState: Equatable {
     var snapshot: WatchedFolderFileSnapshot
     var attempts: Int
     var nextRetryAt: Date
+    var isDeferred = false
 }
 
 enum WatchedFolderRejectedDeliveryAction: Equatable {

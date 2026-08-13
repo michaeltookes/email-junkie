@@ -272,6 +272,28 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertEqual(delivered.count, 1)
     }
 
+    func testStableEmptyFileWaitsForChangeBeforeRetryingIngest() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.onTranscript = { delivered.append($0.rawText); return true }
+        source.start()
+        defer { source.stop() }
+
+        let url = dir.appendingPathComponent("call.txt")
+        try write("", to: url)
+        await scanStable(source)
+        await scanStable(source)
+        XCTAssertTrue(delivered.isEmpty)
+
+        try write("Marcus: recap.", to: url)
+        await scanStable(source)
+
+        XCTAssertEqual(delivered, ["Marcus: recap."])
+    }
+
     // Finding 1(b): a delivery the app can't yet accept (returns false) must be
     // retried on the next scan, then delivered exactly once when accepted.
     func testRejectedDeliveryIsRetriedThenDeliveredOnce() async throws {

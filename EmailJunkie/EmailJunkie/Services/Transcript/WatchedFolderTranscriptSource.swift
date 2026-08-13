@@ -109,9 +109,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
                 continue
             }
             guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
-                // Transient (e.g. a file still being written reads empty): leave
-                // it unseen so a later write event or stability retry can retry.
-                scheduleFileStabilityRetry()
+                // This snapshot is stable but not ingestible (empty/unreadable).
+                // Wait for a filesystem change before trying this path again.
+                seen[key] = deliveredSnapshot
+                pendingFileStability.removeValue(forKey: key)
                 continue
             }
             processing.insert(key)

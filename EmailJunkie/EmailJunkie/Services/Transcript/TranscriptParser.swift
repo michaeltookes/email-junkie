@@ -211,7 +211,7 @@ enum TranscriptParser {
         ) else { return nil }
         let fullRange = NSRange(text.startIndex..., in: text)
         let matches = regex.matches(in: text, range: fullRange)
-        guard matches.count > 1 else { return nil }
+        guard !matches.isEmpty else { return nil }
 
         var lines: [String] = []
         var cursor = text.startIndex

@@ -213,6 +213,7 @@ extension AppState {
         guard !trimmed.isEmpty else { return ([], false) }
         if let start = trimmed.lastIndex(of: "<"), let end = trimmed.lastIndex(of: ">"), start < end {
             let inner = String(trimmed[trimmed.index(after: start)..<end])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             let trailingText = trimmed[trimmed.index(after: end)...].trimmingCharacters(in: .whitespaces)
             return isLikelyEmail(inner) && trailingText.isEmpty ? ([inner], false) : ([], true)
         }

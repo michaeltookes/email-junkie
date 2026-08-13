@@ -148,7 +148,7 @@ struct FollowUpComposerView: View {
         isBusy = true
         defer { isBusy = false }
         do {
-            let ingested = try makeIngested()
+            let ingested = try await makeIngested()
             let recipientEdit = AppState.parseRecipientEdit(recipients)
             guard !recipientEdit.hasInvalidEntries else {
                 errorMessage = "Fix invalid recipient addresses before drafting this follow-up."
@@ -171,9 +171,9 @@ struct FollowUpComposerView: View {
         }
     }
 
-    private func makeIngested() throws -> IngestedTranscript {
+    private func makeIngested() async throws -> IngestedTranscript {
         if let fileURL {
-            return try TranscriptIngest.fromFile(fileURL)
+            return try await TranscriptIngest.fromFileDetached(fileURL)
         }
         return try TranscriptIngest.fromPaste(transcriptText)
     }

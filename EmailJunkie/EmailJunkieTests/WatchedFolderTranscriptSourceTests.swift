@@ -329,10 +329,10 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         var deliveredCount = 0
         let source = makeSource(folderURL: dir)
         source.rejectedDeliveryRetryDelayNanoseconds = 1_000_000
-        source.onTranscript = { _ in
-            guard ready else { return false }
+        source.onTranscriptDelivery = { _ in
+            guard ready else { return .retry }
             deliveredCount += 1
-            return true
+            return .accepted
         }
         source.start()
         defer { source.stop() }

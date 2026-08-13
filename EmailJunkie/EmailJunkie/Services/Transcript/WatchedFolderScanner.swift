@@ -14,6 +14,8 @@ struct WatchedFolderFileSnapshot: Codable, Equatable, Sendable {
     }
 
     init?(url: URL) {
+        var url = url
+        url.removeAllCachedResourceValues()
         guard let values = try? url.resourceValues(
             forKeys: [
                 .fileSizeKey,

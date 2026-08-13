@@ -46,8 +46,8 @@ extension AppState {
             guard let self, let source, self.transcriptFolderSource === source else { return false }
             return self.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
         }
-        source.onTranscript = { [weak self] ingested in
-            await self?.handleWatchedTranscript(ingested) ?? false
+        source.onTranscriptDelivery = { [weak self] ingested in
+            await self?.handleWatchedTranscriptDelivery(ingested) ?? .deferred
         }
         source.onError = { [weak self] error in
             self?.transcriptFolderError = Self.watchedFolderMessage(for: error)
@@ -120,34 +120,42 @@ extension AppState {
     /// generation indefinitely for an unchanged file.
     @discardableResult
     func handleWatchedTranscript(_ ingested: IngestedTranscript) async -> Bool {
+        await handleWatchedTranscriptDelivery(ingested) == .accepted
+    }
+
+    func handleWatchedTranscriptDelivery(
+        _ ingested: IngestedTranscript
+    ) async -> WatchedTranscriptDeliveryResult {
         guard canCreateFollowUp else {
             transcriptFolderError =
                 "A transcript arrived, but connect an email account and AI provider to draft follow-ups."
-            return false
+            return .deferred
         }
         do {
             _ = try await createFollowUp(from: ingested)
             transcriptFolderError = nil
-            return true
+            return .accepted
         } catch {
             transcriptFolderError = Self.draftMessage(for: error)
             transcriptFolderLogger.error("Watched-folder follow-up failed: \(error.localizedDescription)")
-            return !Self.shouldRetryWatchedTranscriptFailure(error)
+            return Self.watchedTranscriptDeliveryResult(for: error)
         }
     }
 
-    private static func shouldRetryWatchedTranscriptFailure(_ error: Error) -> Bool {
+    private static func watchedTranscriptDeliveryResult(for error: Error) -> WatchedTranscriptDeliveryResult {
         switch error {
         case DraftError.llmUnavailable,
              DraftDispatchError.missingCredentials,
              DraftDispatchError.accountChanged:
-            return true
+            return .deferred
         default:
             switch ResilienceClassifier.classify(error) {
-            case .transient, .authentication:
-                return true
+            case .transient:
+                return .retry
+            case .authentication:
+                return .deferred
             case .ambiguousSend, .permanent:
-                return false
+                return .accepted
             }
         }
     }

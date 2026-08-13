@@ -152,6 +152,9 @@ final class AppState: ObservableObject {
     /// The folder watched for new transcript files (e.g. Zoom's recording dir).
     @Published var transcriptWatchedFolderPath: String
 
+    /// Persisted accepted/seeded file snapshots for the current watched folder.
+    var transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]?
+
     /// The live folder watcher, created when watching starts. `nil` while idle.
     var transcriptFolderSource: WatchedFolderTranscriptSource?
 
@@ -346,6 +349,7 @@ final class AppState: ObservableObject {
         self.senderBlocklist = settings.senderBlocklist
         self.transcriptWatchedFolderEnabled = settings.transcriptWatchedFolderEnabled
         self.transcriptWatchedFolderPath = settings.transcriptWatchedFolderPath
+        self.transcriptWatchedFolderSeenSnapshots = settings.transcriptWatchedFolderSeenSnapshots
         self.loadedSettingsPredateOnboardingCompletion =
             loadedSettings.schemaVersion < Settings.onboardingCompletionSchemaVersion
         self.processedMessages = persistence.loadProcessedMessages()

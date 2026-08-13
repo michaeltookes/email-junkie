@@ -35,6 +35,13 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// Reports a watch-start or watch-loss failure so the owner can surface it.
     var onError: ((WatchedFolderError) -> Void)?
 
+    /// Loads the persisted seen-version baseline for this folder, if one has
+    /// already been established.
+    var loadSeenVersions: (() -> [String: WatchedFolderFileSnapshot]?)?
+
+    /// Persists accepted/seeded seen-version snapshots for restart-safe retries.
+    var onSeenVersionsChanged: (([String: WatchedFolderFileSnapshot]) -> Void)?
+
     let folderURL: URL
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
@@ -44,6 +51,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private var pendingFileStability: [String: PendingFileStability] = [:]
     private var seen: [String: WatchedFolderFileSnapshot] = [:]
     private var processing: Set<String> = []
+    private var isScanning = false
+    private var needsScanAfterCurrent = false
     private var isRunning = false
     var recursiveRescanDelayNanoseconds: UInt64 = 30_000_000_000
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
@@ -67,7 +76,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// folder can't be opened, reports the failure and stays inactive. Idempotent.
     func start() {
         guard !isRunning else { return }
-        seen = WatchedFolderScanner.seedSeenVersions(from: currentContents())
+        seen = startupSeenVersions(from: currentContentsForStartupSeed())
         #if DEBUG
         onAfterSeedSeenForTesting?()
         #endif
@@ -76,6 +85,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             return
         }
         isRunning = true
+        persistSeenVersions()
         startRecursiveRescanLoop()
         Task { @MainActor [weak self] in
             await self?.scanForNewTranscripts()
@@ -85,6 +95,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// Stops watching and releases the folder descriptor. Idempotent.
     func stop() {
         isRunning = false
+        isScanning = false
+        needsScanAfterCurrent = false
         cancelScheduledWork()
         teardownWatch()
     }
@@ -94,8 +106,24 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// it. Internal so the FS-event handler and tests can trigger a scan.
     func scanForNewTranscripts() async {
         guard isRunning else { return }
-        let contents = currentContents()
-        seen = WatchedFolderScanner.reconcileSeenVersions(seen, with: contents)
+        if isScanning {
+            needsScanAfterCurrent = true
+            return
+        }
+
+        isScanning = true
+        repeat {
+            needsScanAfterCurrent = false
+            await scanForNewTranscriptsOnce()
+        } while isRunning && needsScanAfterCurrent
+        isScanning = false
+    }
+
+    private func scanForNewTranscriptsOnce() async {
+        guard isRunning else { return }
+        let contents = await currentContents()
+        let reconciledSeen = WatchedFolderScanner.reconcileSeenVersions(seen, with: contents)
+        updateSeenVersions(reconciledSeen)
         let candidates = WatchedFolderScanner.newTranscripts(in: contents, alreadySeen: seen)
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
@@ -111,7 +139,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
                 // This snapshot is stable but not ingestible (empty/unreadable).
                 // Wait for a filesystem change before trying this path again.
-                seen[key] = deliveredSnapshot
+                updateSeenVersion(deliveredSnapshot, forKey: key)
                 pendingFileStability.removeValue(forKey: key)
                 continue
             }
@@ -120,7 +148,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
             processing.remove(key)
             guard isRunning else { return }
             if accepted {
-                seen[key] = deliveredSnapshot
+                updateSeenVersion(deliveredSnapshot, forKey: key)
                 pendingFileStability.removeValue(forKey: key)
             } else {
                 scheduleRejectedDeliveryRetry()
@@ -130,22 +158,35 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     // MARK: - Mechanism
 
-    private func currentContents() -> [URL] {
-        currentRecursiveURLs().filter { !isDirectory($0) }
+    private func startupSeenVersions(from contents: [URL]) -> [String: WatchedFolderFileSnapshot] {
+        guard let persisted = loadSeenVersions?() else {
+            return WatchedFolderScanner.seedSeenVersions(from: contents)
+        }
+        return WatchedFolderScanner.reconcileSeenVersions(persisted, with: contents)
     }
 
-    private func currentRecursiveURLs() -> [URL] {
-        guard let enumerator = fileManager.enumerator(
-            at: folderURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
-        return enumerator.compactMap { $0 as? URL }
-            .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
+    private func updateSeenVersion(_ snapshot: WatchedFolderFileSnapshot, forKey key: String) {
+        guard seen[key] != snapshot else { return }
+        seen[key] = snapshot
+        persistSeenVersions()
     }
 
-    private func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    private func updateSeenVersions(_ snapshots: [String: WatchedFolderFileSnapshot]) {
+        guard seen != snapshots else { return }
+        seen = snapshots
+        persistSeenVersions()
+    }
+
+    private func persistSeenVersions() {
+        onSeenVersionsChanged?(seen)
+    }
+
+    private func currentContents() async -> [URL] {
+        await WatchedFolderDiscovery.currentContents(folderURL: folderURL, fileManager: fileManager)
+    }
+
+    private func currentContentsForStartupSeed() -> [URL] {
+        WatchedFolderDiscovery.currentContentsSync(folderURL: folderURL, fileManager: fileManager)
     }
 
     /// Opens the folder descriptor and starts the dispatch source. Returns whether
@@ -302,4 +343,31 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 private struct PendingFileStability {
     var snapshot: WatchedFolderFileSnapshot
     var observedAt: Date
+}
+
+private enum WatchedFolderDiscovery {
+
+    static func currentContents(folderURL: URL, fileManager: FileManager) async -> [URL] {
+        await Task.detached(priority: .utility) {
+            currentContentsSync(folderURL: folderURL, fileManager: fileManager)
+        }.value
+    }
+
+    static func currentContentsSync(folderURL: URL, fileManager: FileManager) -> [URL] {
+        currentRecursiveURLs(folderURL: folderURL, fileManager: fileManager).filter { !isDirectory($0) }
+    }
+
+    private static func currentRecursiveURLs(folderURL: URL, fileManager: FileManager) -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: folderURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        return enumerator.compactMap { $0 as? URL }
+            .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
 }

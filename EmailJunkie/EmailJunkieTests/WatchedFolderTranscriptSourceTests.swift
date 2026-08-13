@@ -345,31 +345,98 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         try await waitFor { deliveredCount == 1 }
     }
 
+    func testRejectedDeliveryRemainsPendingAcrossRestartWithPersistedBaseline() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write("Marcus: old recap.", to: dir.appendingPathComponent("old.txt"))
+
+        var storedSeen: [String: WatchedFolderFileSnapshot]?
+        let firstSource = makeSource(folderURL: dir)
+        firstSource.loadSeenVersions = { storedSeen }
+        firstSource.onSeenVersionsChanged = { storedSeen = $0 }
+        firstSource.onTranscript = { _ in false }
+        firstSource.start()
+        defer { firstSource.stop() }
+
+        try write("Marcus: pending recap.", to: dir.appendingPathComponent("call.txt"))
+        await scanStable(firstSource)
+        XCTAssertFalse(storedSeen?.keys.contains { $0.hasSuffix("/call.txt") } ?? true)
+
+        firstSource.stop()
+        var delivered: [String] = []
+        let restartedSource = makeSource(folderURL: dir)
+        restartedSource.loadSeenVersions = { storedSeen }
+        restartedSource.onSeenVersionsChanged = { storedSeen = $0 }
+        restartedSource.onTranscript = {
+            delivered.append($0.rawText)
+            return true
+        }
+        restartedSource.start()
+        defer { restartedSource.stop() }
+
+        await scanStable(restartedSource)
+
+        XCTAssertEqual(delivered, ["Marcus: pending recap."])
+    }
+
+    func testOverlappingScansDoNotProcessDifferentCandidatesConcurrently() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write("Marcus: first.", to: dir.appendingPathComponent("a.txt"))
+        try write("Dana: second.", to: dir.appendingPathComponent("b.txt"))
+
+        let started = expectation(description: "first delivery started")
+        var continuation: CheckedContinuation<Bool, Never>?
+        var delivered: [String] = []
+        let source = makeSource(folderURL: dir)
+        source.loadSeenVersions = { [:] }
+        source.onTranscript = { ingested in
+            delivered.append(ingested.rawText)
+            if delivered.count == 1 {
+                started.fulfill()
+                return await withCheckedContinuation { continuation = $0 }
+            }
+            return true
+        }
+        source.start()
+        defer { source.stop() }
+
+        await fulfillment(of: [started], timeout: 1)
+        await source.scanForNewTranscripts()
+        XCTAssertEqual(delivered, ["Marcus: first."])
+
+        continuation?.resume(returning: true)
+        try await waitFor { delivered.count == 2 }
+        XCTAssertEqual(delivered, ["Marcus: first.", "Dana: second."])
+    }
+
     func testInFlightDeliveryIsNotDeliveredTwiceBeforeAccepted() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
+        try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
 
         let started = expectation(description: "delivery started")
         var continuation: CheckedContinuation<Bool, Never>?
         var deliveryCount = 0
         let source = makeSource(folderURL: dir)
+        source.loadSeenVersions = { [:] }
         source.onTranscript = { _ in
             deliveryCount += 1
-            started.fulfill()
-            return await withCheckedContinuation { continuation = $0 }
+            if deliveryCount == 1 {
+                started.fulfill()
+                return await withCheckedContinuation { continuation = $0 }
+            }
+            return true
         }
         source.start()
         defer { source.stop() }
 
-        try write("Marcus: recap.", to: dir.appendingPathComponent("call.txt"))
-        await source.scanForNewTranscripts()
-        let firstScan = Task { await source.scanForNewTranscripts() }
         await fulfillment(of: [started], timeout: 1)
         await source.scanForNewTranscripts()
         XCTAssertEqual(deliveryCount, 1, "A pending delivery must not duplicate before acceptance is known")
 
         continuation?.resume(returning: true)
-        await firstScan.value
+        try await Task.sleep(nanoseconds: 50_000_000)
         await source.scanForNewTranscripts()
         XCTAssertEqual(deliveryCount, 1, "Accepted files are marked seen only after the async callback completes")
     }
@@ -416,23 +483,4 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         XCTAssertTrue(AppState.watchedFolderMessage(for: .folderUnavailable("/y")).contains("/y"))
     }
 
-    func testSettingsRoundTripPersistsWatchedFolder() throws {
-        let settings = Settings(
-            schemaVersion: Settings.currentSchemaVersion,
-            pollIntervalSeconds: 300,
-            transcriptWatchedFolderEnabled: true,
-            transcriptWatchedFolderPath: "/Users/me/Zoom"
-        )
-        let data = try JSONEncoder().encode(settings)
-        let decoded = try JSONDecoder().decode(Settings.self, from: data)
-        XCTAssertTrue(decoded.transcriptWatchedFolderEnabled)
-        XCTAssertEqual(decoded.transcriptWatchedFolderPath, "/Users/me/Zoom")
-    }
-
-    func testOlderSettingsDecodeWatchedFolderOff() throws {
-        let json = "{\"schemaVersion\": 12, \"pollIntervalSeconds\": 300}"
-        let decoded = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
-        XCTAssertFalse(decoded.transcriptWatchedFolderEnabled)
-        XCTAssertEqual(decoded.transcriptWatchedFolderPath, "")
-    }
 }

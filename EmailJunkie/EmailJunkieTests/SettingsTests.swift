@@ -128,12 +128,46 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.llmVerifiedModel, "")
     }
 
-    func testCurrentSchemaVersionIsThirteen() {
-        XCTAssertEqual(Settings.currentSchemaVersion, 13)
+    func testCurrentSchemaVersionIsFourteen() {
+        XCTAssertEqual(Settings.currentSchemaVersion, 14)
     }
 
     func testTranscriptWatchedFolderSchemaVersionIsThirteen() {
         XCTAssertEqual(Settings.transcriptWatchedFolderSchemaVersion, 13)
+    }
+
+    func testTranscriptWatchedFolderSeenSnapshotsSchemaVersionIsFourteen() {
+        XCTAssertEqual(Settings.transcriptWatchedFolderSeenSnapshotsSchemaVersion, 14)
+    }
+
+    func testWatchedFolderSettingsRoundTripThroughCodable() throws {
+        let snapshot = WatchedFolderFileSnapshot(
+            fileSize: 42,
+            modificationDate: Date(timeIntervalSince1970: 100),
+            creationDate: Date(timeIntervalSince1970: 50),
+            fileIdentity: "file-id"
+        )
+        let original = Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            transcriptWatchedFolderEnabled: true,
+            transcriptWatchedFolderPath: "/Users/me/Zoom",
+            transcriptWatchedFolderSeenSnapshots: ["/Users/me/Zoom/call.txt": snapshot]
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Settings.self, from: data)
+
+        XCTAssertTrue(decoded.transcriptWatchedFolderEnabled)
+        XCTAssertEqual(decoded.transcriptWatchedFolderPath, "/Users/me/Zoom")
+        XCTAssertEqual(decoded.transcriptWatchedFolderSeenSnapshots, ["/Users/me/Zoom/call.txt": snapshot])
+    }
+
+    func testLegacyFileWithoutWatchedFolderSettingsDecodesToDefaults() throws {
+        let legacy = #"{"schemaVersion":12,"pollIntervalSeconds":300}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        XCTAssertFalse(decoded.transcriptWatchedFolderEnabled)
+        XCTAssertEqual(decoded.transcriptWatchedFolderPath, "")
+        XCTAssertNil(decoded.transcriptWatchedFolderSeenSnapshots)
     }
 
     func testSavedAccountsSchemaVersionIsEleven() {

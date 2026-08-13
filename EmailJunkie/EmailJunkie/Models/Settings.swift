@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 13
+    static let currentSchemaVersion = 14
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -49,6 +49,10 @@ struct Settings: Codable, Equatable {
     /// Schema version that introduced the optional transcript watched folder
     /// (item 51). Purely additive: older files decode it as off with no path.
     static let transcriptWatchedFolderSchemaVersion = 13
+
+    /// Schema version that introduced the watched-folder seen-version baseline.
+    /// Purely additive: older files decode it as unestablished and seed once.
+    static let transcriptWatchedFolderSeenSnapshotsSchemaVersion = 14
 
     /// The default auto-send undo window, in seconds (item 23). Zero disables it.
     static let defaultSendDelaySeconds = 10
@@ -128,6 +132,11 @@ struct Settings: Codable, Equatable {
     /// directory). Empty when unset. Only meaningful while the feature is enabled.
     var transcriptWatchedFolderPath: String
 
+    /// Version snapshots the watched-folder source has accepted or explicitly
+    /// seeded as pre-existing. `nil` means the baseline has not been established
+    /// for the currently configured folder.
+    var transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]?
+
     init(
         schemaVersion: Int,
         pollIntervalSeconds: Int,
@@ -147,7 +156,8 @@ struct Settings: Codable, Equatable {
         senderAllowlist: [SenderRule] = [],
         senderBlocklist: [SenderRule] = [],
         transcriptWatchedFolderEnabled: Bool = false,
-        transcriptWatchedFolderPath: String = ""
+        transcriptWatchedFolderPath: String = "",
+        transcriptWatchedFolderSeenSnapshots: [String: WatchedFolderFileSnapshot]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.pollIntervalSeconds = pollIntervalSeconds
@@ -168,6 +178,7 @@ struct Settings: Codable, Equatable {
         self.senderBlocklist = senderBlocklist
         self.transcriptWatchedFolderEnabled = transcriptWatchedFolderEnabled
         self.transcriptWatchedFolderPath = transcriptWatchedFolderPath
+        self.transcriptWatchedFolderSeenSnapshots = transcriptWatchedFolderSeenSnapshots
     }
 
     /// Default settings for a fresh install.
@@ -181,7 +192,7 @@ struct Settings: Codable, Equatable {
         case mailHostGuidancePendingEmail, mailPort, savedAccounts
         case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
         case senderAllowlist, senderBlocklist
-        case transcriptWatchedFolderEnabled, transcriptWatchedFolderPath
+        case transcriptWatchedFolderEnabled, transcriptWatchedFolderPath, transcriptWatchedFolderSeenSnapshots
     }
 
     init(from decoder: Decoder) throws {
@@ -209,6 +220,11 @@ struct Settings: Codable, Equatable {
             try container.decodeIfPresent(Bool.self, forKey: .transcriptWatchedFolderEnabled) ?? false
         transcriptWatchedFolderPath =
             try container.decodeIfPresent(String.self, forKey: .transcriptWatchedFolderPath) ?? ""
+        transcriptWatchedFolderSeenSnapshots =
+            try container.decodeIfPresent(
+                [String: WatchedFolderFileSnapshot].self,
+                forKey: .transcriptWatchedFolderSeenSnapshots
+            )
     }
 
     /// Returns a copy with values clamped to sane ranges.
@@ -236,6 +252,9 @@ struct Settings: Codable, Equatable {
         copy.senderAllowlist = Self.dedupedRules(senderAllowlist)
         copy.senderBlocklist = Self.dedupedRules(senderBlocklist)
         copy.transcriptWatchedFolderPath = transcriptWatchedFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if copy.transcriptWatchedFolderPath.isEmpty || !copy.transcriptWatchedFolderEnabled {
+            copy.transcriptWatchedFolderSeenSnapshots = nil
+        }
         return copy
     }
 

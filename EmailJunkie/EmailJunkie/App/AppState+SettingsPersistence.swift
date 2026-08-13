@@ -35,7 +35,8 @@ extension AppState {
             senderAllowlist: senderAllowlist,
             senderBlocklist: senderBlocklist,
             transcriptWatchedFolderEnabled: transcriptWatchedFolderEnabled,
-            transcriptWatchedFolderPath: transcriptWatchedFolderPath
+            transcriptWatchedFolderPath: transcriptWatchedFolderPath,
+            transcriptWatchedFolderSeenSnapshots: transcriptWatchedFolderSeenSnapshots
         )
     }
 

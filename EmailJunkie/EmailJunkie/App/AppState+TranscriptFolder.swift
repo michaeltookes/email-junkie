@@ -39,6 +39,12 @@ extension AppState {
 
         transcriptFolderError = nil
         let source = WatchedFolderTranscriptSource(folderURL: url)
+        source.loadSeenVersions = { [weak self] in
+            self?.transcriptWatchedFolderSeenSnapshots
+        }
+        source.onSeenVersionsChanged = { [weak self] snapshots in
+            self?.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
+        }
         source.onTranscript = { [weak self] ingested in
             await self?.handleWatchedTranscript(ingested) ?? false
         }
@@ -71,6 +77,7 @@ extension AppState {
     func setTranscriptWatchedFolderEnabled(_ enabled: Bool) {
         guard enabled != transcriptWatchedFolderEnabled else { return }
         transcriptWatchedFolderEnabled = enabled
+        transcriptWatchedFolderSeenSnapshots = nil
         saveSettings()
         startTranscriptFolderWatchingIfEnabled()
     }
@@ -81,8 +88,22 @@ extension AppState {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != transcriptWatchedFolderPath else { return }
         transcriptWatchedFolderPath = trimmed
+        transcriptWatchedFolderSeenSnapshots = nil
         saveSettings()
         startTranscriptFolderWatchingIfEnabled()
+    }
+
+    /// Persists watched-folder version snapshots immediately so a transcript that
+    /// is rejected for a retryable setup/provider issue stays eligible after an
+    /// app restart instead of being re-seeded as pre-existing.
+    func persistTranscriptWatchedFolderSeenSnapshots(_ snapshots: [String: WatchedFolderFileSnapshot]) {
+        transcriptWatchedFolderSeenSnapshots = snapshots
+        do {
+            try persistSettingsSync(buildSettings())
+        } catch {
+            connectionError = Self.settingsMessage(action: "save", error: error)
+            transcriptFolderLogger.error("Failed to save transcript folder snapshots: \(error.localizedDescription)")
+        }
     }
 
     /// Handles a transcript that appeared in the watched folder: drafts a follow-up

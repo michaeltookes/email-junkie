@@ -1,10 +1,17 @@
 import Foundation
 
-struct WatchedFolderFileSnapshot: Equatable {
+struct WatchedFolderFileSnapshot: Codable, Equatable, Sendable {
     var fileSize: Int
     var modificationDate: Date?
     var creationDate: Date?
     var fileIdentity: String?
+
+    init(fileSize: Int, modificationDate: Date?, creationDate: Date?, fileIdentity: String?) {
+        self.fileSize = fileSize
+        self.modificationDate = modificationDate
+        self.creationDate = creationDate
+        self.fileIdentity = fileIdentity
+    }
 
     init?(url: URL) {
         guard let values = try? url.resourceValues(

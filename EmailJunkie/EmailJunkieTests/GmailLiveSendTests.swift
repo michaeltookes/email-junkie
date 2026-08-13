@@ -85,11 +85,11 @@ final class GmailLiveSendTests: XCTestCase {
         app.mailHost = credentials.host
         app.mailPort = credentials.port
 
-        // Dispatch through the app's real auto-send path (SMTP submission on the
-        // derived smtp. host, implicit TLS 465 — the same call `approve` makes).
-        try await app.performSend(draft, credentials: credentials)
-
         do {
+            // Dispatch through the app's real auto-send path (SMTP submission on the
+            // derived smtp. host, implicit TLS 465 — the same call `approve` makes).
+            try await app.performSend(draft, credentials: credentials)
+
             try await verifyDeliveredMessage(
                 provider: provider,
                 credentials: credentials,
@@ -98,7 +98,7 @@ final class GmailLiveSendTests: XCTestCase {
                 originalMessageID: originalMessageID
             )
         } catch {
-            await cleanUpAfterVerificationError(provider: provider, credentials: credentials, marker: marker)
+            await cleanUpAfterTestError(provider: provider, credentials: credentials, marker: marker)
             throw error
         }
 
@@ -169,7 +169,7 @@ final class GmailLiveSendTests: XCTestCase {
         return nil
     }
 
-    private func cleanUpAfterVerificationError(
+    private func cleanUpAfterTestError(
         provider: IMAPMailProvider,
         credentials: MailAccountCredentials,
         marker: String
@@ -177,7 +177,7 @@ final class GmailLiveSendTests: XCTestCase {
         do {
             try await cleanUpTestMessages(provider: provider, credentials: credentials, marker: marker)
         } catch {
-            XCTFail("Failed to clean up Gmail live test messages after verification error: \(error.localizedDescription)")
+            XCTFail("Failed to clean up Gmail live test messages after test error: \(error.localizedDescription)")
         }
     }
 

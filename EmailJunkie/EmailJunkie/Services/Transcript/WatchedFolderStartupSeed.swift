@@ -5,7 +5,7 @@ enum WatchedFolderStartupSeed {
         addedToDirectoryDate: Date?,
         startedAt startupBoundary: Date
     ) -> Bool {
-        guard let addedToDirectoryDate else { return false }
+        guard let addedToDirectoryDate else { return true }
         return addedToDirectoryDate <= startupBoundary
     }
 }

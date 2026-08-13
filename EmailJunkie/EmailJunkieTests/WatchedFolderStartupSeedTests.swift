@@ -3,10 +3,10 @@ import XCTest
 
 final class WatchedFolderStartupSeedTests: XCTestCase {
 
-    func testMissingDirectoryAddedDateIsNotTreatedAsPreExisting() {
+    func testMissingDirectoryAddedDateIsSeededToPreserveHistoricalFiles() {
         let startupBoundary = Date(timeIntervalSince1970: 1_700_000_000)
 
-        XCTAssertFalse(WatchedFolderStartupSeed.existedBeforeStartup(
+        XCTAssertTrue(WatchedFolderStartupSeed.existedBeforeStartup(
             addedToDirectoryDate: nil,
             startedAt: startupBoundary
         ))

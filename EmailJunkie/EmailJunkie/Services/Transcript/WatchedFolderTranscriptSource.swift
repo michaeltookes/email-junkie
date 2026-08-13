@@ -159,10 +159,14 @@ extension WatchedFolderTranscriptSource {
                 try? await Task.sleep(nanoseconds: recursiveRescanDelayNanoseconds)
                 continue
             }
-            updateSeenVersions(
+            let didPersistSeed = updateSeenVersions(
                 startupSeenVersions(from: discovery, startedAt: startupBoundary, persisted: persisted),
                 forcePersist: persisted == nil
             )
+            if persisted == nil, !didPersistSeed {
+                try? await Task.sleep(nanoseconds: recursiveRescanDelayNanoseconds)
+                continue
+            }
             startupSeedTask = nil
             #if DEBUG
             onAfterSeedSeenForTesting?()
@@ -197,22 +201,25 @@ extension WatchedFolderTranscriptSource {
         updateSeenVersions(nextSeen)
     }
 
+    @discardableResult
     private func updateSeenVersions(
         _ snapshots: [String: WatchedFolderFileSnapshot],
         forcePersist: Bool = false
-    ) {
+    ) -> Bool {
         guard seen != snapshots || forcePersist else {
             retryPendingSeenPersistence()
-            return
+            return !seenPersistencePending
         }
         seen = snapshots
         if persistSeenVersions(seen) {
             seenPersistencePending = false
             seenPersistenceRetryTask?.cancel()
             seenPersistenceRetryTask = nil
+            return true
         } else {
             seenPersistencePending = true
             scheduleSeenPersistenceRetry()
+            return false
         }
     }
 
@@ -229,10 +236,6 @@ extension WatchedFolderTranscriptSource {
 
     private func persistSeenVersions(_ snapshots: [String: WatchedFolderFileSnapshot]) -> Bool {
         onSeenVersionsChanged?(snapshots) ?? true
-    }
-
-    private func ingestTranscript(at url: URL) async throws -> IngestedTranscript {
-        try await TranscriptIngest.fromFileDetached(url, origin: .watchedFolder)
     }
 
     private func processCandidate(_ url: URL) async {
@@ -278,10 +281,6 @@ extension WatchedFolderTranscriptSource {
             return
         }
         handleDeliveryResult(result, forKey: key, snapshot: deliveredSnapshot)
-    }
-
-    private func isCurrentDeliverySnapshot(_ url: URL, snapshot: WatchedFolderFileSnapshot) -> Bool {
-        isRunning && WatchedFolderFileSnapshot(url: url) == snapshot
     }
 
     private func currentContents() async -> WatchedFolderDiscoveryResult {

@@ -67,13 +67,51 @@ final class WatchedFolderSeenPersistenceTests: XCTestCase {
         XCTAssertTrue(delivered.isEmpty)
         XCTAssertNotNil(persistedSeen?[key])
     }
+
+    func testInitialStartupSeedWaitsForBaselinePersistence() async throws {
+        let dir = try makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write("Marcus: old recap.", to: dir.appendingPathComponent("old.txt"))
+        let newTranscript = dir.appendingPathComponent("new.txt")
+
+        var saveAttempts = 0
+        var seedCompleted = false
+        var deliveriesBeforeSeed = 0
+        let source = makeSource(folderURL: dir)
+        source.recursiveRescanDelayNanoseconds = 1_000_000
+        source.loadSeenVersions = { nil }
+        source.onSeenVersionsChanged = { _ in
+            saveAttempts += 1
+            if saveAttempts == 1 {
+                try? self.write("Marcus: new recap.", to: newTranscript)
+                return false
+            }
+            return true
+        }
+        source.onAfterSeedSeenForTesting = {
+            seedCompleted = true
+        }
+        source.onTranscript = { _ in
+            if !seedCompleted {
+                deliveriesBeforeSeed += 1
+            }
+            return true
+        }
+        source.start()
+        defer { source.stop() }
+
+        try await waitFor { seedCompleted }
+
+        XCTAssertGreaterThanOrEqual(saveAttempts, 2)
+        XCTAssertEqual(deliveriesBeforeSeed, 0)
+    }
     #endif
 
     func testAcceptedTranscriptRetriesSeenPersistenceWithoutRedelivery() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        var allowPersist = false
+        var allowPersist = true
         var saveAttempts = 0
         var persistedSeen: [String: WatchedFolderFileSnapshot]?
         var delivered: [String] = []
@@ -90,19 +128,20 @@ final class WatchedFolderSeenPersistenceTests: XCTestCase {
         defer { source.stop() }
 
         await source.scanForNewTranscripts()
+        allowPersist = false
         let transcript = dir.appendingPathComponent("call.txt")
         try write("Marcus: recap.", to: transcript)
+        let key = WatchedFolderScanner.seenKey(for: transcript)
         await scanStable(source)
 
         XCTAssertEqual(delivered, ["Marcus: recap."])
-        XCTAssertNil(persistedSeen)
+        XCTAssertNil(persistedSeen?[key])
         let failedAttempts = saveAttempts
 
         await scanStable(source)
         XCTAssertEqual(delivered, ["Marcus: recap."])
 
         allowPersist = true
-        let key = WatchedFolderScanner.seenKey(for: transcript)
         try await waitFor { persistedSeen?[key] != nil }
 
         XCTAssertEqual(delivered, ["Marcus: recap."])

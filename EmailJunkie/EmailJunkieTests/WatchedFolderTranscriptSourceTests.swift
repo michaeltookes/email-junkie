@@ -231,7 +231,7 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
     }
 
     #if DEBUG
-    func testStartCatchUpDeliversFileCreatedBetweenSeedAndWatchOpen() async throws {
+    func testStartCatchUpDeliversFileCreatedAfterStartupSeed() async throws {
         let dir = try makeTempFolder()
         defer { try? FileManager.default.removeItem(at: dir) }
 

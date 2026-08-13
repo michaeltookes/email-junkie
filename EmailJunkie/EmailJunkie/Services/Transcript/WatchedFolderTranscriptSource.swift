@@ -45,6 +45,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     let folderURL: URL
     private let fileManager: FileManager
     private var source: DispatchSourceFileSystemObject?
+    private var startupSeedTask: Task<Void, Never>?
+    private var startupCatchUpTask: Task<Void, Never>?
     private var recursiveRescanTask: Task<Void, Never>?
     private var rejectedDeliveryRetryTask: Task<Void, Never>?
     private var fileStabilityRetryTask: Task<Void, Never>?
@@ -57,6 +59,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     var recursiveRescanDelayNanoseconds: UInt64 = 30_000_000_000
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
     var fileStabilityDelayNanoseconds: UInt64 = 2_000_000_000
+    private let startupCatchUpDelayNanoseconds: UInt64 = 50_000_000
 
     #if DEBUG
     var onAfterSeedSeenForTesting: (() -> Void)?
@@ -76,19 +79,14 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// folder can't be opened, reports the failure and stays inactive. Idempotent.
     func start() {
         guard !isRunning else { return }
-        seen = startupSeenVersions(from: currentContentsForStartupSeed())
-        #if DEBUG
-        onAfterSeedSeenForTesting?()
-        #endif
+        let startupBoundary = Date()
         guard openWatch() else {
             report(.cannotOpenFolder(folderURL.path))
             return
         }
         isRunning = true
-        persistSeenVersions()
-        startRecursiveRescanLoop()
-        Task { @MainActor [weak self] in
-            await self?.scanForNewTranscripts()
+        startupSeedTask = Task { @MainActor [weak self] in
+            await self?.finishStartupSeed(startedAt: startupBoundary)
         }
     }
 
@@ -105,7 +103,11 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     /// is marked processed only once it ingests and the delivery callback accepts
     /// it. Internal so the FS-event handler and tests can trigger a scan.
     func scanForNewTranscripts() async {
+        if let startupSeedTask {
+            await startupSeedTask.value
+        }
         guard isRunning else { return }
+        cancelStartupCatchUpScanIfPending()
         if isScanning {
             needsScanAfterCurrent = true
             return
@@ -136,11 +138,11 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
                 scheduleFileStabilityRetry()
                 continue
             }
-            guard let ingested = try? TranscriptIngest.fromFile(url, origin: .watchedFolder) else {
-                // This snapshot is stable but not ingestible (empty/unreadable).
-                // Wait for a filesystem change before trying this path again.
-                updateSeenVersion(deliveredSnapshot, forKey: key)
-                pendingFileStability.removeValue(forKey: key)
+            let ingested: IngestedTranscript
+            do {
+                ingested = try TranscriptIngest.fromFile(url, origin: .watchedFolder)
+            } catch {
+                handleStableIngestFailure(error, for: url, key: key, snapshot: deliveredSnapshot)
                 continue
             }
             processing.insert(key)
@@ -158,11 +160,45 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     // MARK: - Mechanism
 
-    private func startupSeenVersions(from contents: [URL]) -> [String: WatchedFolderFileSnapshot] {
+    private func finishStartupSeed(startedAt startupBoundary: Date) async {
+        let contents = await currentContents()
+        guard isRunning, !Task.isCancelled else { return }
+        seen = startupSeenVersions(from: contents, startedAt: startupBoundary)
+        persistSeenVersions()
+        startupSeedTask = nil
+        #if DEBUG
+        onAfterSeedSeenForTesting?()
+        #endif
+        startRecursiveRescanLoop()
+        scheduleStartupCatchUpScan()
+    }
+
+    private func startupSeenVersions(
+        from contents: [URL],
+        startedAt startupBoundary: Date
+    ) -> [String: WatchedFolderFileSnapshot] {
         guard let persisted = loadSeenVersions?() else {
-            return WatchedFolderScanner.seedSeenVersions(from: contents)
+            let baselineContents = contents.filter {
+                existedBeforeStartup($0, startedAt: startupBoundary)
+            }
+            return WatchedFolderScanner.seedSeenVersions(from: baselineContents)
         }
         return WatchedFolderScanner.reconcileSeenVersions(persisted, with: contents)
+    }
+
+    private func existedBeforeStartup(_ url: URL, startedAt startupBoundary: Date) -> Bool {
+        guard let values = try? url.resourceValues(
+            forKeys: [.addedToDirectoryDateKey, .creationDateKey, .contentModificationDateKey]
+        ) else {
+            return false
+        }
+        let observedDates = [
+            values.addedToDirectoryDate,
+            values.creationDate,
+            values.contentModificationDate
+        ].compactMap { $0 }
+        guard !observedDates.isEmpty else { return true }
+        return observedDates.allSatisfy { $0 <= startupBoundary }
     }
 
     private func updateSeenVersion(_ snapshot: WatchedFolderFileSnapshot, forKey key: String) {
@@ -183,10 +219,6 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     private func currentContents() async -> [URL] {
         await WatchedFolderDiscovery.currentContents(folderURL: folderURL, fileManager: fileManager)
-    }
-
-    private func currentContentsForStartupSeed() -> [URL] {
-        WatchedFolderDiscovery.currentContentsSync(folderURL: folderURL, fileManager: fileManager)
     }
 
     /// Opens the folder descriptor and starts the dispatch source. Returns whether
@@ -223,13 +255,42 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     }
 
     private func cancelScheduledWork() {
+        startupSeedTask?.cancel()
+        startupCatchUpTask?.cancel()
         recursiveRescanTask?.cancel()
         rejectedDeliveryRetryTask?.cancel()
         fileStabilityRetryTask?.cancel()
+        startupSeedTask = nil
+        startupCatchUpTask = nil
         recursiveRescanTask = nil
         rejectedDeliveryRetryTask = nil
         fileStabilityRetryTask = nil
         pendingFileStability.removeAll()
+    }
+
+    private func scheduleStartupCatchUpScan() {
+        guard startupCatchUpTask == nil else { return }
+        startupCatchUpTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.startupCatchUpDelayNanoseconds)
+            } catch {
+                self.startupCatchUpTask = nil
+                return
+            }
+            guard !Task.isCancelled, self.isRunning else {
+                self.startupCatchUpTask = nil
+                return
+            }
+            self.startupCatchUpTask = nil
+            await self.scanForNewTranscripts()
+        }
+    }
+
+    private func cancelStartupCatchUpScanIfPending() {
+        guard startupCatchUpTask != nil, !isScanning else { return }
+        startupCatchUpTask?.cancel()
+        startupCatchUpTask = nil
     }
 
     private func startRecursiveRescanLoop() {
@@ -251,6 +312,11 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         }
 
         let now = Date()
+        if fileStabilityDelayNanoseconds == 0 {
+            pendingFileStability[key] = PendingFileStability(snapshot: snapshot, observedAt: now)
+            return true
+        }
+
         if let pending = pendingFileStability[key], pending.snapshot == snapshot {
             if now.timeIntervalSince(pending.observedAt) >= fileStabilityDelaySeconds {
                 return true
@@ -264,12 +330,31 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         return false
     }
 
+    private func handleStableIngestFailure(
+        _ error: Error,
+        for url: URL,
+        key: String,
+        snapshot: WatchedFolderFileSnapshot
+    ) {
+        switch error {
+        case TranscriptIngestError.emptyTranscript, TranscriptIngestError.unsupportedFormat(_):
+            updateSeenVersion(snapshot, forKey: key)
+        default:
+            // Permission and decoding failures may recover without changing the
+            // tracked file snapshot, so leave the file retryable on later scans.
+            watchedFolderLogger.debug(
+                "Transcript file not readable yet; will retry on a later scan: \(url.path)"
+            )
+        }
+        pendingFileStability.removeValue(forKey: key)
+    }
+
     private var fileStabilityDelaySeconds: TimeInterval {
         TimeInterval(fileStabilityDelayNanoseconds) / 1_000_000_000
     }
 
     private func scheduleFileStabilityRetry() {
-        guard isRunning, fileStabilityRetryTask == nil else { return }
+        guard isRunning, fileStabilityDelayNanoseconds > 0, fileStabilityRetryTask == nil else { return }
         fileStabilityRetryTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -310,6 +395,7 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         if isRoot, flags.contains(.delete) || flags.contains(.rename) {
             await handleFolderMoved()
         } else {
+            guard startupSeedTask == nil, startupCatchUpTask == nil else { return }
             await scanForNewTranscripts()
         }
     }

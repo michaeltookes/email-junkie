@@ -3,7 +3,7 @@ import Foundation
 /// A transcript file format the app can ingest (item 51). Zoom, Teams, and
 /// third-party notetakers export one of these; adding a new format is a matter
 /// of adding a case here plus a branch in `TranscriptParser`.
-enum TranscriptFormat: String, CaseIterable, Equatable {
+enum TranscriptFormat: String, CaseIterable, Equatable, Sendable {
     /// Plain `.txt` — one speaker turn per line, or free-form notes.
     case plainText
     /// Markdown `.md` — treated like plain text; markup is left intact for the LLM.

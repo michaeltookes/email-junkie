@@ -4,7 +4,7 @@ import Foundation
 /// LLM providers do — add a case here plus a producer — so the follow-up
 /// pipeline never changes as acquisition grows: platform APIs (item 53) and
 /// native on-device capture (item 54) will add their own cases.
-enum TranscriptSourceKind: Equatable {
+enum TranscriptSourceKind: Equatable, Sendable {
     /// Text the user pasted into the composer.
     case paste
     /// A file the user chose or dragged in.
@@ -15,7 +15,7 @@ enum TranscriptSourceKind: Equatable {
 
 /// A transcript handed to the follow-up drafting pipeline, tagged with its origin
 /// and format so the parser and prompt can adapt.
-struct IngestedTranscript: Equatable {
+struct IngestedTranscript: Equatable, Sendable {
     /// The raw file/paste contents, before parsing.
     var rawText: String
     /// The detected format, driving how `TranscriptParser` normalizes it.
@@ -92,6 +92,17 @@ enum TranscriptIngest {
             origin: origin,
             suggestedTitle: url.deletingPathExtension().lastPathComponent
         )
+    }
+
+    /// Reads a transcript file on a utility task for watched-folder scans, where
+    /// the file may be large or live on a slow/network-mounted volume.
+    static func fromFileDetached(
+        _ url: URL,
+        origin: TranscriptSourceKind = .file
+    ) async throws -> IngestedTranscript {
+        try await Task.detached(priority: .utility) {
+            try fromFile(url, origin: origin)
+        }.value
     }
 
     private static func readText(_ url: URL) throws -> String {

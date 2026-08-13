@@ -42,8 +42,9 @@ extension AppState {
         source.loadSeenVersions = { [weak self] in
             self?.transcriptWatchedFolderSeenSnapshots
         }
-        source.onSeenVersionsChanged = { [weak self] snapshots in
-            self?.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
+        source.onSeenVersionsChanged = { [weak self, weak source] snapshots in
+            guard let self, let source, self.transcriptFolderSource === source else { return false }
+            return self.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
         }
         source.onTranscript = { [weak self] ingested in
             await self?.handleWatchedTranscript(ingested) ?? false
@@ -96,13 +97,18 @@ extension AppState {
     /// Persists watched-folder version snapshots immediately so a transcript that
     /// is rejected for a retryable setup/provider issue stays eligible after an
     /// app restart instead of being re-seeded as pre-existing.
-    func persistTranscriptWatchedFolderSeenSnapshots(_ snapshots: [String: WatchedFolderFileSnapshot]) {
+    @discardableResult
+    func persistTranscriptWatchedFolderSeenSnapshots(_ snapshots: [String: WatchedFolderFileSnapshot]) -> Bool {
+        let previous = transcriptWatchedFolderSeenSnapshots
         transcriptWatchedFolderSeenSnapshots = snapshots
         do {
             try persistSettingsSync(buildSettings())
+            return true
         } catch {
+            transcriptWatchedFolderSeenSnapshots = previous
             connectionError = Self.settingsMessage(action: "save", error: error)
             transcriptFolderLogger.error("Failed to save transcript folder snapshots: \(error.localizedDescription)")
+            return false
         }
     }
 

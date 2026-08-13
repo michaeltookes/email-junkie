@@ -72,7 +72,10 @@ final class WatchedFolderIngestFailureTests: XCTestCase {
         var delivered: [String] = []
         let source = makeSource(folderURL: dir)
         source.loadSeenVersions = { storedSeen }
-        source.onSeenVersionsChanged = { storedSeen = $0 }
+        source.onSeenVersionsChanged = {
+            storedSeen = $0
+            return true
+        }
         source.onTranscript = { delivered.append($0.rawText); return true }
         source.start()
         defer { source.stop() }

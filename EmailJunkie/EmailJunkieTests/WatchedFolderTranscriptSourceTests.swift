@@ -353,7 +353,10 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         var storedSeen: [String: WatchedFolderFileSnapshot]?
         let firstSource = makeSource(folderURL: dir)
         firstSource.loadSeenVersions = { storedSeen }
-        firstSource.onSeenVersionsChanged = { storedSeen = $0 }
+        firstSource.onSeenVersionsChanged = {
+            storedSeen = $0
+            return true
+        }
         firstSource.onTranscript = { _ in false }
         firstSource.start()
         defer { firstSource.stop() }
@@ -366,7 +369,10 @@ final class WatchedFolderTranscriptSourceTests: XCTestCase {
         var delivered: [String] = []
         let restartedSource = makeSource(folderURL: dir)
         restartedSource.loadSeenVersions = { storedSeen }
-        restartedSource.onSeenVersionsChanged = { storedSeen = $0 }
+        restartedSource.onSeenVersionsChanged = {
+            storedSeen = $0
+            return true
+        }
         restartedSource.onTranscript = {
             delivered.append($0.rawText)
             return true

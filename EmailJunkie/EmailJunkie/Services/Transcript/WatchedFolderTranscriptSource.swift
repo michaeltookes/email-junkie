@@ -3,15 +3,6 @@ import os
 
 private let watchedFolderLogger = Logger(subsystem: "com.tookes.EmailJunkie", category: "TranscriptFolder")
 
-/// A watched-folder failure surfaced to the owner so the UI never claims to be
-/// watching a folder it can't actually reach (item 51).
-enum WatchedFolderError: Error, Equatable {
-    /// The folder couldn't be opened for watching (missing, or no permission).
-    case cannotOpenFolder(String)
-    /// The folder was renamed or deleted while watching and can't be re-opened.
-    case folderUnavailable(String)
-}
-
 /// Watches a folder for new transcript files and delivers each newly appeared one
 /// to `onTranscript` (item 51) — e.g. Zoom's local recording directory. This is
 /// the v1 `TranscriptSource`; platform integrations (item 53) and native capture
@@ -40,7 +31,8 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     var loadSeenVersions: (() -> [String: WatchedFolderFileSnapshot]?)?
 
     /// Persists accepted/seeded seen-version snapshots for restart-safe retries.
-    var onSeenVersionsChanged: (([String: WatchedFolderFileSnapshot]) -> Void)?
+    /// Returns `true` only when the snapshot map was durably saved.
+    var onSeenVersionsChanged: (([String: WatchedFolderFileSnapshot]) -> Bool)?
 
     let folderURL: URL
     private let fileManager: FileManager
@@ -50,8 +42,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private var recursiveRescanTask: Task<Void, Never>?
     private var rejectedDeliveryRetryTask: Task<Void, Never>?
     private var fileStabilityRetryTask: Task<Void, Never>?
+    private var seenPersistenceRetryTask: Task<Void, Never>?
     private var pendingFileStability: [String: PendingFileStability] = [:]
     private var seen: [String: WatchedFolderFileSnapshot] = [:]
+    private var seenPersistencePending = false
     private var processing: Set<String> = []
     private var isScanning = false
     private var needsScanAfterCurrent = false
@@ -59,10 +53,12 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     var recursiveRescanDelayNanoseconds: UInt64 = 30_000_000_000
     var rejectedDeliveryRetryDelayNanoseconds: UInt64 = 30_000_000_000
     var fileStabilityDelayNanoseconds: UInt64 = 2_000_000_000
+    var seenPersistenceRetryDelayNanoseconds: UInt64 = 30_000_000_000
     private let startupCatchUpDelayNanoseconds: UInt64 = 50_000_000
 
     #if DEBUG
     var onAfterSeedSeenForTesting: (() -> Void)?
+    var onAfterScanDiscoveryForTesting: (() -> Void)?
     #endif
 
     /// Whether the folder is currently being watched. Reflects reality — it is
@@ -124,6 +120,11 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     private func scanForNewTranscriptsOnce() async {
         guard isRunning else { return }
         let discovery = await currentContents()
+        #if DEBUG
+        onAfterScanDiscoveryForTesting?()
+        #endif
+        guard isRunning, !Task.isCancelled else { return }
+        retryPendingSeenPersistence()
         let reconciledSeen = WatchedFolderScanner.reconcileSeenVersions(
             seen,
             with: discovery.urls,
@@ -133,42 +134,22 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         let candidates = WatchedFolderScanner.newTranscripts(in: discovery.urls, alreadySeen: seen)
         let candidateKeys = Set(candidates.map(WatchedFolderScanner.seenKey(for:)))
         pendingFileStability = pendingFileStability.filter { candidateKeys.contains($0.key) }
-        for url in candidates {
-            guard isRunning else { return }
-            let key = WatchedFolderScanner.seenKey(for: url)
-            guard !processing.contains(key) else { continue }
-            guard isStableForDelivery(url, key: key) else { continue }
-            guard let deliveredSnapshot = pendingFileStability[key]?.snapshot else {
-                scheduleFileStabilityRetry()
-                continue
-            }
-            let ingested: IngestedTranscript
-            do {
-                ingested = try TranscriptIngest.fromFile(url, origin: .watchedFolder)
-            } catch {
-                handleStableIngestFailure(error, for: url, key: key, snapshot: deliveredSnapshot)
-                continue
-            }
-            processing.insert(key)
-            let accepted = await onTranscript?(ingested) == true
-            processing.remove(key)
-            guard isRunning else { return }
-            if accepted {
-                updateSeenVersion(deliveredSnapshot, forKey: key)
-                pendingFileStability.removeValue(forKey: key)
-            } else {
-                scheduleRejectedDeliveryRetry()
-            }
+        for url in candidates where isRunning {
+            await processCandidate(url)
         }
     }
-
+}
+private extension WatchedFolderTranscriptSource {
     // MARK: - Mechanism
 
     private func finishStartupSeed(startedAt startupBoundary: Date) async {
         let discovery = await currentContents()
         guard isRunning, !Task.isCancelled else { return }
-        seen = startupSeenVersions(from: discovery, startedAt: startupBoundary)
-        persistSeenVersions()
+        let persisted = loadSeenVersions?()
+        updateSeenVersions(
+            startupSeenVersions(from: discovery, startedAt: startupBoundary, persisted: persisted),
+            forcePersist: persisted == nil
+        )
         startupSeedTask = nil
         #if DEBUG
         onAfterSeedSeenForTesting?()
@@ -179,9 +160,10 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 
     private func startupSeenVersions(
         from discovery: WatchedFolderDiscoveryResult,
-        startedAt startupBoundary: Date
+        startedAt startupBoundary: Date,
+        persisted: [String: WatchedFolderFileSnapshot]?
     ) -> [String: WatchedFolderFileSnapshot] {
-        guard let persisted = loadSeenVersions?() else {
+        guard let persisted else {
             let baselineContents = discovery.urls.filter {
                 existedBeforeStartup($0, startedAt: startupBoundary)
             }
@@ -210,19 +192,75 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
     }
 
     private func updateSeenVersion(_ snapshot: WatchedFolderFileSnapshot, forKey key: String) {
-        guard seen[key] != snapshot else { return }
-        seen[key] = snapshot
-        persistSeenVersions()
+        var nextSeen = seen
+        nextSeen[key] = snapshot
+        updateSeenVersions(nextSeen)
     }
 
-    private func updateSeenVersions(_ snapshots: [String: WatchedFolderFileSnapshot]) {
-        guard seen != snapshots else { return }
+    private func updateSeenVersions(
+        _ snapshots: [String: WatchedFolderFileSnapshot],
+        forcePersist: Bool = false
+    ) {
+        guard seen != snapshots || forcePersist else {
+            retryPendingSeenPersistence()
+            return
+        }
         seen = snapshots
-        persistSeenVersions()
+        if persistSeenVersions(seen) {
+            seenPersistencePending = false
+            seenPersistenceRetryTask?.cancel()
+            seenPersistenceRetryTask = nil
+        } else {
+            seenPersistencePending = true
+            scheduleSeenPersistenceRetry()
+        }
     }
 
-    private func persistSeenVersions() {
-        onSeenVersionsChanged?(seen)
+    private func retryPendingSeenPersistence() {
+        guard seenPersistencePending else { return }
+        if persistSeenVersions(seen) {
+            seenPersistencePending = false
+            seenPersistenceRetryTask?.cancel()
+            seenPersistenceRetryTask = nil
+        } else {
+            scheduleSeenPersistenceRetry()
+        }
+    }
+
+    private func persistSeenVersions(_ snapshots: [String: WatchedFolderFileSnapshot]) -> Bool {
+        onSeenVersionsChanged?(snapshots) ?? true
+    }
+
+    private func ingestTranscript(at url: URL) async throws -> IngestedTranscript {
+        try await TranscriptIngest.fromFileDetached(url, origin: .watchedFolder)
+    }
+
+    private func processCandidate(_ url: URL) async {
+        let key = WatchedFolderScanner.seenKey(for: url)
+        guard !processing.contains(key) else { return }
+        guard isStableForDelivery(url, key: key) else { return }
+        guard let deliveredSnapshot = pendingFileStability[key]?.snapshot else {
+            scheduleFileStabilityRetry()
+            return
+        }
+        let ingested: IngestedTranscript
+        do {
+            ingested = try await ingestTranscript(at: url)
+        } catch {
+            handleStableIngestFailure(error, for: url, key: key, snapshot: deliveredSnapshot)
+            return
+        }
+        guard isRunning else { return }
+        processing.insert(key)
+        let accepted = await onTranscript?(ingested) == true
+        processing.remove(key)
+        guard isRunning else { return }
+        if accepted {
+            updateSeenVersion(deliveredSnapshot, forKey: key)
+            pendingFileStability.removeValue(forKey: key)
+        } else {
+            scheduleRejectedDeliveryRetry()
+        }
     }
 
     private func currentContents() async -> WatchedFolderDiscoveryResult {
@@ -268,11 +306,13 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         recursiveRescanTask?.cancel()
         rejectedDeliveryRetryTask?.cancel()
         fileStabilityRetryTask?.cancel()
+        seenPersistenceRetryTask?.cancel()
         startupSeedTask = nil
         startupCatchUpTask = nil
         recursiveRescanTask = nil
         rejectedDeliveryRetryTask = nil
         fileStabilityRetryTask = nil
+        seenPersistenceRetryTask = nil
         pendingFileStability.removeAll()
     }
 
@@ -399,6 +439,25 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
         }
     }
 
+    private func scheduleSeenPersistenceRetry() {
+        guard isRunning, seenPersistenceRetryTask == nil else { return }
+        seenPersistenceRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(nanoseconds: self.seenPersistenceRetryDelayNanoseconds)
+            } catch {
+                self.seenPersistenceRetryTask = nil
+                return
+            }
+            guard self.isRunning else {
+                self.seenPersistenceRetryTask = nil
+                return
+            }
+            self.seenPersistenceRetryTask = nil
+            self.retryPendingSeenPersistence()
+        }
+    }
+
     private func handleEvent(_ flags: DispatchSource.FileSystemEvent, isRoot: Bool) async {
         if isRoot, flags.contains(.delete) || flags.contains(.rename) {
             await handleFolderMoved()
@@ -437,59 +496,4 @@ final class WatchedFolderTranscriptSource: TranscriptSource {
 private struct PendingFileStability {
     var snapshot: WatchedFolderFileSnapshot
     var observedAt: Date
-}
-
-private struct WatchedFolderDiscoveryResult {
-    var urls: [URL]
-    var isComplete: Bool
-}
-
-private enum WatchedFolderDiscovery {
-
-    static func currentContents(folderURL: URL, fileManager: FileManager) async -> WatchedFolderDiscoveryResult {
-        await Task.detached(priority: .utility) {
-            currentContentsSync(folderURL: folderURL, fileManager: fileManager)
-        }.value
-    }
-
-    static func currentContentsSync(folderURL: URL, fileManager: FileManager) -> WatchedFolderDiscoveryResult {
-        let recursive = currentRecursiveURLs(folderURL: folderURL, fileManager: fileManager)
-        var isComplete = recursive.isComplete
-        let urls = recursive.urls.filter { url in
-            guard let isDirectory = isDirectory(url) else {
-                isComplete = false
-                return false
-            }
-            return !isDirectory
-        }
-        return WatchedFolderDiscoveryResult(urls: urls, isComplete: isComplete)
-    }
-
-    private static func currentRecursiveURLs(
-        folderURL: URL,
-        fileManager: FileManager
-    ) -> WatchedFolderDiscoveryResult {
-        var isComplete = true
-        guard let enumerator = fileManager.enumerator(
-            at: folderURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants],
-            errorHandler: { _, _ in
-                isComplete = false
-                return true
-            }
-        ) else {
-            return WatchedFolderDiscoveryResult(urls: [], isComplete: false)
-        }
-        let urls = enumerator.compactMap { $0 as? URL }
-            .sorted { $0.standardizedFileURL.path < $1.standardizedFileURL.path }
-        return WatchedFolderDiscoveryResult(urls: urls, isComplete: isComplete)
-    }
-
-    private static func isDirectory(_ url: URL) -> Bool? {
-        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else {
-            return nil
-        }
-        return values.isDirectory == true
-    }
 }

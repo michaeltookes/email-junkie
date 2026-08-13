@@ -136,6 +136,66 @@ final class AppStateWatchedTranscriptRetryTests: XCTestCase {
         XCTAssertNil(restartedAppState.transcriptFolderError)
     }
 
+    func testWatchedFolderSeenSnapshotPersistenceFailureReturnsFalseAndRollsBack() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("seen-persistence-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let transcript = dir.appendingPathComponent("call.txt")
+        try "Marcus: recap.".write(to: transcript, atomically: true, encoding: .utf8)
+        let snapshot = try XCTUnwrap(WatchedFolderFileSnapshot(url: transcript))
+        let snapshots = [WatchedFolderScanner.seenKey(for: transcript): snapshot]
+        let persistence = AppStateMemoryPersistence(settings: watchedFolderSettings(dir: dir))
+        let appState = makeAppState(
+            persistence: persistence,
+            secrets: connectedSecrets(),
+            llm: WatchedTranscriptRetryLLMProvider(completions: [])
+        )
+        persistence.syncSaveError = AppStatePersistenceError.writeDenied
+
+        let didPersist = appState.persistTranscriptWatchedFolderSeenSnapshots(snapshots)
+
+        XCTAssertFalse(didPersist)
+        XCTAssertNil(appState.transcriptWatchedFolderSeenSnapshots)
+        XCTAssertNil(persistence.loadSettings().transcriptWatchedFolderSeenSnapshots)
+        XCTAssertEqual(appState.connectionError, "Couldn't save mailbox settings. settings write denied")
+    }
+
+    func testInactiveWatchedFolderSourceCannotPersistSnapshotsAfterFolderChange() throws {
+        let firstDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inactive-seen-source-a-\(UUID().uuidString)", isDirectory: true)
+        let secondDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inactive-seen-source-b-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondDir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: firstDir)
+            try? FileManager.default.removeItem(at: secondDir)
+        }
+        let persistence = AppStateMemoryPersistence(settings: watchedFolderSettings(dir: firstDir))
+        let appState = makeAppState(
+            persistence: persistence,
+            secrets: connectedSecrets(),
+            llm: WatchedTranscriptRetryLLMProvider(completions: [])
+        )
+        appState.startTranscriptFolderWatchingIfEnabled()
+        guard let staleSource = appState.transcriptFolderSource else {
+            return XCTFail("Expected transcript folder source")
+        }
+        defer { appState.stopTranscriptFolderWatching() }
+
+        appState.setTranscriptWatchedFolderPath(secondDir.path)
+        let staleTranscript = firstDir.appendingPathComponent("old.txt")
+        try "Marcus: old recap.".write(to: staleTranscript, atomically: true, encoding: .utf8)
+        let snapshot = try XCTUnwrap(WatchedFolderFileSnapshot(url: staleTranscript))
+        let didPersist = staleSource.onSeenVersionsChanged?([
+            WatchedFolderScanner.seenKey(for: staleTranscript): snapshot
+        ])
+
+        XCTAssertEqual(didPersist, false)
+        XCTAssertNil(appState.transcriptWatchedFolderSeenSnapshots)
+    }
+
     private func watchedFolderSettings(dir: URL) -> Settings {
         Settings(
             schemaVersion: Settings.currentSchemaVersion,

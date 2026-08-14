@@ -21,7 +21,7 @@ Initial release.
 - **Bring-your-own AI** — pluggable providers (Anthropic, OpenAI, and any OpenAI-compatible endpoint including local runtimes like Ollama), with your key stored in the macOS Keychain.
 - **Mailbox cleanup tools** — a browser with search and safe bulk cleanup that can drain even huge, neglected inboxes without ever bulk-downloading them.
 - **Activity history** — a local, metadata-only log of everything the assistant did and why.
-- **Private by design** — local-first: your mail, voice profile, and transcripts stay on your Mac. The only thing that leaves is the drafting call to the AI provider you configured. Secrets live in the Keychain.
+- **Private by design** — local-first storage keeps settings, history, and secrets on your Mac. When you use a remote AI provider, Sentwise sends the relevant mail content, transcript text, and voice profile only to the provider you configure.
 - **Signed, notarized, auto-updating** — Developer ID–signed DMG with Sparkle auto-update and a Homebrew cask (`brew install --cask michaeltookes/tap/sentwise`).
 
 [0.1.0]: https://github.com/michaeltookes/sentwise/releases/tag/v0.1.0

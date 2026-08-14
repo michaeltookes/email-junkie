@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// A single entry in the user-facing activity history (item 21): a durable record

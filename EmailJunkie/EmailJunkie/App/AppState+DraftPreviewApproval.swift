@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Preview-sheet draft dispatch. Kept separate from generation so the draft

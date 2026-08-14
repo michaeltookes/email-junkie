@@ -43,7 +43,7 @@ jobs:
       - name: Test mail package
         working-directory: ${{ github.workspace }}
         run: |
-          cd Packages/EmailJunkieMail
+          cd Packages/SentwiseMail
           swift test
 
       - name: Build & Test

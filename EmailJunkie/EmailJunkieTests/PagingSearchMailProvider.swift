@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// A mail provider that models server-side search over a fixed message list,

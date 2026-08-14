@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "EmailJunkieMail",
+    name: "SentwiseMail",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "EmailJunkieMail", targets: ["EmailJunkieMail"])
+        .library(name: "SentwiseMail", targets: ["SentwiseMail"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
@@ -17,7 +17,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "EmailJunkieMail",
+            name: "SentwiseMail",
             dependencies: [
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
@@ -27,9 +27,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "EmailJunkieMailTests",
+            name: "SentwiseMailTests",
             dependencies: [
-                "EmailJunkieMail",
+                "SentwiseMail",
                 .product(name: "NIOEmbedded", package: "swift-nio")
             ]
         )

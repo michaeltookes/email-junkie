@@ -3,7 +3,7 @@ import NIOCore
 import NIOEmbedded
 import NIOIMAP
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 // swiftlint:disable file_length type_body_length
 /// Drives `IMAPBulkCleanupHandler` through the real IMAP decoder with an

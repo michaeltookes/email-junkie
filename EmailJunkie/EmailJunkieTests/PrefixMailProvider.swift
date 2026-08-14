@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 final class PrefixMailProvider: MailProvider, @unchecked Sendable {

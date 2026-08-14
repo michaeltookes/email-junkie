@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import SwiftUI
 
 /// A resizable window to search, filter, and browse a mailbox for a message to

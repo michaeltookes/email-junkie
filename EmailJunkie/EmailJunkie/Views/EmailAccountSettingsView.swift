@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import SwiftUI
 
 /// The dedicated "Email Account" tab of Settings (item 48). Promotes the cramped

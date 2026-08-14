@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Why the assistant couldn't confidently draft a reply — the reply would need

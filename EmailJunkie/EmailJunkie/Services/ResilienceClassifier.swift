@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// How a failed operation should be treated by the resilience layer (item 27).

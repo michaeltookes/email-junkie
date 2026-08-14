@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import UserNotifications
 import XCTest
 @testable import EmailJunkie

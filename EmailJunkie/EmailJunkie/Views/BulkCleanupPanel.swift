@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import SwiftUI
 
 /// The bulk-cleanup panel inside the mailbox browser (item 42).

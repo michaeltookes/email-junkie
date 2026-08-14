@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Draft-generation actions on `AppState`. Kept in a separate file so `AppState`

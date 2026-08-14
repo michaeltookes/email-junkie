@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// The mailbox + criteria used to produce the currently displayed result set.

@@ -1,5 +1,5 @@
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Tests the pure sequence-number paging math behind the bounded "recent mail"
 /// view (item 45) — no network.

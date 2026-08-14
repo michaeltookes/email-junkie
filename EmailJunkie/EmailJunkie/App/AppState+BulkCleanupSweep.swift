@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Thrown to unwind a sweep that was superseded (a newer action or a cancel),

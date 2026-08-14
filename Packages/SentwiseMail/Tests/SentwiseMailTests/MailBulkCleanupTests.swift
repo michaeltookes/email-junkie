@@ -1,5 +1,5 @@
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Covers the pure selection math behind bulk cleanup (item 42). The windowing
 /// is what keeps a bulk operation under NIO-IMAP's 8 KB frame cap on a mailbox

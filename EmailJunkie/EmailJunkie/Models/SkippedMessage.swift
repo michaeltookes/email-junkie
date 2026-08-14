@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// A message the watcher passed over instead of drafting a reply to (item 17).

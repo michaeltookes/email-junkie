@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Sender allow/blocklist wiring on `AppState` (item 18). The watcher consults

@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// State for the bulk-cleanup panel (item 42): the chosen action, the preview of

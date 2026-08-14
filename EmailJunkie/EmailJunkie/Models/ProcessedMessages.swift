@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// A bounded, ordered record of inbox messages the watcher has already handled,

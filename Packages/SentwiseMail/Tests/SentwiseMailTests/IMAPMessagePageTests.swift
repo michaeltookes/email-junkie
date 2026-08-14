@@ -2,7 +2,7 @@ import NIOCore
 import NIOEmbedded
 import NIOIMAP
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Drives `IMAPMessagePageHandler` through the real IMAP decoder with an
 /// `EmbeddedChannel`, feeding raw server responses — deterministic coverage of

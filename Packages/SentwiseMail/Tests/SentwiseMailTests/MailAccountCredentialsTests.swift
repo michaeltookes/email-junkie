@@ -1,5 +1,5 @@
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 final class MailAccountCredentialsTests: XCTestCase {
 

@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import XCTest
 @testable import EmailJunkie
 private actor SequencedCompletionLLMProvider: LLMProviding {

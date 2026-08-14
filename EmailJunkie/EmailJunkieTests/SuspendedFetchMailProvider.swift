@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import XCTest
 
 final class SuspendedFetchMailProvider: MailProvider, @unchecked Sendable {

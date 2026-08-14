@@ -1,6 +1,6 @@
 import NIOEmbedded
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Tests the `MailProvider` seam via a fake. The real `IMAPMailProvider` network
 /// path is verified live (it needs a real server), so these cover the contract

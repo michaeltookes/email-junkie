@@ -1,7 +1,7 @@
 import NIOCore
 import NIOEmbedded
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Drives `SMTPSendHandler` (behind the real `SMTPResponseDecoder`) through an
 /// `EmbeddedChannel`, exercising the greeting → EHLO → AUTH → MAIL/RCPT → DATA

@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Mail/Keychain error-message mapping for `AppState`. Kept in a separate file

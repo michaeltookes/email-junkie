@@ -2,7 +2,7 @@ import NIOCore
 import NIOEmbedded
 import NIOIMAP
 import XCTest
-@testable import EmailJunkieMail
+@testable import SentwiseMail
 
 /// Drives `IMAPAppendHandler` through the real IMAP client handler with an
 /// `EmbeddedChannel`, exercising the LOGIN → APPEND (literal + continuation) →

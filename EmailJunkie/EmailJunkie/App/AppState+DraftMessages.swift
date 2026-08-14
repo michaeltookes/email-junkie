@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// User-facing error copy for draft dispatch, and the dispatch error type. Split

@@ -2,7 +2,7 @@ import Foundation
 
 /// Opt-in, append-only diagnostic log for IMAP operations.
 ///
-/// Off unless the `EMAILJUNKIE_IMAP_LOG` environment variable points to a file
+/// Off unless the `SENTWISE_IMAP_LOG` environment variable points to a file
 /// path, so it costs nothing and leaks nothing in normal use. Used to reproduce
 /// the large-mailbox bulk under-selection (item 49) against a real server, where
 /// unit tests with a well-behaved fake cannot: it records, per selection window,
@@ -12,7 +12,7 @@ import Foundation
 enum IMAPDiagnosticLog {
     /// The log file path, or `nil` when logging is disabled.
     static var path: String? {
-        ProcessInfo.processInfo.environment["EMAILJUNKIE_IMAP_LOG"]
+        ProcessInfo.processInfo.environment["SENTWISE_IMAP_LOG"]
     }
 
     /// Whether diagnostic logging is currently enabled.

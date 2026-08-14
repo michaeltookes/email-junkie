@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Provider-awareness helpers on `AppState`: special-folder capability for the

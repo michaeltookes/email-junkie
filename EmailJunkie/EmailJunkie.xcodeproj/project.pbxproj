@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CC0000000000000000000003 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000002 /* EmailJunkieMail */; };
-		CC0000000000000000000004 /* EmailJunkieMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* EmailJunkieMail */; };
+		CC0000000000000000000003 /* SentwiseMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000002 /* SentwiseMail */; };
+		CC0000000000000000000004 /* SentwiseMail in Frameworks */ = {isa = PBXBuildFile; productRef = CC0000000000000000000005 /* SentwiseMail */; };
 		DD0000000000000000000003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -45,7 +45,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CC0000000000000000000003 /* EmailJunkieMail in Frameworks */,
+				CC0000000000000000000003 /* SentwiseMail in Frameworks */,
 				DD0000000000000000000003 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -54,7 +54,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CC0000000000000000000004 /* EmailJunkieMail in Frameworks */,
+				CC0000000000000000000004 /* SentwiseMail in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -99,7 +99,7 @@
 			);
 			name = EmailJunkie;
 			packageProductDependencies = (
-				CC0000000000000000000002 /* EmailJunkieMail */,
+				CC0000000000000000000002 /* SentwiseMail */,
 				DD0000000000000000000002 /* Sparkle */,
 			);
 			productName = EmailJunkie;
@@ -124,7 +124,7 @@
 			);
 			name = EmailJunkieTests;
 			packageProductDependencies = (
-				CC0000000000000000000005 /* EmailJunkieMail */,
+				CC0000000000000000000005 /* SentwiseMail */,
 			);
 			productName = EmailJunkieTests;
 			productReference = BB0000000000000000000003 /* EmailJunkieTests.xctest */;
@@ -160,7 +160,7 @@
 			mainGroup = AA0000000000000000000002;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */,
+				CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/SentwiseMail" */,
 				DD0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -175,9 +175,9 @@
 /* End PBXProject section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */ = {
+		CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/SentwiseMail" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../Packages/EmailJunkieMail;
+			relativePath = ../Packages/SentwiseMail;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -193,15 +193,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CC0000000000000000000002 /* EmailJunkieMail */ = {
+		CC0000000000000000000002 /* SentwiseMail */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
-			productName = EmailJunkieMail;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/SentwiseMail" */;
+			productName = SentwiseMail;
 		};
-		CC0000000000000000000005 /* EmailJunkieMail */ = {
+		CC0000000000000000000005 /* SentwiseMail */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/EmailJunkieMail" */;
-			productName = EmailJunkieMail;
+			package = CC0000000000000000000001 /* XCLocalSwiftPackageReference "../Packages/SentwiseMail" */;
+			productName = SentwiseMail;
 		};
 		DD0000000000000000000002 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;

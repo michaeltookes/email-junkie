@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// On-demand message-preview actions on `AppState` (Settings "Recent messages"

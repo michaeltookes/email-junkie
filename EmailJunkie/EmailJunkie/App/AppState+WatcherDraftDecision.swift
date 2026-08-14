@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 
 /// Watcher draft gating that combines sender rules (item 18) with the
 /// reply-worthiness check (item 17).

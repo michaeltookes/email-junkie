@@ -1,4 +1,4 @@
-import EmailJunkieMail
+import SentwiseMail
 import Foundation
 
 /// Why a message was skipped instead of drafted (item 17). Recorded on the skip

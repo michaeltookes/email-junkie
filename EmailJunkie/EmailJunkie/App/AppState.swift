@@ -1,5 +1,5 @@
 import Combine
-import EmailJunkieMail
+import SentwiseMail
 import os
 import SwiftUI
 

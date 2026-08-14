@@ -26,17 +26,17 @@ gated; optional host/port vars default to the provider's standard IMAP endpoint.
 
 **Gmail** (`GmailLiveSendTests`) — requires a Google **app password** (2FA on):
 
-- `EMAILJUNKIE_LIVE_GMAIL_EMAIL` — the Gmail address (required)
-- `EMAILJUNKIE_LIVE_GMAIL_APP_PASSWORD` — its 16-character app password (required)
-- `EMAILJUNKIE_LIVE_GMAIL_HOST` — IMAP host (optional; default `imap.gmail.com`)
-- `EMAILJUNKIE_LIVE_GMAIL_PORT` — IMAP port (optional; default `993`)
+- `SENTWISE_LIVE_GMAIL_EMAIL` — the Gmail address (required)
+- `SENTWISE_LIVE_GMAIL_APP_PASSWORD` — its 16-character app password (required)
+- `SENTWISE_LIVE_GMAIL_HOST` — IMAP host (optional; default `imap.gmail.com`)
+- `SENTWISE_LIVE_GMAIL_PORT` — IMAP port (optional; default `993`)
 
 **att.net** (`AttNetLiveDraftTests`) — requires an AT&T **Secure Mail Key**:
 
-- `EMAILJUNKIE_LIVE_ATTNET_EMAIL` — the att.net address (required)
-- `EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD` — its Secure Mail Key (required)
-- `EMAILJUNKIE_LIVE_ATTNET_HOST` — IMAP host (optional; default `imap.mail.att.net`)
-- `EMAILJUNKIE_LIVE_ATTNET_PORT` — IMAP port (optional; default `993`)
+- `SENTWISE_LIVE_ATTNET_EMAIL` — the att.net address (required)
+- `SENTWISE_LIVE_ATTNET_APP_PASSWORD` — its Secure Mail Key (required)
+- `SENTWISE_LIVE_ATTNET_HOST` — IMAP host (optional; default `imap.mail.att.net`)
+- `SENTWISE_LIVE_ATTNET_PORT` — IMAP port (optional; default `993`)
 
 The SMTP submission host and port are **derived** from the IMAP host: a leading
 `imap.` is swapped for `smtp.` (Gmail: `smtp.gmail.com`) and the port defaults to
@@ -49,11 +49,11 @@ commit it):
 
 ```sh
 # .env — placeholders; fill in real values
-EMAILJUNKIE_LIVE_GMAIL_EMAIL=you@gmail.com
-EMAILJUNKIE_LIVE_GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
+SENTWISE_LIVE_GMAIL_EMAIL=you@gmail.com
+SENTWISE_LIVE_GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 # att.net (optional — only needed for AttNetLiveDraftTests)
-EMAILJUNKIE_LIVE_ATTNET_EMAIL=you@att.net
-EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD=xxxxxxxxxxxxxxxx
+SENTWISE_LIVE_ATTNET_EMAIL=you@att.net
+SENTWISE_LIVE_ATTNET_APP_PASSWORD=xxxxxxxxxxxxxxxx
 ```
 
 ## How env vars reach the test process
@@ -76,12 +76,12 @@ runs only the Gmail live send test:
 set -a; source .env; set +a
 
 xcodebuild test \
-  -project EmailJunkie/EmailJunkie.xcodeproj \
-  -scheme EmailJunkie \
+  -project Sentwise/Sentwise.xcodeproj \
+  -scheme Sentwise \
   -destination 'platform=macOS' \
-  -only-testing:EmailJunkieTests/GmailLiveSendTests \
-  TEST_RUNNER_EMAILJUNKIE_LIVE_GMAIL_EMAIL="$EMAILJUNKIE_LIVE_GMAIL_EMAIL" \
-  TEST_RUNNER_EMAILJUNKIE_LIVE_GMAIL_APP_PASSWORD="$EMAILJUNKIE_LIVE_GMAIL_APP_PASSWORD"
+  -only-testing:SentwiseTests/GmailLiveSendTests \
+  TEST_RUNNER_SENTWISE_LIVE_GMAIL_EMAIL="$SENTWISE_LIVE_GMAIL_EMAIL" \
+  TEST_RUNNER_SENTWISE_LIVE_GMAIL_APP_PASSWORD="$SENTWISE_LIVE_GMAIL_APP_PASSWORD"
 ```
 
 For the att.net draft test, swap the `-only-testing` target and forward the
@@ -91,16 +91,16 @@ att.net vars instead:
 set -a; source .env; set +a
 
 xcodebuild test \
-  -project EmailJunkie/EmailJunkie.xcodeproj \
-  -scheme EmailJunkie \
+  -project Sentwise/Sentwise.xcodeproj \
+  -scheme Sentwise \
   -destination 'platform=macOS' \
-  -only-testing:EmailJunkieTests/AttNetLiveDraftTests \
-  TEST_RUNNER_EMAILJUNKIE_LIVE_ATTNET_EMAIL="$EMAILJUNKIE_LIVE_ATTNET_EMAIL" \
-  TEST_RUNNER_EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD="$EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD"
+  -only-testing:SentwiseTests/AttNetLiveDraftTests \
+  TEST_RUNNER_SENTWISE_LIVE_ATTNET_EMAIL="$SENTWISE_LIVE_ATTNET_EMAIL" \
+  TEST_RUNNER_SENTWISE_LIVE_ATTNET_APP_PASSWORD="$SENTWISE_LIVE_ATTNET_APP_PASSWORD"
 ```
 
 Optional host/port overrides forward the same way (e.g.
-`TEST_RUNNER_EMAILJUNKIE_LIVE_GMAIL_HOST="$EMAILJUNKIE_LIVE_GMAIL_HOST"`).
+`TEST_RUNNER_SENTWISE_LIVE_GMAIL_HOST="$SENTWISE_LIVE_GMAIL_HOST"`).
 
 Without the `TEST_RUNNER_` arguments the live tests skip and the rest of the
 suite runs normally.
@@ -112,5 +112,5 @@ suite runs normally.
 
 `xcodebuild test` occasionally fails with undefined NIO symbols or a hung test
 runner. These are environment flakes, not code bugs. To recover: kill any stray
-`EmailJunkie` process, `rm -rf ./build`, `pkill` `xctest` and `testmanagerd`,
+`Sentwise` process, `rm -rf ./build`, `pkill` `xctest` and `testmanagerd`,
 then re-run. A reboot is never needed.

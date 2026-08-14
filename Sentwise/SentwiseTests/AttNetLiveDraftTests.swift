@@ -11,10 +11,10 @@ import XCTest
 /// are supplied through environment variables, so it never fails in CI or on a
 /// developer machine without a live account:
 ///
-///   - `EMAILJUNKIE_LIVE_ATTNET_EMAIL`         — the att.net address (required)
-///   - `EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD`  — its AT&T Secure Mail Key (required)
-///   - `EMAILJUNKIE_LIVE_ATTNET_HOST`          — IMAP host (optional; default imap.mail.att.net)
-///   - `EMAILJUNKIE_LIVE_ATTNET_PORT`          — IMAP port (optional; default 993)
+///   - `SENTWISE_LIVE_ATTNET_EMAIL`         — the att.net address (required)
+///   - `SENTWISE_LIVE_ATTNET_APP_PASSWORD`  — its AT&T Secure Mail Key (required)
+///   - `SENTWISE_LIVE_ATTNET_HOST`          — IMAP host (optional; default imap.mail.att.net)
+///   - `SENTWISE_LIVE_ATTNET_PORT`          — IMAP port (optional; default 993)
 ///
 /// When credentials ARE present it: saves a reply draft to the account's real
 /// Drafts mailbox through the normal save path, fetches it back to assert the
@@ -26,15 +26,15 @@ final class AttNetLiveDraftTests: XCTestCase {
 
     private func liveCredentials() throws -> MailAccountCredentials {
         let env = ProcessInfo.processInfo.environment
-        guard let email = env["EMAILJUNKIE_LIVE_ATTNET_EMAIL"], !email.isEmpty,
-              let password = env["EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD"], !password.isEmpty else {
+        guard let email = env["SENTWISE_LIVE_ATTNET_EMAIL"], !email.isEmpty,
+              let password = env["SENTWISE_LIVE_ATTNET_APP_PASSWORD"], !password.isEmpty else {
             throw XCTSkip(
-                "Set EMAILJUNKIE_LIVE_ATTNET_EMAIL and EMAILJUNKIE_LIVE_ATTNET_APP_PASSWORD "
+                "Set SENTWISE_LIVE_ATTNET_EMAIL and SENTWISE_LIVE_ATTNET_APP_PASSWORD "
                 + "to run the att.net live draft test."
             )
         }
-        let host = env["EMAILJUNKIE_LIVE_ATTNET_HOST"] ?? "imap.mail.att.net"
-        let port = env["EMAILJUNKIE_LIVE_ATTNET_PORT"].flatMap(Int.init) ?? 993
+        let host = env["SENTWISE_LIVE_ATTNET_HOST"] ?? "imap.mail.att.net"
+        let port = env["SENTWISE_LIVE_ATTNET_PORT"].flatMap(Int.init) ?? 993
         return MailAccountCredentials(email: email, appPassword: password, host: host, port: port)
     }
 

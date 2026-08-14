@@ -2,21 +2,21 @@
   <defs>
     <linearGradient id="bg" x1="0.12" y1="0" x2="0.88" y2="1">
       <stop offset="0" stop-color="#FBFBFC"></stop>
-      <stop offset="1" stop-color="#E9EAEF"></stop>
+      <stop offset="1" stop-color="#E8EBF1"></stop>
     </linearGradient>
     <pattern id="weave" width="12.73" height="12.73" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-      <rect x="0" y="0" width="2" height="12.73" fill="#3C3C5A" opacity="0.045"></rect>
+      <rect x="0" y="0" width="2" height="12.73" fill="#2E4A6E" opacity="0.045"></rect>
     </pattern>
   </defs>
 
   <rect width="660" height="400" fill="url(#bg)"></rect>
   <rect width="660" height="400" fill="url(#weave)"></rect>
 
-  <text id="dmg-brand-title" x="330" y="62" text-anchor="middle" font-family="-apple-system, SF Pro Display, Helvetica Neue, Helvetica, sans-serif" font-size="21" font-weight="600" letter-spacing="-0.2" fill="#1D1D1F">Sentwise</text>
-  <text x="330" y="84" text-anchor="middle" font-family="-apple-system, SF Pro Text, Helvetica Neue, Helvetica, sans-serif" font-size="11" letter-spacing="1.1" fill="#6E6E78">DRAG TO APPLICATIONS</text>
+  <text x="330" y="62" text-anchor="middle" font-family="-apple-system, SF Pro Display, Helvetica Neue, Helvetica, sans-serif" font-size="21" font-weight="600" letter-spacing="-0.2" fill="#1D1D1F">Sentwise</text>
+  <text x="330" y="84" text-anchor="middle" font-family="-apple-system, SF Pro Text, Helvetica Neue, Helvetica, sans-serif" font-size="11" letter-spacing="1.1" fill="#6E7480">DRAG TO APPLICATIONS</text>
 
   
-  <g fill="#A7A7B4">
+  <g fill="#9FA8B8">
     <rect x="290" y="206" width="52" height="8" rx="4"></rect>
     <polygon points="348,197 366,210 348,223"></polygon>
   </g>

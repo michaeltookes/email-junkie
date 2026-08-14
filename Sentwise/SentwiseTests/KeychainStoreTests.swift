@@ -9,7 +9,7 @@ import XCTest
 /// service so they never touch real app secrets, and clean up after themselves.
 final class KeychainStoreTests: XCTestCase {
 
-    private let store = KeychainStore(service: "com.tookes.EmailJunkie.tests")
+    private let store = KeychainStore(service: "com.tookes.Sentwise.tests")
     private let key = SecretKey(rawValue: "test.sample")
 
     override func setUpWithError() throws {
@@ -145,7 +145,7 @@ private final class FakeKeychain {
 
     func makeStore() -> KeychainStore {
         KeychainStore(
-            service: "com.tookes.EmailJunkie.fake-tests",
+            service: "com.tookes.Sentwise.fake-tests",
             addItem: addItem,
             copyMatching: copyMatching,
             deleteItem: deleteItem,

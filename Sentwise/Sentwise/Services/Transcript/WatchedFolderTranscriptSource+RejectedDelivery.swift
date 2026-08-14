@@ -2,7 +2,7 @@ import Foundation
 import os
 
 private let rejectedDeliveryLogger = Logger(
-    subsystem: "com.tookes.EmailJunkie",
+    subsystem: "com.tookes.Sentwise",
     category: "TranscriptFolder"
 )
 

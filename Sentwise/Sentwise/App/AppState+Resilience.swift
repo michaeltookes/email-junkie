@@ -2,7 +2,7 @@ import SentwiseMail
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Resilience")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Resilience")
 
 /// Offline queue, reachability handling, and the shared retry wrappers for
 /// item 27. The queue deliberately *reuses* the pending-draft store: an approved

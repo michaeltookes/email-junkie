@@ -2,7 +2,7 @@ import Foundation
 import os
 import Security
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Keychain")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Keychain")
 
 /// Errors thrown by `KeychainStore`.
 enum KeychainError: Error, Equatable {
@@ -31,7 +31,7 @@ final class KeychainStore: SecretStore {
     private let updateItem: UpdateItem
 
     init(
-        service: String = "com.tookes.EmailJunkie",
+        service: String = "com.tookes.Sentwise",
         addItem: @escaping AddItem = SecItemAdd,
         copyMatching: @escaping CopyMatching = SecItemCopyMatching,
         deleteItem: @escaping DeleteItem = SecItemDelete,

@@ -34,7 +34,7 @@ struct FollowUpComposerView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("New follow-up from a call")
                 .font(.headline)
-            Text("Paste or drop the call transcript. Email Junkie drafts the follow-up in "
+            Text("Paste or drop the call transcript. Sentwise drafts the follow-up in "
                  + "your voice and adds it to Review Drafts for approval.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

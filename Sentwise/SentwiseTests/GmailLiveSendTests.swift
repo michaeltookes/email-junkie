@@ -53,7 +53,7 @@ final class GmailLiveSendTests: XCTestCase {
 
         // A unique marker so we find and clean up exactly our own test message.
         let marker = UUID().uuidString
-        let subject = "EmailJunkie item9 live test \(marker)"
+        let subject = "Sentwise item9 live test \(marker)"
         // Self-addressed: the reply recipient is our own account, so the SMTP
         // dispatch can never deliver anything to a third party.
         let recipient = credentials.email

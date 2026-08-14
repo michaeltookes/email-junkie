@@ -2,7 +2,7 @@ import SentwiseMail
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "SavedAccounts")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "SavedAccounts")
 
 struct ActiveMailPasswordRemoval {
     let accountEmail: String

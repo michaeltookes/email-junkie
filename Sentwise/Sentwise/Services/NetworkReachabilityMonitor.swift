@@ -31,7 +31,7 @@ final class NetworkReachabilityMonitor: NetworkReachabilityMonitoring {
     var onChange: ((Bool) -> Void)?
 
     private let monitor = NWPathMonitor()
-    private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.reachability")
+    private let queue = DispatchQueue(label: "com.tookes.Sentwise.reachability")
     private(set) var isStarted = false
 
     /// Nonisolated so it can serve as a default argument for `AppState.init`

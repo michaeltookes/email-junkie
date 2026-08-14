@@ -38,7 +38,7 @@ struct OnboardingView: View {
             Image(systemName: "envelope.badge")
                 .font(.system(size: 30))
                 .foregroundStyle(.tint)
-            Text("Welcome to Email Junkie")
+            Text("Welcome to Sentwise")
                 .font(.headline)
             stepIndicator
         }
@@ -158,7 +158,7 @@ private struct OnboardingAccountStep: View {
         VStack(alignment: .leading, spacing: 12) {
             StepHeading(
                 title: "Connect your inbox",
-                subtitle: "Email Junkie reads your inbox and Sent mail over IMAP using an app password."
+                subtitle: "Sentwise reads your inbox and Sent mail over IMAP using an app password."
             )
 
             if appState.isAccountConnected {
@@ -357,7 +357,7 @@ private struct OnboardingVoiceStep: View {
         VStack(alignment: .leading, spacing: 12) {
             StepHeading(
                 title: "Learn your writing voice",
-                subtitle: "Email Junkie studies your Sent mail so drafts sound like you, not a bot."
+                subtitle: "Sentwise studies your Sent mail so drafts sound like you, not a bot."
             )
 
             if let profile = appState.voiceProfile {

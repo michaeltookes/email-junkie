@@ -2,7 +2,7 @@ import AppKit
 import os
 import SwiftUI
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "AppDelegate")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "AppDelegate")
 
 /// Manages the application lifecycle and coordinates the top-level components.
 ///
@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Resume watching the transcript folder if it was left enabled (item 51).
         appState.startTranscriptFolderWatchingIfEnabled()
 
-        logger.info("Email Junkie launched")
+        logger.info("Sentwise launched")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.stopReachabilityMonitoring()
         appState.stopTranscriptFolderWatching()
         appState.saveSettingsSync()
-        logger.info("Email Junkie terminating")
+        logger.info("Sentwise terminating")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

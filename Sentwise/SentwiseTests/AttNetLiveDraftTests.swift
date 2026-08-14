@@ -44,7 +44,7 @@ final class AttNetLiveDraftTests: XCTestCase {
 
         // A unique marker so we find and clean up exactly our own test draft.
         let marker = UUID().uuidString
-        let subject = "EmailJunkie item44 live test \(marker)"
+        let subject = "Sentwise item44 live test \(marker)"
         // Self-addressed: replying "to" our own account so nothing leaves the mailbox.
         let recipient = credentials.email
         let originalMessageID = "<original-\(marker)@att.net>"

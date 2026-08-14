@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Persistence")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Persistence")
 
 /// Persistence operations used by `AppState`.
 ///
@@ -43,7 +43,7 @@ protocol PersistenceProvider {
 
 /// File-based persistence for non-secret application settings.
 ///
-/// Data is stored as JSON in `~/Library/Application Support/EmailJunkie/`.
+/// Data is stored as JSON in `~/Library/Application Support/Sentwise/`.
 /// Writes are atomic and happen off the main thread.
 final class PersistenceService: PersistenceProvider {
 
@@ -59,7 +59,7 @@ final class PersistenceService: PersistenceProvider {
     private let pendingDraftsURL: URL
     private let approvedDraftsURL: URL
     private let activityEventsURL: URL
-    private let ioQueue = DispatchQueue(label: "com.tookes.EmailJunkie.persistence", qos: .utility)
+    private let ioQueue = DispatchQueue(label: "com.tookes.Sentwise.persistence", qos: .utility)
 
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -80,7 +80,7 @@ final class PersistenceService: PersistenceProvider {
         let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first!
-        let directory = appSupport.appendingPathComponent("EmailJunkie", isDirectory: true)
+        let directory = appSupport.appendingPathComponent("Sentwise", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         settingsURL = directory.appendingPathComponent("Settings.json")
         voiceProfileURL = directory.appendingPathComponent("VoiceProfile.json")

@@ -14,7 +14,7 @@ struct GeneralSettingsView: View {
                     get: { appState.launchAtLogin },
                     set: { appState.setLaunchAtLogin($0) }
                 ))
-                .accessibilityLabel("Launch Email Junkie at login")
+                .accessibilityLabel("Launch Sentwise at login")
 
                 Stepper(
                     "Inbox poll interval: \(appState.pollIntervalSeconds)s",
@@ -45,7 +45,7 @@ struct GeneralSettingsView: View {
                     }
                     .accessibilityLabel("Auto-send undo window")
                     Text(appState.sendDelaySeconds > 0
-                         ? "After you approve, Email Junkie waits "
+                         ? "After you approve, Sentwise waits "
                            + "\(appState.sendDelaySeconds)s so you can cancel before it sends."
                          : "Approved drafts send immediately with no cancel window.")
                         .font(.caption)

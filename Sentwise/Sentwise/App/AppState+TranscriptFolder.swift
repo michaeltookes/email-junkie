@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let transcriptFolderLogger = Logger(subsystem: "com.tookes.EmailJunkie", category: "TranscriptFolder")
+private let transcriptFolderLogger = Logger(subsystem: "com.tookes.Sentwise", category: "TranscriptFolder")
 
 /// Watched-folder lifecycle for the post-call follow-up workflow (item 51). Kept
 /// in its own file so `AppState` stays within length limits.
@@ -65,7 +65,7 @@ extension AppState {
     static func watchedFolderMessage(for error: WatchedFolderError) -> String {
         switch error {
         case .cannotOpenFolder(let path):
-            return "Couldn't watch \(path). Check the folder exists and Email Junkie has access to it."
+            return "Couldn't watch \(path). Check the folder exists and Sentwise has access to it."
         case .folderUnavailable(let path):
             return "The watched folder \(path) is no longer available. Choose it again in Settings."
         }

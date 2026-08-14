@@ -29,7 +29,7 @@ struct DraftNeedsInfoView: View {
                 }
             }
 
-            Text("Email Junkie won't send a reply here — add these details or write the reply yourself.")
+            Text("Sentwise won't send a reply here — add these details or write the reply yourself.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

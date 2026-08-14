@@ -3,7 +3,7 @@ import Foundation
 import Network
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "OAuthRedirect")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "OAuthRedirect")
 
 /// Opens a URL in the user's default browser.
 protocol BrowserOpening {
@@ -33,7 +33,7 @@ protocol RedirectListener {
 /// the socket handling itself is verified live.
 final class LoopbackRedirectListener: RedirectListener {
 
-    private let queue = DispatchQueue(label: "com.tookes.EmailJunkie.loopback")
+    private let queue = DispatchQueue(label: "com.tookes.Sentwise.loopback")
     private var listener: NWListener?
     private var hasResumed = false
     private var redirectContinuation: CheckedContinuation<[String: String], Error>?
@@ -135,7 +135,7 @@ final class LoopbackRedirectListener: RedirectListener {
     }
 
     private func respond(on connection: NWConnection) {
-        let body = "Email Junkie is connected. You can close this window and return to the app."
+        let body = "Sentwise is connected. You can close this window and return to the app."
         let response = """
         HTTP/1.1 200 OK\r
         Content-Type: text/plain; charset=utf-8\r

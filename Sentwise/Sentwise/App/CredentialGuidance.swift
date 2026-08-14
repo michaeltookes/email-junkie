@@ -120,7 +120,7 @@ struct CredentialGuidance: Equatable {
                     "Sign in at appleid.apple.com.",
                     "Enable two-factor authentication if needed, then go to "
                         + "Sign-In and Security → App-Specific Passwords.",
-                    "Create one for Email Junkie, then paste it here."
+                    "Create one for Sentwise, then paste it here."
                 ],
                 url: URL(string: "https://appleid.apple.com")
             )

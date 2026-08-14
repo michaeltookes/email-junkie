@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "GmailAuth")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "GmailAuth")
 
 /// Errors specific to the Gmail auth coordinator.
 enum GmailAuthError: Error, Equatable {

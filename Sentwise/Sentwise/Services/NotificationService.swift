@@ -2,7 +2,7 @@ import Foundation
 import os
 import UserNotifications
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Notifications")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Notifications")
 
 /// `userInfo` key carrying a draft's `identity` on its notification.
 private let draftIdentityUserInfoKey = "draftIdentity"
@@ -233,7 +233,7 @@ final class UserNotificationService: NSObject, DraftNotifying {
             sendBehavior: sendBehavior,
             suppressPresentation: suppressPresentation
         )
-        content.threadIdentifier = draft.sourceAccountEmail ?? "EmailJunkie"
+        content.threadIdentifier = draft.sourceAccountEmail ?? "Sentwise"
         if suppressPresentation {
             content.interruptionLevel = .passive
         }

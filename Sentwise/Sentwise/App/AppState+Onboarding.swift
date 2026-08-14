@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.tookes.EmailJunkie", category: "Onboarding")
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Onboarding")
 
 /// First-run onboarding state and transitions on `AppState`. Kept in a separate
 /// file so `AppState` stays within the file/type length limits.
@@ -30,7 +30,7 @@ extension AppState {
     /// The privacy statement shown during onboarding and in Settings. A single
     /// source of truth so the two never drift.
     static let privacyStatement =
-        "Email Junkie is local-first. Your mail and settings stay on this Mac, "
+        "Sentwise is local-first. Your mail and settings stay on this Mac, "
         + "and secrets like API keys and app passwords are stored in the macOS "
         + "Keychain — never in plaintext. Nothing leaves your machine except the "
         + "LLM request you configure and control."

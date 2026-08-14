@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Manages the menu bar icon and dropdown menu.
 ///
-/// The menu bar is the primary access point for Email Junkie. The menu is
+/// The menu bar is the primary access point for Sentwise. The menu is
 /// rebuilt on demand (`menuNeedsUpdate`) so the status line and toggle states
 /// always reflect current `AppState`.
 @MainActor
@@ -78,7 +78,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if let button = statusItem.button {
             button.image = NSImage(
                 systemSymbolName: "envelope.badge",
-                accessibilityDescription: "Email Junkie"
+                accessibilityDescription: "Sentwise"
             )
             button.image?.isTemplate = true  // Adapts to light/dark menu bar.
         }
@@ -154,7 +154,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         var items: [NSMenuItem] = []
 
         // Header (disabled label)
-        let header = NSMenuItem(title: "Email Junkie", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "Sentwise", action: nil, keyEquivalent: "")
         header.isEnabled = false
         items.append(header)
 
@@ -205,7 +205,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         items.append(.separator())
 
         // Quit
-        let quit = NSMenuItem(title: "Quit Email Junkie", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Sentwise", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         items.append(quit)
 
@@ -292,11 +292,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Email Junkie Setup"
+            window.title = "Sentwise Setup"
             window.contentView = NSHostingView(rootView: view)
             window.center()
             window.isReleasedWhenClosed = false
-            window.setAccessibilityLabel("Email Junkie Setup")
+            window.setAccessibilityLabel("Sentwise Setup")
             onboardingWindow = window
 
             onboardingCloseObserver = NotificationCenter.default.addObserver(
@@ -412,11 +412,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Email Junkie Settings"
+            window.title = "Sentwise Settings"
             window.contentView = NSHostingView(rootView: view)
             window.center()
             window.isReleasedWhenClosed = false
-            window.setAccessibilityLabel("Email Junkie Settings")
+            window.setAccessibilityLabel("Sentwise Settings")
             settingsWindow = window
 
             settingsCloseObserver = NotificationCenter.default.addObserver(

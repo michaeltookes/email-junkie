@@ -44,7 +44,7 @@ Prioritized list of planned features, improvements, and technical debt for **sen
 
 11. **Distribution: signed DMG + Sparkle + Homebrew cask** — *scaffolding built (branch `distribution-pipeline`); live signed release remaining*
     Reuse the Prompter shipping pipeline.
-    > **Scaffolding landed 2026-08-03 (branch `distribution-pipeline`):** the code/asset half is in the repo — branded app icon, DMG assets, a credential-parameterized release pipeline with a proven unsigned dry-run, Sparkle wiring (placeholder key), the cask template, and the release runbook. The ⬜ items below can only be met by an actual signed release using the user's Developer ID cert, notarytool profile, and a real EdDSA keypair — done later via the release-prep skill (see [`releasing.md`](./releasing.md)). CI automation of this pipeline is item 29.
+    > **Scaffolding landed 2026-08-03 (branch `distribution-pipeline`):** the code/asset half is in the repo — branded app icon, DMG assets, a credential-parameterized release pipeline with a proven unsigned dry-run, Sparkle wiring with the established v0.1.0 public key, the cask template, and the release runbook. The ⬜ items below can only be met by an actual signed release using the user's Developer ID cert, notarytool profile, and matching Sparkle EdDSA private key — done later via the release-prep skill (see [`releasing.md`](./releasing.md)). CI automation of this pipeline is item 29.
     *As Priya, I want to install via DMG or Homebrew and get automatic updates, so that setup and upkeep are frictionless and not scary.*
     - ✅ Branded app icon compiled into the app (AppIcon asset catalog, verified `CFBundleIconName`) and DMG background/icon masters vendored under `Distribution/`.
     - ✅ Release pipeline `Distribution/scripts/release.sh` (archive → export → notarize → DMG → appcast → checksums), all credentials via env vars; unsigned `--dry-run` verified to build the branded DMG (volume "Sentwise", drag-to-Applications, branded background, staged "Sentwise.app", 0.1.0).
@@ -52,7 +52,7 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - ✅ Homebrew cask template `Distribution/sentwise.rb` (house style) and full release runbook `docs/releasing.md`.
     - ⬜ Signed, notarized DMG installs without Gatekeeper "unidentified developer" warnings — needs the Developer ID cert + notarytool profile at release time.
     - ⬜ Homebrew cask published live in the tap with the real DMG `sha256`.
-    - ⬜ Sparkle auto-update verified against a published appcast — needs the real EdDSA keypair (replace the placeholder `SUPublicEDKey`).
+    - ⬜ Sparkle auto-update verified against a published appcast — needs an appcast signed with the established Sparkle EdDSA private key.
 
 29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
     Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything.

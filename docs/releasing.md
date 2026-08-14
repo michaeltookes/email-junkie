@@ -16,9 +16,9 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
 | --- | --- |
 | `Distribution/scripts/release.sh` — the pipeline | Developer ID Application cert (in login Keychain) |
 | `Distribution/scripts/make-dmg.sh` / `make-icns.sh` | notarytool keychain profile |
-| `Distribution/assets/**` — branded DMG background + icon masters | Sparkle EdDSA **private** key (in login Keychain) |
-| `Distribution/sentwise.rb` — Homebrew cask template | The real `SUPublicEDKey` (paste into `Info.plist` once) |
-| `Sentwise/Info.plist` — Sparkle feed URL + **placeholder** public key | |
+| `Distribution/assets/**` — branded DMG background + icon masters | Sparkle EdDSA **private** key matching the committed public key |
+| `Distribution/sentwise.rb` — Homebrew cask template | |
+| `Sentwise/Info.plist` — Sparkle feed URL + established `SUPublicEDKey` | |
 
 ---
 
@@ -41,21 +41,22 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
    ```
    `Sentwise-Notary` is then your `NOTARY_PROFILE`.
 
-3. **Sparkle EdDSA signing keypair** — generate **once, ever**
-   Use Sparkle's `generate_keys` (ships in the Sparkle SPM artifact bundle, or
-   download the Sparkle release tools):
-   ```bash
-   ./bin/generate_keys
-   ```
-   - The **private** key is stored in your login Keychain automatically — never
-     commit it, never print it into the repo.
-   - It prints the **public** key. Paste that base64 string into
-     `Sentwise/Info.plist` as `SUPublicEDKey`, replacing the all-`A`
-     placeholder. Commit that one-line change.
-   - To recover the public key later: `./bin/generate_keys -p`.
+3. **Sparkle EdDSA signing keypair** — established for v0.1.0
+   The public key is already committed in `Sentwise/Info.plist` as
+   `SUPublicEDKey`. For every signed release, use the matching **private** key
+   from the maintainer's login Keychain. Never generate a replacement keypair or
+   change `SUPublicEDKey` for a normal release: installed clients verify updates
+   against the public key that shipped inside their current app.
 
-   > Until this real key is in `Info.plist`, the app still launches and runs —
-   > it just rejects any downloaded update because signature verification fails.
+   - The **private** key stays in the maintainer's login Keychain — never commit
+     it, never print it into the repo.
+   - To re-print the public half for verification: `./bin/generate_keys -p`.
+   - Run Sparkle's `generate_keys` only before the first public release or as an
+     intentional key rotation with a migration plan. If it is run accidentally,
+     do not paste or commit the new public key.
+
+   The release script still aborts if a signed build contains the old all-`A`
+   placeholder or an empty `SUPublicEDKey`.
 
 4. **Tooling**: `create-dmg` (`brew install create-dmg`) and Sparkle's
    `generate_appcast` / `sign_update`. Point `SPARKLE_BIN` at the directory
@@ -112,9 +113,11 @@ What `release.sh` does, step by step:
 1. **Archive** the `Sentwise` scheme in Release, stamping the version/build.
 2. **Export** a Developer-ID-signed `.app` (hardened runtime, secure timestamp)
    via a generated `ExportOptions.plist`. It then **hard-aborts if the built
-   app's `SUPublicEDKey` is still the placeholder** (or empty), so a signed
-   release can never ship with auto-update silently broken — generate the real
-   key (prerequisite 3) and update `Info.plist` first.
+   app's `SUPublicEDKey` is empty or still carries the legacy all-`A`
+   placeholder**, so a signed release can never ship without its
+   update-verification key. This is a guard against missing/legacy wiring;
+   normal releases must keep the committed public key and sign appcasts with the
+   matching private key (prerequisite 3).
 3. **Stage** the app as `Sentwise.app` so the DMG icon label reads as the
    brand name.
 4. **Build the DMG** with the branded background (`make-dmg.sh`, fixed geometry).
@@ -147,4 +150,5 @@ What `release.sh` does, step by step:
 - On launch, Sparkle quietly checks the appcast (`SUEnableAutomaticChecks`).
 - The menu's **Check for Updates…** item triggers an interactive check.
 - Sparkle downloads the new DMG and verifies it against `SUPublicEDKey` before
-  installing — which is why the real key must ship in the first release.
+  installing — which is why future appcasts must be signed with the private key
+  matching the public key already shipped in the app.

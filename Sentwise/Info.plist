@@ -28,18 +28,17 @@
 	  when an update is actually found; the explicit "Check for Updates…" menu
 	  item is the always-interactive path.
 
-	  SUPublicEDKey: TODO — REPLACE BEFORE FIRST RELEASE. This is a placeholder
-	  (32 zero bytes, base64). Generate the real EdDSA keypair once with
-	  Sparkle's `generate_keys` tool, keep the PRIVATE key in the login
-	  Keychain (never in the repo), and paste the printed PUBLIC key here.
-	  Until then, downloaded updates fail signature verification and are
-	  rejected — the app still launches and runs normally.
+	  SUPublicEDKey: the real EdDSA public key (set 2026-08-14 for v0.1.0).
+	  The matching PRIVATE key lives in the maintainer's login Keychain (never in
+	  the repo); `generate_keys -p` re-prints this public half if ever needed.
+	  Do not replace this public key for normal releases: installed clients
+	  verify future appcasts against the key that shipped in their current app.
 	-->
 	<key>SUFeedURL</key>
 	<string>https://github.com/michaeltookes/sentwise/releases/latest/download/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUPublicEDKey</key>
-	<string>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</string>
+	<string>juNano3Eeq4XsPnbiSyqQ0mk48luI+lIyureRMZmJnI=</string>
 </dict>
 </plist>

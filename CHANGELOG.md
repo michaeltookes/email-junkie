@@ -17,7 +17,7 @@ Initial release.
 - **One-tap approval** — native macOS notifications and a review window; approve, edit, or deny every draft. Nothing ever sends without you.
 - **Send or save-as-draft** — your choice on approval: send immediately (with a configurable undo window) or save to your provider's Drafts folder.
 - **Safety guards** — stale-thread detection blocks replies to conversations that moved on; low-confidence drafts are flagged for your input instead of guessing; offline approvals queue durably and dispatch on reconnect.
-- **Works with any IMAP mailbox** — connect with your email address and an app password. Gmail and AT&T/Yahoo verified live end to end.
+- **Supported IMAP mailboxes** — connect with your email address and an app password. Gmail and AT&T/Yahoo are verified live end to end; custom IMAP hosts are supported when their SMTP endpoint follows the derived `smtp.` host on implicit-TLS port 465.
 - **Bring-your-own AI** — pluggable providers (Anthropic, OpenAI, and any OpenAI-compatible endpoint including local runtimes like Ollama), with your key stored in the macOS Keychain.
 - **Mailbox cleanup tools** — a browser with search and safe bulk cleanup that can drain even huge, neglected inboxes without ever bulk-downloading them.
 - **Activity history** — a local, metadata-only log of everything the assistant did and why.

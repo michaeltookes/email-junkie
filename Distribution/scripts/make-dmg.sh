@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Email Junkie DMG with the branded background and drag-to-Applications
+# Build the Sentwise DMG with the branded background and drag-to-Applications
 # layout.
 #
 # Home: Distribution/scripts/ — paths resolve relative to Distribution/.
@@ -7,7 +7,7 @@
 # /opt/homebrew/bin/create-dmg).
 #
 # Usage: make-dmg.sh <path-to.app> [output.dmg]
-#   The .app should already be named "Email Junkie.app" so the icon label under
+#   The .app should already be named "Sentwise.app" so the icon label under
 #   the drag target reads as the brand name (the release pipeline stages it that
 #   way). The exact geometry below matches the baked-in background art and must
 #   not drift: 660x400 window, app icon at (160,214), Applications alias at
@@ -15,8 +15,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="${1:-build/Email Junkie.app}"
-OUT="${2:-build/EmailJunkie.dmg}"
+APP="${1:-build/Sentwise.app}"
+OUT="${2:-build/Sentwise.dmg}"
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 
@@ -28,7 +28,7 @@ fi
 # Window is 660x400; Finder draws the two 128px icons at the centers baked into
 # the background art: app at (160,214), Applications alias at (500,214).
 create-dmg \
-  --volname "Email Junkie" \
+  --volname "Sentwise" \
   --background "assets/png/dmg-background.png" \
   --window-pos 200 120 \
   --window-size 660 400 \

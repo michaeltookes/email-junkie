@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Email Junkie release pipeline.
+# Sentwise release pipeline.
 #
 #   archive -> export (Developer ID) -> notarize -> DMG -> appcast -> checksums
 #
@@ -29,9 +29,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"            # Distribution/
 REPO_ROOT="$(cd "$DIST_DIR/.." && pwd)"
-PROJECT="$REPO_ROOT/EmailJunkie/EmailJunkie.xcodeproj"
-SCHEME="EmailJunkie"
-APP_DISPLAY_NAME="Email Junkie"                     # DMG icon label / volume name
+PROJECT="$REPO_ROOT/Sentwise/Sentwise.xcodeproj"
+SCHEME="Sentwise"
+APP_DISPLAY_NAME="Sentwise"                     # DMG icon label / volume name
 OUT="$REPO_ROOT/dist"                               # gitignored artifact dir
 
 # ---- args ------------------------------------------------------------------
@@ -58,10 +58,10 @@ pbxproj="$PROJECT/project.pbxproj"
 log()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
 step() { printf '\n\033[1;36m### %s\033[0m\n' "$*"; }
 
-ARCHIVE="$OUT/EmailJunkie.xcarchive"
+ARCHIVE="$OUT/Sentwise.xcarchive"
 EXPORT_DIR="$OUT/export"
 STAGE_DIR="$OUT/stage"
-DMG="$OUT/EmailJunkie-$VERSION.dmg"
+DMG="$OUT/Sentwise-$VERSION.dmg"
 
 # The all-zero SUPublicEDKey placeholder shipped in Info.plist until a real
 # EdDSA keypair is generated at release time. Shipping a signed build with this
@@ -70,7 +70,7 @@ DMG="$OUT/EmailJunkie-$VERSION.dmg"
 # signed path hard-aborts if the built app still carries it.
 PLACEHOLDER_EDKEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-step "Email Junkie release  (version $VERSION, build $BUILD, dry-run=$DRY_RUN)"
+step "Sentwise release  (version $VERSION, build $BUILD, dry-run=$DRY_RUN)"
 rm -rf "$ARCHIVE" "$EXPORT_DIR" "$STAGE_DIR"
 mkdir -p "$OUT"
 
@@ -104,7 +104,7 @@ step "2/6  Exporting app bundle"
 mkdir -p "$EXPORT_DIR"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   # No signing: lift the .app straight out of the archive.
-  cp -R "$ARCHIVE/Products/Applications/EmailJunkie.app" "$EXPORT_DIR/EmailJunkie.app"
+  cp -R "$ARCHIVE/Products/Applications/Sentwise.app" "$EXPORT_DIR/Sentwise.app"
 else
   cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -129,7 +129,7 @@ fi
 # source plist. A signed release with the placeholder key would install fine
 # but never accept an update, so this is a hard stop for real releases.
 built_edkey="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' \
-  "$EXPORT_DIR/EmailJunkie.app/Contents/Info.plist" 2>/dev/null || true)"
+  "$EXPORT_DIR/Sentwise.app/Contents/Info.plist" 2>/dev/null || true)"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$built_edkey" == "$PLACEHOLDER_EDKEY" || -z "$built_edkey" ]]; then
     log "NOTE: SUPublicEDKey is the placeholder — expected for a dry run; a real signed release would abort here."
@@ -138,7 +138,7 @@ else
   if [[ -z "$built_edkey" || "$built_edkey" == "$PLACEHOLDER_EDKEY" ]]; then
     echo "release: SUPublicEDKey is still the placeholder (or empty/missing) in the built app." >&2
     echo "         Run Sparkle's generate_keys and paste the real public key into" >&2
-    echo "         EmailJunkie/Info.plist, then rebuild. See docs/releasing.md." >&2
+    echo "         Sentwise/Info.plist, then rebuild. See docs/releasing.md." >&2
     exit 1
   fi
   log "SUPublicEDKey verified present (non-placeholder)"
@@ -147,7 +147,7 @@ fi
 # ---- 3. stage under the branded name ---------------------------------------
 step "3/6  Staging \"$APP_DISPLAY_NAME.app\""
 mkdir -p "$STAGE_DIR"
-cp -R "$EXPORT_DIR/EmailJunkie.app" "$STAGE_DIR/$APP_DISPLAY_NAME.app"
+cp -R "$EXPORT_DIR/Sentwise.app" "$STAGE_DIR/$APP_DISPLAY_NAME.app"
 
 # ---- 4. build the DMG ------------------------------------------------------
 step "4/6  Building DMG"

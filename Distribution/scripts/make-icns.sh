@@ -17,7 +17,7 @@ mkdir -p "$OUT" build
 # Re-render from the SVG master if librsvg is available (sharper than downscaling).
 render() { # $1 = px, $2 = dest
   if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert -w "$1" -h "$1" assets/EmailJunkie.svg -o "$2"
+    rsvg-convert -w "$1" -h "$1" assets/Sentwise.svg -o "$2"
   else
     sips -z "$1" "$1" "$SRC" --out "$2" >/dev/null
   fi

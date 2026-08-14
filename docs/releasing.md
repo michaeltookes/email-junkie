@@ -1,7 +1,7 @@
-# Releasing Email Junkie
+# Releasing Sentwise
 
 The full runbook for cutting a signed, notarized, auto-updating release of the
-Email Junkie menu-bar app. This covers the **manual** pipeline; CI automation
+Sentwise menu-bar app. This covers the **manual** pipeline; CI automation
 (backlog item 29) is deliberately out of scope.
 
 Everything credential-related is supplied at release time through environment
@@ -17,8 +17,8 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
 | `Distribution/scripts/release.sh` — the pipeline | Developer ID Application cert (in login Keychain) |
 | `Distribution/scripts/make-dmg.sh` / `make-icns.sh` | notarytool keychain profile |
 | `Distribution/assets/**` — branded DMG background + icon masters | Sparkle EdDSA **private** key (in login Keychain) |
-| `Distribution/email-junkie.rb` — Homebrew cask template | The real `SUPublicEDKey` (paste into `Info.plist` once) |
-| `EmailJunkie/Info.plist` — Sparkle feed URL + **placeholder** public key | |
+| `Distribution/sentwise.rb` — Homebrew cask template | The real `SUPublicEDKey` (paste into `Info.plist` once) |
+| `Sentwise/Info.plist` — Sparkle feed URL + **placeholder** public key | |
 
 ---
 
@@ -34,12 +34,12 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
 2. **notarytool keychain profile**
    Store an app-specific password (from appleid.apple.com) once:
    ```bash
-   xcrun notarytool store-credentials "EmailJunkie-Notary" \
+   xcrun notarytool store-credentials "Sentwise-Notary" \
      --apple-id "you@example.com" \
      --team-id "YOURTEAMID" \
      --password "app-specific-password"
    ```
-   `EmailJunkie-Notary` is then your `NOTARY_PROFILE`.
+   `Sentwise-Notary` is then your `NOTARY_PROFILE`.
 
 3. **Sparkle EdDSA signing keypair** — generate **once, ever**
    Use Sparkle's `generate_keys` (ships in the Sparkle SPM artifact bundle, or
@@ -50,7 +50,7 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
    - The **private** key is stored in your login Keychain automatically — never
      commit it, never print it into the repo.
    - It prints the **public** key. Paste that base64 string into
-     `EmailJunkie/Info.plist` as `SUPublicEDKey`, replacing the all-`A`
+     `Sentwise/Info.plist` as `SUPublicEDKey`, replacing the all-`A`
      placeholder. Commit that one-line change.
    - To recover the public key later: `./bin/generate_keys -p`.
 
@@ -87,8 +87,8 @@ Distribution/scripts/release.sh --dry-run
 ```
 
 Output lands in the gitignored `dist/`:
-- `dist/EmailJunkie-<version>.dmg` — unsigned, for layout inspection only
-- `dist/EmailJunkie-<version>.dmg.sha256`
+- `dist/Sentwise-<version>.dmg` — unsigned, for layout inspection only
+- `dist/Sentwise-<version>.dmg.sha256`
 
 Open the DMG to confirm the background art and drag-to-Applications layout, then
 detach it. **Do not distribute a dry-run DMG** — it is unsigned and
@@ -101,7 +101,7 @@ un-notarized, so Gatekeeper will block it on other machines.
 ```bash
 export SIGNING_IDENTITY="Developer ID Application: Your Name (YOURTEAMID)"
 export DEVELOPMENT_TEAM="YOURTEAMID"
-export NOTARY_PROFILE="EmailJunkie-Notary"
+export NOTARY_PROFILE="Sentwise-Notary"
 # export SPARKLE_BIN="/path/to/Sparkle/bin"   # if not on PATH
 
 Distribution/scripts/release.sh --version 0.1.0 --build 1
@@ -109,13 +109,13 @@ Distribution/scripts/release.sh --version 0.1.0 --build 1
 
 What `release.sh` does, step by step:
 
-1. **Archive** the `EmailJunkie` scheme in Release, stamping the version/build.
+1. **Archive** the `Sentwise` scheme in Release, stamping the version/build.
 2. **Export** a Developer-ID-signed `.app` (hardened runtime, secure timestamp)
    via a generated `ExportOptions.plist`. It then **hard-aborts if the built
    app's `SUPublicEDKey` is still the placeholder** (or empty), so a signed
    release can never ship with auto-update silently broken — generate the real
    key (prerequisite 3) and update `Info.plist` first.
-3. **Stage** the app as `Email Junkie.app` so the DMG icon label reads as the
+3. **Stage** the app as `Sentwise.app` so the DMG icon label reads as the
    brand name.
 4. **Build the DMG** with the branded background (`make-dmg.sh`, fixed geometry).
 5. **Notarize** the DMG (`notarytool submit --wait`) and **staple** the ticket.
@@ -127,17 +127,17 @@ What `release.sh` does, step by step:
 ## Publishing
 
 1. Create a GitHub release tagged `v<version>` on
-   `github.com/michaeltookes/email-junkie`.
-2. Upload **both** `EmailJunkie-<version>.dmg` and `appcast.xml` as release
+   `github.com/michaeltookes/sentwise`.
+2. Upload **both** `Sentwise-<version>.dmg` and `appcast.xml` as release
    assets. The app's `SUFeedURL` points at
    `releases/latest/download/appcast.xml`, so the appcast must be an asset on
    the release marked **latest**.
-3. **Homebrew cask**: copy `Distribution/email-junkie.rb` into the tap at
+3. **Homebrew cask**: copy `Distribution/sentwise.rb` into the tap at
    `~/Desktop/Current Projects/homebrew-tap/Casks/`, set `version` and the DMG
    `sha256` (from the `.sha256` file), then commit/push the tap. Users install
    with:
    ```bash
-   brew install --cask michaeltookes/tap/email-junkie
+   brew install --cask michaeltookes/tap/sentwise
    ```
 
 ---

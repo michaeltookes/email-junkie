@@ -5,6 +5,17 @@ All notable changes to Sentwise are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-14
+
+### Fixed
+
+- **v0.1.0 crashed at launch** — the exported app was missing its framework search path, so it could not load the bundled Sparkle updater and aborted immediately. If you installed v0.1.0, update to this release (`brew upgrade --cask sentwise` or download the new DMG); it launches correctly.
+
+### Changed
+
+- **New app icon** — the Sentwise owl: an envelope that looks back at you, with a hand-tuned variant so it stays legible at the smallest sizes.
+- **Refreshed DMG installer artwork** to match the new brand.
+
 ## [0.1.0] - 2026-08-14
 
 Initial release.
@@ -24,4 +35,5 @@ Initial release.
 - **Private by design** — local-first storage keeps settings, history, and secrets on your Mac. When you use a remote AI provider, Sentwise sends the relevant mail content, transcript text, and voice profile only to the provider you configure.
 - **Signed, notarized, auto-updating** — Developer ID–signed DMG with Sparkle auto-update and a Homebrew cask (`brew install --cask michaeltookes/tap/sentwise`).
 
+[0.1.1]: https://github.com/michaeltookes/sentwise/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/michaeltookes/sentwise/releases/tag/v0.1.0

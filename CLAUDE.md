@@ -1,10 +1,12 @@
 # CLAUDE.md
 
-Guidance for agents working in the **email-junkie** repository.
+Guidance for agents working in the **sentwise** repository.
 
 ## What this is
 
-email-junkie is a **native, local-first macOS menu-bar assistant** that learns the user's voice from their Sent mail and drafts email on their behalf for one-tap approval via a native macOS notification.
+Sentwise is a **native, local-first macOS menu-bar assistant** that learns the user's voice from their Sent mail and drafts email on their behalf for one-tap approval via a native macOS notification.
+
+**Product rename (2026-08-13):** the product was renamed **Email Junkie → Sentwise** (a clean, pre-release break — no released builds existed, so there is no migration code for settings or Keychain). Canonical domain **sentwise.ai**; **sentwise.app** and **sentwise.io** are owned and redirect to it. The GitHub repo is renamed to `sentwise` at merge time. Bundle id is `com.tookes.Sentwise`; the local mail package is `SentwiseMail`.
 
 **Direction update (2026-08-12):** the **flagship workflow is the post-call follow-up** — when a call ends, ingest the transcript and draft the next-steps email in the user's voice (backlog items 51–57). Inbox reply drafting remains, as one workflow among several. Primary commercial ICP: **Account Executives / high-velocity salespeople** (the "Marcus" persona in `docs/backlog.md`). **No bot, no storage, no training:** calls are never joined by a bot; audio and (future) capture/transcription stay on-device; call content is never stored server-side or used as training data. Drafting runs through a stateless, zero-retention managed proxy by default (2026-08-12 managed-inference decision — backlog items 56/59), or fully under user control via BYO-key/local model. (Bot-free capture alone is no longer unique — Fathom and Granola both offer it but store calls in their cloud and train on de-identified customer data; the durable differentiators are nothing-stored/nothing-trained-on privacy and the send-ready email in the user's voice from their own mailbox.)
 
@@ -20,7 +22,7 @@ It is a **Prompter-family product** — a native Mac app for individual knowledg
 - **Monetization (updated 2026-08-12, second revision — supersedes "no subscription" and BYO-key-as-default):** subscription with **managed inference bundled** (user never touches an API key; stateless zero-retention proxy; license = account); open core / paid binary — source stays public, signed auto-updating binaries are licensed. Trial → Individual → Team; BYO-key/local stays as the power/privacy option. See backlog items 56–59. The landing page/marketing site lives in **its own repo** and requires a discussion before any building starts.
 
 ### Email connection method (updated 2026-07-03): IMAP + app password
-**The primary connection path is IMAP + a Google app password**, implemented with SwiftNIO (`swift-nio-imap`) in the local `Packages/EmailJunkieMail` package. Users paste their email + a 16-character app password (2FA required) — no Google Cloud console, no client ID/secret, no verification/CASA.
+**The primary connection path is IMAP + a Google app password**, implemented with SwiftNIO (`swift-nio-imap`) in the local `Packages/SentwiseMail` package. Users paste their email + a 16-character app password (2FA required) — no Google Cloud console, no client ID/secret, no verification/CASA.
 
 This **superseded an earlier BYO-OAuth decision** (2026-07-02): we built the full Google OAuth flow (item 3) but live testing showed BYO OAuth is far too much friction for non-developers (create a Cloud project, enable APIs, configure a consent screen, make a Desktop client). The OAuth engine (`GmailAuthCoordinator`, `OAuthTokenService`, `LoopbackRedirectListener`, etc.) **remains in the codebase, parked** — it's the future "bundled verified client + CASA" option if the product ever targets the non-technical mass market. Known parked bug: the OAuth loopback listener throws `NWError 22` on start; unfixed because that path isn't primary.
 

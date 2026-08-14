@@ -19,7 +19,7 @@ What you expected to happen.
 
 **Environment**
 - macOS version:
-- Email Junkie version:
+- Sentwise version:
 - LLM provider (if relevant):
 
 **Additional context**

@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: EmailJunkie
+        working-directory: Sentwise
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,14 +43,14 @@ jobs:
       - name: Test mail package
         working-directory: ${{ github.workspace }}
         run: |
-          cd Packages/EmailJunkieMail
+          cd Packages/SentwiseMail
           swift test
 
       - name: Build & Test
         run: |
           set -o pipefail
           xcodebuild test \
-            -project EmailJunkie.xcodeproj \
-            -scheme EmailJunkie \
+            -project Sentwise.xcodeproj \
+            -scheme Sentwise \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO

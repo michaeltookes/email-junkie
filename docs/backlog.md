@@ -1,6 +1,6 @@
 # Backlog
 
-Prioritized list of planned features, improvements, and technical debt for **email-junkie** — a native, local-first macOS assistant that learns your voice from your Sent mail and drafts email on your behalf for one-tap approval. Its **flagship workflow (2026-08-12 pivot)** is the **post-call follow-up**: when a call ends, ingest the transcript and draft the next-steps email in the user's voice. Inbox reply drafting remains, as one workflow among several.
+Prioritized list of planned features, improvements, and technical debt for **sentwise** — a native, local-first macOS assistant that learns your voice from your Sent mail and drafts email on your behalf for one-tap approval. Its **flagship workflow (2026-08-12 pivot)** is the **post-call follow-up**: when a call ends, ingest the transcript and draft the next-steps email in the user's voice. Inbox reply drafting remains, as one workflow among several.
 
 **Product direction (updated 2026-08-12):**
 - **Flagship workflow:** transcript in → next-steps follow-up email out, in the user's voice (items 51–55). The existing drafting → approval → send plumbing is reused; transcript acquisition is the new subsystem, phased: file/paste ingestion first (51), calendar awareness (52), platform APIs (53), native no-bot capture last (54).
@@ -47,9 +47,9 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     > **Scaffolding landed 2026-08-03 (branch `distribution-pipeline`):** the code/asset half is in the repo — branded app icon, DMG assets, a credential-parameterized release pipeline with a proven unsigned dry-run, Sparkle wiring (placeholder key), the cask template, and the release runbook. The ⬜ items below can only be met by an actual signed release using the user's Developer ID cert, notarytool profile, and a real EdDSA keypair — done later via the release-prep skill (see [`releasing.md`](./releasing.md)). CI automation of this pipeline is item 29.
     *As Priya, I want to install via DMG or Homebrew and get automatic updates, so that setup and upkeep are frictionless and not scary.*
     - ✅ Branded app icon compiled into the app (AppIcon asset catalog, verified `CFBundleIconName`) and DMG background/icon masters vendored under `Distribution/`.
-    - ✅ Release pipeline `Distribution/scripts/release.sh` (archive → export → notarize → DMG → appcast → checksums), all credentials via env vars; unsigned `--dry-run` verified to build the branded DMG (volume "Email Junkie", drag-to-Applications, branded background, staged "Email Junkie.app", 0.1.0).
+    - ✅ Release pipeline `Distribution/scripts/release.sh` (archive → export → notarize → DMG → appcast → checksums), all credentials via env vars; unsigned `--dry-run` verified to build the branded DMG (volume "Sentwise", drag-to-Applications, branded background, staged "Sentwise.app", 0.1.0).
     - ✅ Sparkle 2.x integrated as an SPM dependency and wired via `SPUStandardUpdaterController`; `SUFeedURL` + `SUEnableAutomaticChecks` set in Info.plist.
-    - ✅ Homebrew cask template `Distribution/email-junkie.rb` (house style) and full release runbook `docs/releasing.md`.
+    - ✅ Homebrew cask template `Distribution/sentwise.rb` (house style) and full release runbook `docs/releasing.md`.
     - ⬜ Signed, notarized DMG installs without Gatekeeper "unidentified developer" warnings — needs the Developer ID cert + notarytool profile at release time.
     - ⬜ Homebrew cask published live in the tap with the real DMG `sha256`.
     - ⬜ Sparkle auto-update verified against a published appcast — needs the real EdDSA keypair (replace the placeholder `SUPublicEDKey`).
@@ -64,7 +64,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 57. **Landing page / marketing site** — *⚠️ discussion required before building; lives in its own repo*
     The public site where people find the product, understand it in 30 seconds, and pay: positioning, pricing/checkout, download, and the Windows-demand waitlist.
-    > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not email-junkie. This item exists so the work isn't forgotten and its requirements are captured.
+    > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not sentwise. This item exists so the work isn't forgotten and its requirements are captured.
     *As Marcus, I want to find the product, get what it does in 30 seconds, and start a trial without friction, so that trying it is easier than ignoring it.*
     - Positioning centered on the post-call follow-up workflow ("your follow-up is drafted before you're back from coffee") and the differentiators: no bot in your meetings, nothing stored in anyone's cloud, never training data, one price with the AI included.
     - **Training-data contrast (updated 2026-08-12 for the managed-inference decision):** cloud notetakers' own policies state customer call data (de-identified) is used to improve their models — e.g. Fathom's FAQ — and they store calls indefinitely. Our claim, stated accurately and without overreach: **"your calls are never stored on our servers and never train anyone's models"** — the managed proxy is stateless with zero-retention provider terms (item 56), and the BYO-key/local path removes us from the loop entirely. Copy must not blur the tiers: "we never even see your calls" belongs to the BYO/local option only.
@@ -209,12 +209,12 @@ Prioritized list of planned features, improvements, and technical debt for **ema
 
 31. **Outlook / Microsoft 365 support**
     Add an Outlook/M365 provider behind the email-provider abstraction.
-    *As an Outlook user, I want to connect my M365 mailbox, so that I can use email-junkie without Gmail.*
+    *As an Outlook user, I want to connect my M365 mailbox, so that I can use sentwise without Gmail.*
     - Graph API + OAuth provider implementing the shared email-provider interface.
     - Feature parity with Gmail for read/draft/send.
 
 32. **IMAP/SMTP connection (app password)** — *PRIMARY connection path*
-    IMAP + Google app password is the primary way users connect (decided 2026-07-03, superseding OAuth item 3). Provider-agnostic, works for Gmail/Outlook/any IMAP host. Built on SwiftNIO (`swift-nio-imap`) in `Packages/EmailJunkieMail`.
+    IMAP + Google app password is the primary way users connect (decided 2026-07-03, superseding OAuth item 3). Provider-agnostic, works for Gmail/Outlook/any IMAP host. Built on SwiftNIO (`swift-nio-imap`) in `Packages/SentwiseMail`.
     *As anyone, I want to connect by pasting my email + an app password, so that I skip Google Cloud setup entirely.*
     - ✅ `MailProvider` protocol + `IMAPMailProvider` (TLS connect + IMAP LOGIN/LOGOUT); "Test Connection" wired into Settings; app password stored in Keychain. **Live-verified against real Gmail 2026-07-04.**
     - ✅ Recent-message fetch (LOGIN → SELECT → FETCH UID+ENVELOPE → LOGOUT), newest first; sender/subject/date parsed; "Preview inbox" action in Settings. State machine + envelope parsing covered by EmbeddedChannel tests.
@@ -262,7 +262,7 @@ Prioritized list of planned features, improvements, and technical debt for **ema
     - Cache SwiftPM/Xcode build dependencies to speed up runs.
 
 53. **Platform transcript integrations (Zoom first, Teams later)**
-    Pull call transcripts automatically from the user's own meeting-platform account — no bot joins the call, nothing transits an email-junkie server.
+    Pull call transcripts automatically from the user's own meeting-platform account — no bot joins the call, nothing transits an sentwise server.
     *As Marcus, whose org records to Zoom cloud, I want new call transcripts picked up automatically, so that I never export a file by hand.*
     - **Zoom first:** poll the cloud-recordings API with the user's own credentials for newly completed transcripts. **Polling, not webhooks** — a local-first app has no public URL; a "dumb relay" push function (Cloudflare Worker/Lambda that forwards only a "new recording exists" ping, never the transcript) is a natural later upgrade now that the managed-inference service (item 56) means a server exists anyway.
     - Transcripts are fetched directly from the platform to the Mac and feed the item 51 `TranscriptSource` pipeline.

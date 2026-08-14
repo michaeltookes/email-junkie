@@ -57,7 +57,7 @@ extension AppState {
     }
 
     static func generateMessageID(forEmail email: String) -> String {
-        let host = email.split(separator: "@").last.map(String.init) ?? "emailjunkie.local"
+        let host = email.split(separator: "@").last.map(String.init) ?? "sentwise.local"
         return "<\(UUID().uuidString)@\(host)>"
     }
 

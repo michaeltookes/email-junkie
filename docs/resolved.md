@@ -1,6 +1,8 @@
-# Email Junkie - Resolved Items
+# Sentwise - Resolved Items
 
 Completed backlog items, most recent first. Item numbers are the stable IDs from `docs/backlog.md` and are not reused.
+
+> **Rename: Email Junkie → Sentwise** — 2026-08-13 (branch `rename-sentwise`). Full product rename with no backlog item number. A pre-release clean break (no released builds, so no migration code): renamed the Xcode project/target/scheme and app display name (`Email Junkie` → `Sentwise`), the bundle id (`com.tookes.EmailJunkie` → `com.tookes.Sentwise`), the local mail package (`EmailJunkieMail` → `SentwiseMail`), all Swift identifiers/files, Keychain service and Logger subsystems, on-disk support dir (`~/Library/Application Support/EmailJunkie` → `.../Sentwise`), the Sparkle feed URL and Homebrew cask/distribution pipeline, the live-test env vars (`EMAILJUNKIE_LIVE_*` → `SENTWISE_LIVE_*`) and the `EMAILJUNKIE_IMAP_LOG` diagnostic var (→ `SENTWISE_IMAP_LOG`), and all docs/metadata. Canonical domain sentwise.ai (sentwise.app / sentwise.io redirect). Consequence: the maintainer reconnects accounts once (new Keychain service) and prior local settings under the old support dir are not read. Historical descriptions below intentionally keep the old names/symbols as a point-in-time record.
 
 ### ~~9: Send / save-as-draft (user-configurable)~~
 **Resolved**: 2026-08-13 (branch send-path-verify)

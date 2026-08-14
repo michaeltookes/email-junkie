@@ -1,4 +1,4 @@
-# Contributing to Email Junkie
+# Contributing to Sentwise
 
 Thanks for your interest in contributing! This is an early-stage, local-first,
 open-source macOS app. Contributions of all kinds are welcome — bug reports,
@@ -15,32 +15,32 @@ features, docs, and tests.
 **Build & run**
 
 ```bash
-git clone https://github.com/michaeltookes/email-junkie.git
-cd email-junkie/EmailJunkie
-open EmailJunkie.xcodeproj   # select the "EmailJunkie" scheme and run
+git clone https://github.com/michaeltookes/sentwise.git
+cd sentwise/Sentwise
+open Sentwise.xcodeproj   # select the "Sentwise" scheme and run
 ```
 
 **Test & lint from the command line**
 
 ```bash
-cd EmailJunkie
-xcodebuild test -project EmailJunkie.xcodeproj -scheme EmailJunkie \
+cd Sentwise
+xcodebuild test -project Sentwise.xcodeproj -scheme Sentwise \
   -destination 'platform=macOS'
-swiftlint lint --strict      # run from the EmailJunkie/ directory
+swiftlint lint --strict      # run from the Sentwise/ directory
 ```
 
 ## Project layout
 
 ```
-EmailJunkie/
-├─ EmailJunkie.xcodeproj      # Xcode 16 project (file-system-synchronized groups)
-├─ EmailJunkie/              # app sources
+Sentwise/
+├─ Sentwise.xcodeproj      # Xcode 16 project (file-system-synchronized groups)
+├─ Sentwise/              # app sources
 │  ├─ App/                   # entry point, AppDelegate, AppState, menu bar
 │  ├─ Services/              # persistence, updates, login item
 │  ├─ Models/                # data models
 │  ├─ Views/                 # SwiftUI views
 │  └─ Utilities/
-└─ EmailJunkieTests/         # unit tests
+└─ SentwiseTests/         # unit tests
 docs/
 ├─ backlog.md                # prioritized roadmap (item numbers are stable IDs)
 └─ resolved.md               # completed items
@@ -55,7 +55,7 @@ file edits needed.
 1. **Branch off `main`** with a descriptive name (e.g. `feature/gmail-oauth`).
 2. **Keep commits focused** — one logical change per commit, imperative subject.
 3. **Match the surrounding style.** Swift code should pass `swiftlint --strict`.
-4. **Add tests** for logic where practical; put them in `EmailJunkieTests/`.
+4. **Add tests** for logic where practical; put them in `SentwiseTests/`.
 5. **Pick up a backlog item.** See [`docs/backlog.md`](docs/backlog.md); reference
    the item number in your PR.
 

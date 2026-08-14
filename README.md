@@ -1,4 +1,4 @@
-# Email Junkie
+# Sentwise
 
 A native, local-first, open-source macOS menu-bar email assistant. It learns
 your voice from your Sent mail, watches your inbox, drafts replies with a
@@ -13,7 +13,7 @@ waiting when you glance, not sitting on someone else's server.
 ## Why
 
 Most AI email tools are cloud SaaS that read your mail on their servers and
-charge per seat. Email Junkie is the opposite: a native Mac app that runs on
+charge per seat. Sentwise is the opposite: a native Mac app that runs on
 your machine, stores your data locally, and uses whatever LLM you point it at
 (including a fully local model). No subscription, no inbox custody.
 
@@ -48,17 +48,17 @@ approval channel are on the roadmap.
 ## Build from source
 
 ```bash
-git clone https://github.com/michaeltookes/email-junkie.git
-cd email-junkie/EmailJunkie
-open EmailJunkie.xcodeproj
+git clone https://github.com/michaeltookes/sentwise.git
+cd sentwise/Sentwise
+open Sentwise.xcodeproj
 ```
 
-Select the **EmailJunkie** scheme and run. To build and test from the command
+Select the **Sentwise** scheme and run. To build and test from the command
 line:
 
 ```bash
-cd EmailJunkie
-xcodebuild test -project EmailJunkie.xcodeproj -scheme EmailJunkie \
+cd Sentwise
+xcodebuild test -project Sentwise.xcodeproj -scheme Sentwise \
   -destination 'platform=macOS'
 ```
 

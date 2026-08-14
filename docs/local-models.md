@@ -1,6 +1,6 @@
 # Local models (Ollama, LM Studio)
 
-Email Junkie can draft replies against a model running on your own machine, so
+Sentwise can draft replies against a model running on your own machine, so
 no email content ever leaves it — not even the LLM call. The local provider
 speaks the same OpenAI `/v1/chat/completions` wire format as the cloud
 OpenAI-compatible provider, so any local runtime that exposes that endpoint
@@ -25,10 +25,10 @@ works. This guide covers Ollama (the default) and LM Studio.
    ```
 
    The pulled model's name (e.g. `llama3.1`, `llama3.1:8b`, `qwen2.5`) is what
-   you enter in the **Model** field in Email Junkie. Run `ollama list` to see
+   you enter in the **Model** field in Sentwise. Run `ollama list` to see
    what you have.
 
-3. **Select the provider in Email Junkie.** Open **Settings → AI provider**
+3. **Select the provider in Sentwise.** Open **Settings → AI provider**
    (or the onboarding "Choose your AI" step) and set:
 
    - **Provider:** `Local (Ollama)`
@@ -52,7 +52,7 @@ different port. To use it:
 
 - Start LM Studio's local server (its **Developer / Local Server** tab) and load
   a model.
-- In Email Junkie, choose **Local (Ollama)** as the provider, then set the
+- In Sentwise, choose **Local (Ollama)** as the provider, then set the
   **Base URL** to LM Studio's endpoint, typically `http://localhost:1234/v1`.
 - Enter the model identifier LM Studio reports for the loaded model, then
   **Test Connection**.
@@ -62,7 +62,7 @@ URL at its `/v1` endpoint.
 
 ## Running the model on another machine (LAN)
 
-You can point Email Junkie at a runtime on a different box on your network
+You can point Sentwise at a runtime on a different box on your network
 (e.g. a Mac Studio or a Linux server with a GPU): set the **Base URL** to that
 host's endpoint, such as `http://192.168.1.50:11434/v1`.
 

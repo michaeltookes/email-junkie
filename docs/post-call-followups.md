@@ -1,6 +1,6 @@
 # Post-call follow-ups
 
-Email Junkie drafts the follow-up email after a call from its transcript, in
+Sentwise drafts the follow-up email after a call from its transcript, in
 your learned voice, and hands it to the same review → approve → send/save flow
 as inbox replies. There is no bot in your meetings and no audio capture: the
 transcript arrives as a file or a paste, and everything stays on your machine
@@ -34,12 +34,12 @@ doesn't support.
 
 ## Watched folder (automatic)
 
-To draft follow-ups without pasting anything, point Email Junkie at a folder —
+To draft follow-ups without pasting anything, point Sentwise at a folder —
 for example Zoom's local recording directory. Open **Settings → General →
 Post-call follow-ups**, turn on **Watch a folder for new transcripts**, and
 **Choose…** the folder.
 
-When a new transcript file appears in that folder, Email Junkie drafts a
+When a new transcript file appears in that folder, Sentwise drafts a
 follow-up automatically and adds it to Review Drafts. The feature is **off by
 default**. Files already in the folder when watching starts are left alone —
 only files that appear afterwards trigger a draft — and your files are never
@@ -60,7 +60,7 @@ auto-send undo window.
 ## Long calls
 
 A two-hour call produces a draft, not an error. When a transcript is longer than
-the model's single-pass budget, Email Junkie summarizes it chunk-by-chunk first —
+the model's single-pass budget, Sentwise summarizes it chunk-by-chunk first —
 extracting decisions, action items with owners, deadlines, and any next meeting —
 then drafts the follow-up from that distilled summary, keeping the request within
 the model's context window.

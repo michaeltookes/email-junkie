@@ -1,8 +1,11 @@
 # Releasing Sentwise
 
 The full runbook for cutting a signed, notarized, auto-updating release of the
-Sentwise menu-bar app. This covers the **manual** pipeline; CI automation
-(backlog item 29) is deliberately out of scope.
+Sentwise menu-bar app. This covers the **manual** pipeline. The same
+`release.sh` also runs unchanged on CI — a version-tag push builds and publishes
+the whole release via GitHub Actions; see [`ci-release.md`](./ci-release.md) for
+the workflow and its secrets. This page stays the source of truth for the
+pipeline itself.
 
 Everything credential-related is supplied at release time through environment
 variables — **nothing is stored in the repo**. The scaffolding (scripts, cask
@@ -120,10 +123,34 @@ What `release.sh` does, step by step:
    matching private key (prerequisite 3).
 3. **Stage** the app as `Sentwise.app` so the DMG icon label reads as the
    brand name.
-4. **Build the DMG** with the branded background (`make-dmg.sh`, fixed geometry).
-5. **Notarize** the DMG (`notarytool submit --wait`) and **staple** the ticket.
-6. **Appcast + checksums**: `generate_appcast dist/` signs the DMG with the
-   EdDSA private key and writes `dist/appcast.xml`; a `.sha256` is written too.
+4. **Notarize + staple the app** — the ticket is stapled to the `.app`
+   **before** it goes into the DMG (notarytool takes a throwaway zip; the ticket
+   staples onto the bundle), so the app is independently notarized, not only the
+   DMG.
+5. **Build the DMG** with the branded background (`make-dmg.sh`, fixed geometry),
+   then **notarize + staple the DMG** (`notarytool submit --wait`).
+6. **Launch smoke test** — mount the final DMG, `spctl`-assess the app, launch
+   it, confirm the process is still alive after ~5s, then kill and detach. This
+   hard-fails the release on a dyld/startup crash; it is the only gate that
+   would have caught the v0.1.0 launch crash (signatures and unit tests never
+   execute the binary). It runs in both dry-run and signed modes.
+7. **Appcast + checksums**: `generate_appcast dist/` signs the DMG with the
+   EdDSA private key and writes `dist/appcast.xml`; the script then verifies the
+   appcast actually references the new DMG (a silent `generate_appcast` failure
+   is what shipped a broken v0.1.0 step). A `.sha256` is written too.
+
+**Guards worth knowing:**
+- **Stale-dist guard.** The script refuses to build if `dist/` holds a DMG or
+  pkg from another version (a leftover dry-run artifact with a duplicate bundle
+  version corrupts appcast generation). Clear `dist/` or pass `--clean-dist` to
+  remove the strays automatically.
+- **Fail-loud.** Every step's failure aborts the script with a named
+  command/line; the run can no longer exit `0` after a step has failed.
+- **CI credential form.** Instead of `NOTARY_PROFILE`, CI supplies
+  `NOTARY_APPLE_ID` / `NOTARY_TEAM_ID` / `NOTARY_PASSWORD` (notarytool's flag
+  form) and `SPARKLE_ED_KEY_FILE` (passed to `generate_appcast --ed-key-file`,
+  since the runner has no login Keychain). Both credential paths are supported
+  by the one script.
 
 ---
 

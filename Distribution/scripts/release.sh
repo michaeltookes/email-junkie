@@ -2,28 +2,56 @@
 #
 # Sentwise release pipeline.
 #
-#   archive -> export (Developer ID) -> notarize -> DMG -> appcast -> checksums
+#   archive -> export (Developer ID) -> notarize+staple app -> DMG ->
+#   notarize+staple DMG -> launch smoke test -> appcast -> checksums
 #
 # Everything credential-related comes from the environment (nothing is
 # hardcoded or stored in the repo). A --dry-run mode exercises the whole
-# archive -> DMG path WITHOUT any credentials so the pipeline is testable now.
+# archive -> DMG -> launch-smoke-test path WITHOUT any credentials so the
+# pipeline is testable now, locally and on CI.
 #
-# Full runbook and prerequisites: docs/releasing.md
+# The SAME script drives the local/manual release (via the release-prep skill)
+# and CI (.github/workflows/release.yml) — CI just supplies credentials from
+# encrypted secrets. There is deliberately no second pipeline.
+#
+# Full runbook and prerequisites: docs/releasing.md and docs/ci-release.md
 #
 # Usage:
 #   release.sh --dry-run [--version X.Y.Z] [--build N]
 #   release.sh [--version X.Y.Z] [--build N]        # full signed release
+#   release.sh --clean-dist ...                     # remove stale dist/ artifacts first
 #
 # Environment (required for a full signed release, ignored by --dry-run):
 #   SIGNING_IDENTITY   Developer ID Application identity, e.g.
 #                      "Developer ID Application: Your Name (TEAMID)"
 #   DEVELOPMENT_TEAM   10-char Apple Developer Team ID
-#   NOTARY_PROFILE     notarytool keychain profile name (see releasing.md)
+#   Notarization credentials — supply EITHER:
+#     NOTARY_PROFILE   notarytool keychain profile name (local; see releasing.md)
+#   OR the three flag-based values (CI; no Keychain profile available):
+#     NOTARY_APPLE_ID  Apple ID email
+#     NOTARY_TEAM_ID   Apple Team ID
+#     NOTARY_PASSWORD  app-specific password
 # Optional:
-#   SPARKLE_BIN        directory holding Sparkle's generate_appcast / sign_update
-#                      (defaults to searching PATH). Needed for the appcast step.
+#   SPARKLE_BIN         directory holding Sparkle's generate_appcast / sign_update
+#                       (defaults to searching PATH). Needed for the appcast step.
+#   SPARKLE_ED_KEY_FILE path to a file holding the EdDSA private key; when set it
+#                       is passed to generate_appcast via --ed-key-file (CI path,
+#                       where there is no login Keychain). When unset,
+#                       generate_appcast reads the key from the login Keychain
+#                       (local path).
 #
 set -euo pipefail
+
+# ---- loud failures ---------------------------------------------------------
+# Every step's failure must fail the script. set -e handles non-zero exits; this
+# ERR trap makes the failure LOUD by naming the command and line that failed
+# (the v0.1.0 release exited 0 while a step had quietly failed).
+err_trap() {
+  local rc=$?
+  printf '\033[1;31m==> release FAILED (exit %s) at line %s: %s\033[0m\n' \
+    "$rc" "${BASH_LINENO[0]}" "$BASH_COMMAND" >&2
+}
+trap err_trap ERR
 
 # ---- paths -----------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -36,17 +64,19 @@ OUT="$REPO_ROOT/dist"                               # gitignored artifact dir
 
 # ---- args ------------------------------------------------------------------
 DRY_RUN=0
+CLEAN_DIST=0
 VERSION=""
 BUILD=""
 
-usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dry-run) DRY_RUN=1; shift ;;
-    --version) VERSION="${2:?}"; shift 2 ;;
-    --build)   BUILD="${2:?}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
+    --dry-run)    DRY_RUN=1; shift ;;
+    --clean-dist) CLEAN_DIST=1; shift ;;
+    --version)    VERSION="${2:?}"; shift 2 ;;
+    --build)      BUILD="${2:?}"; shift 2 ;;
+    -h|--help)    usage; exit 0 ;;
     *) echo "release: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
@@ -62,6 +92,7 @@ ARCHIVE="$OUT/Sentwise.xcarchive"
 EXPORT_DIR="$OUT/export"
 STAGE_DIR="$OUT/stage"
 DMG="$OUT/Sentwise-$VERSION.dmg"
+DMG_NAME="$(basename "$DMG")"
 
 # Legacy all-zero SUPublicEDKey placeholder from before the v0.1.0 Sparkle
 # keypair was established. Signed releases must use the private key matching the
@@ -70,18 +101,118 @@ DMG="$OUT/Sentwise-$VERSION.dmg"
 PLACEHOLDER_EDKEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 step "Sentwise release  (version $VERSION, build $BUILD, dry-run=$DRY_RUN)"
-rm -rf "$ARCHIVE" "$EXPORT_DIR" "$STAGE_DIR"
+
+# ---- 0. stale-dist guard ---------------------------------------------------
+# generate_appcast scans the ENTIRE dist/ dir for update archives (*.dmg / *.zip
+# / *.pkg). A leftover DMG from another version — e.g. a prior dry-run — with a
+# duplicate bundle version silently broke appcast generation for v0.1.0. Refuse
+# to build on top of a dirty dist/ unless --clean-dist is given.
 mkdir -p "$OUT"
+stale=()
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  base="$(basename "$f")"
+  [[ "$base" == "$DMG_NAME" ]] && continue        # this run overwrites its own DMG
+  stale+=("$f")
+done < <(find "$OUT" -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' \) 2>/dev/null)
+
+if [[ ${#stale[@]} -gt 0 ]]; then
+  if [[ "$CLEAN_DIST" -eq 1 ]]; then
+    log "Removing ${#stale[@]} stale dist artifact(s):"
+    for f in "${stale[@]}"; do echo "    rm $f"; rm -f "$f" "$f.sha256"; done
+  else
+    {
+      echo "release: dist/ contains artifacts from another version:"
+      for f in "${stale[@]}"; do echo "    $f"; done
+      echo "These would corrupt appcast generation (duplicate bundle versions)."
+      echo "Re-run with --clean-dist to remove them, or clear dist/ by hand."
+    } >&2
+    exit 1
+  fi
+fi
+
+# Always start the build stages from clean archive/export/stage dirs.
+rm -rf "$ARCHIVE" "$EXPORT_DIR" "$STAGE_DIR"
 
 # ---- credential pre-flight (signed only) -----------------------------------
 if [[ "$DRY_RUN" -eq 0 ]]; then
   : "${SIGNING_IDENTITY:?set SIGNING_IDENTITY (Developer ID Application: …)}"
   : "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM (Apple Team ID)}"
-  : "${NOTARY_PROFILE:?set NOTARY_PROFILE (notarytool keychain profile)}"
+  if [[ -z "${NOTARY_PROFILE:-}" ]]; then
+    : "${NOTARY_APPLE_ID:?set NOTARY_PROFILE, or NOTARY_APPLE_ID/NOTARY_TEAM_ID/NOTARY_PASSWORD}"
+    : "${NOTARY_TEAM_ID:?set NOTARY_TEAM_ID (or use NOTARY_PROFILE)}"
+    : "${NOTARY_PASSWORD:?set NOTARY_PASSWORD (or use NOTARY_PROFILE)}"
+  fi
 fi
 
+# notarytool submit, using whichever credential style is configured.
+notarize_submit() {
+  local artifact="$1"
+  if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+    xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" --wait
+  else
+    xcrun notarytool submit "$artifact" \
+      --apple-id "$NOTARY_APPLE_ID" \
+      --team-id "$NOTARY_TEAM_ID" \
+      --password "$NOTARY_PASSWORD" \
+      --wait
+  fi
+}
+
+# ---- launch smoke test -----------------------------------------------------
+# Mandatory gate. v0.1.0 shipped notarized, Gatekeeper-accepted and 905 tests
+# green yet crashed instantly at launch (missing LD_RUNPATH_SEARCH_PATHS) —
+# signatures and unit tests validate a binary without ever executing it. Mount
+# the FINAL DMG, (signed only) assess it with spctl, launch the app, confirm the
+# process is still alive after a few seconds, then kill and detach. Hard-fails if
+# the process is not running.
+smoke_test() {
+  local dmg="$1"
+  local mnt app exe rc=0
+  mnt="$(mktemp -d /tmp/sentwise-smoke.XXXXXX)"
+  log "Mounting $dmg for launch smoke test"
+  hdiutil attach "$dmg" -nobrowse -noverify -mountpoint "$mnt" >/dev/null
+
+  app="$mnt/$APP_DISPLAY_NAME.app"
+  exe="$app/Contents/MacOS/$APP_DISPLAY_NAME"
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    if spctl --assess --type execute -vv "$app"; then
+      log "spctl assessment: accepted"
+    else
+      echo "release: spctl assessment REJECTED the app in the DMG" >&2
+      rc=1
+    fi
+  else
+    log "spctl assessment — SKIPPED (dry-run app is ad-hoc signed, not notarized)"
+  fi
+
+  if [[ $rc -eq 0 ]]; then
+    log "Launching app from the mounted DMG"
+    if open "$app"; then
+      sleep 5
+      if pgrep -f "$exe" >/dev/null 2>&1; then
+        log "Launch smoke test PASSED — process alive 5s after launch"
+        pkill -f "$exe" >/dev/null 2>&1 || true
+      else
+        echo "release: LAUNCH SMOKE TEST FAILED — process not running 5s after launch (dyld/startup crash)" >&2
+        rc=1
+      fi
+    else
+      echo "release: LAUNCH SMOKE TEST FAILED — 'open' could not launch the app" >&2
+      rc=1
+    fi
+  fi
+
+  # Always unmount, even on failure.
+  hdiutil detach "$mnt" -quiet 2>/dev/null \
+    || hdiutil detach "$mnt" -force -quiet 2>/dev/null || true
+  rmdir "$mnt" 2>/dev/null || true
+  return $rc
+}
+
 # ---- 1. archive ------------------------------------------------------------
-step "1/6  Archiving Release"
+step "1/7  Archiving Release"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   xcodebuild archive \
     -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
@@ -99,11 +230,14 @@ else
 fi
 
 # ---- 2. export a distributable .app ----------------------------------------
-step "2/6  Exporting app bundle"
+step "2/7  Exporting app bundle"
 mkdir -p "$EXPORT_DIR"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  # No signing: lift the .app straight out of the archive.
+  # No Developer ID signing: lift the .app straight out of the archive, then
+  # ad-hoc sign it so it can execute on Apple Silicon (required for the launch
+  # smoke test — an unsigned arm64 binary is killed by the kernel).
   cp -R "$ARCHIVE/Products/Applications/Sentwise.app" "$EXPORT_DIR/Sentwise.app"
+  codesign --force --deep --sign - "$EXPORT_DIR/Sentwise.app"
 else
   cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -144,27 +278,49 @@ else
 fi
 
 # ---- 3. stage under the branded name ---------------------------------------
-step "3/6  Staging \"$APP_DISPLAY_NAME.app\""
+step "3/7  Staging \"$APP_DISPLAY_NAME.app\""
 mkdir -p "$STAGE_DIR"
 cp -R "$EXPORT_DIR/Sentwise.app" "$STAGE_DIR/$APP_DISPLAY_NAME.app"
 
-# ---- 4. build the DMG ------------------------------------------------------
-step "4/6  Building DMG"
+# ---- 4. notarize + staple the APP (signed only) ----------------------------
+# Staple the ticket to the .app BEFORE it goes into the DMG, so the app itself
+# is independently notarized/stapled (not only the DMG). notarytool cannot take
+# a raw .app, so submit a throwaway zip; the ticket is then stapled onto the app
+# bundle. The zip lives outside dist/ so generate_appcast never sees it.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  step "4/7  Notarize + staple app — SKIPPED (dry-run)"
+else
+  step "4/7  Notarizing + stapling the app bundle"
+  app_zip="$(mktemp -d)/Sentwise-app.zip"
+  ditto -c -k --keepParent "$STAGE_DIR/$APP_DISPLAY_NAME.app" "$app_zip"
+  notarize_submit "$app_zip"
+  log "Stapling ticket to $APP_DISPLAY_NAME.app"
+  xcrun stapler staple "$STAGE_DIR/$APP_DISPLAY_NAME.app"
+  xcrun stapler validate "$STAGE_DIR/$APP_DISPLAY_NAME.app"
+  rm -rf "$(dirname "$app_zip")"
+fi
+
+# ---- 5. build the DMG ------------------------------------------------------
+step "5/7  Building DMG"
 "$SCRIPT_DIR/make-dmg.sh" "$STAGE_DIR/$APP_DISPLAY_NAME.app" "$DMG"
 
-# ---- 5. notarize + staple (signed only) ------------------------------------
+# ---- 5b. notarize + staple the DMG (signed only) ---------------------------
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  step "5/6  Notarize — SKIPPED (dry-run)"
+  log "Notarize + staple DMG — SKIPPED (dry-run)"
 else
-  step "5/6  Notarizing DMG (notarytool submit --wait)"
-  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
-  log "Stapling ticket"
+  step "5b/7  Notarizing + stapling the DMG"
+  notarize_submit "$DMG"
+  log "Stapling ticket to the DMG"
   xcrun stapler staple "$DMG"
   xcrun stapler validate "$DMG"
 fi
 
-# ---- 6. appcast + checksums ------------------------------------------------
-step "6/6  Appcast + checksums"
+# ---- 6. launch smoke test (both modes) -------------------------------------
+step "6/7  Launch smoke test (mount, assess, launch, verify alive)"
+smoke_test "$DMG"
+
+# ---- 7. appcast + checksums ------------------------------------------------
+step "7/7  Appcast + checksums"
 if [[ "$DRY_RUN" -eq 1 ]]; then
   log "Appcast — SKIPPED (dry-run; needs the EdDSA private key)"
 else
@@ -174,10 +330,26 @@ else
     echo "release: generate_appcast not found. Set SPARKLE_BIN to Sparkle's bin dir." >&2
     exit 1
   fi
-  # generate_appcast signs every archive in $OUT with the private key from the
-  # Keychain and (re)writes appcast.xml alongside them.
-  "$gen_appcast" "$OUT"
-  log "Wrote $OUT/appcast.xml"
+  # generate_appcast signs every archive in $OUT and (re)writes appcast.xml.
+  # On CI there is no login Keychain, so pass the private key explicitly.
+  if [[ -n "${SPARKLE_ED_KEY_FILE:-}" ]]; then
+    "$gen_appcast" --ed-key-file "$SPARKLE_ED_KEY_FILE" "$OUT"
+  else
+    "$gen_appcast" "$OUT"
+  fi
+
+  # Fail loudly if generate_appcast did not actually produce a usable appcast.
+  # (For v0.1.0 the step "succeeded" while writing nothing useful.)
+  if [[ ! -s "$OUT/appcast.xml" ]]; then
+    echo "release: generate_appcast did not write dist/appcast.xml." >&2
+    exit 1
+  fi
+  if ! grep -q "$DMG_NAME" "$OUT/appcast.xml"; then
+    echo "release: dist/appcast.xml has no entry for $DMG_NAME — appcast generation failed silently." >&2
+    echo "         (Check for stale/duplicate artifacts in dist/; re-run with --clean-dist.)" >&2
+    exit 1
+  fi
+  log "Wrote $OUT/appcast.xml (verified it references $DMG_NAME)"
 fi
 
 shasum -a 256 "$DMG" | tee "$DMG.sha256"

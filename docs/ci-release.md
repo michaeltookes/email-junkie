@@ -129,14 +129,13 @@ from your Keychain — the script supports both paths.
 ## Homebrew tap update
 
 On a tagged run the workflow clones `michaeltookes/homebrew-tap`, copies this
-repo's `Distribution/sentwise.rb` template over `Casks/sentwise.rb` (so the tap
-picks up template changes such as the modernized `depends_on macos: :sonoma`
-line), stamps the new `version` and DMG `sha256`, and commits in the tap's house
-style: `sentwise: X.Y.Z`.
+repo's `Distribution/sentwise.rb` template over `Casks/sentwise.rb`, stamps the
+new `version` and DMG `sha256`, and commits in the tap's house style:
+`sentwise: X.Y.Z`.
 
 > The tap's `depends_on` line only updates the next time this workflow runs on a
-> tag. The other casks in that tap still carry the deprecated string form and
-> are updated by their own projects.
+> tag. Keep the comparison string form (`">= :sonoma"`) so the cask tracks the
+> app's Sonoma-or-newer deployment target.
 
 ---
 

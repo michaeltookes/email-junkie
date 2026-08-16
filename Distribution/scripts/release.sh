@@ -114,7 +114,7 @@ while IFS= read -r f; do
   base="$(basename "$f")"
   [[ "$base" == "$DMG_NAME" ]] && continue        # this run overwrites its own DMG
   stale+=("$f")
-done < <(find "$OUT" -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.pkg' \) 2>/dev/null)
+done < <(find "$OUT" -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.pkg' \) 2>/dev/null)
 
 if [[ ${#stale[@]} -gt 0 ]]; then
   if [[ "$CLEAN_DIST" -eq 1 ]]; then

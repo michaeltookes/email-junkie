@@ -140,10 +140,10 @@ What `release.sh` does, step by step:
    is what shipped a broken v0.1.0 step). A `.sha256` is written too.
 
 **Guards worth knowing:**
-- **Stale-dist guard.** The script refuses to build if `dist/` holds a DMG or
-  pkg from another version (a leftover dry-run artifact with a duplicate bundle
-  version corrupts appcast generation). Clear `dist/` or pass `--clean-dist` to
-  remove the strays automatically.
+- **Stale-dist guard.** The script refuses to build if `dist/` holds a DMG, ZIP,
+  or pkg from another version (a leftover dry-run artifact with a duplicate
+  bundle version corrupts appcast generation). Clear `dist/` or pass
+  `--clean-dist` to remove the strays automatically.
 - **Fail-loud.** Every step's failure aborts the script with a named
   command/line; the run can no longer exit `0` after a step has failed.
 - **CI credential form.** Instead of `NOTARY_PROFILE`, CI supplies

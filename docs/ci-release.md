@@ -128,6 +128,11 @@ from your Keychain — the script supports both paths.
 
 ## Homebrew tap update
 
+Before bumping the tap, the tagged workflow publishes the GitHub release. If the
+release already exists from a failed prior attempt, the workflow edits the title
+and notes from the CHANGELOG section and re-uploads the DMG, appcast, and SHA256
+assets with `--clobber` so the tap update can be retried by rerunning the job.
+
 On a tagged run the workflow clones `michaeltookes/homebrew-tap`, copies this
 repo's `Distribution/sentwise.rb` template over `Casks/sentwise.rb`, stamps the
 new `version` and DMG `sha256`, and commits in the tap's house style:

@@ -156,10 +156,12 @@ What `release.sh` does, step by step:
 
 ## Publishing
 
-1. Create a GitHub release tagged `v<version>` on
+1. Create or update the GitHub release tagged `v<version>` on
    `github.com/michaeltookes/sentwise`.
-2. Upload **both** `Sentwise-<version>.dmg` and `appcast.xml` as release
-   assets. The app's `SUFeedURL` points at
+2. Upload `Sentwise-<version>.dmg`, `appcast.xml`, and the DMG `.sha256` as
+   release assets. On a CI rerun for an existing release, the workflow edits the
+   release notes and re-uploads those assets with `--clobber` before retrying
+   the tap update. The app's `SUFeedURL` points at
    `releases/latest/download/appcast.xml`, so the appcast must be an asset on
    the release marked **latest**.
 3. **Homebrew cask**: copy `Distribution/sentwise.rb` into the tap at

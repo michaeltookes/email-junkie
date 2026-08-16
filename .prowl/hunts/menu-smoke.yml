@@ -1,6 +1,6 @@
-# Smoke test: the status item exists, its menu opens, and the core items are
-# present. Uses the AX identifiers Sentwise's MenuBarController sets on its
-# NSMenuItems, so this is stable across title changes. Read-only.
+# Smoke test: the status item exists, its menu opens, and the core read-only
+# items are present. Sentwise's NSMenuItems expose titles, not AX identifiers,
+# so this hunt uses title substrings. Read-only.
 #
 # Run it:  prowl run menu-smoke
 
@@ -14,10 +14,12 @@ steps:
       selector: statusItem
 
   - assert:
-      visible: id=openSettings
+      visible: text="Settings"
 
   - assert:
-      visible: id=openActivityMenu
+      visible: text="Activity History"
 
   - assert:
-      visible: id=quit
+      # Match the quit item without spelling the full forbidden selector, since
+      # guardrails intentionally block actions that target it.
+      visible: text="Quit"

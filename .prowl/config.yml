@@ -13,14 +13,19 @@ artifacts:
   screenshots: "on-failure"   # screenshots need Screen Recording permission
 
 # Safety guardrails. forbiddenSelectors is substring-matched against every
-# selector, so these block any hunt step from touching menu items that have
-# real side effects (login item registration, Sparkle network call, app quit —
-# session teardown quits the app itself; hunts never need to).
+# selector, so these block any hunt step from touching menu items that mutate
+# system/app state, start live mailbox work, or open send-capable surfaces.
 guardrails:
   maxSteps: 25
   allowedApps:
     - com.tookes.Sentwise
   forbiddenSelectors:
+    - "New Follow-up from Transcript"
+    - "Review Drafts"
+    - "Review Skipped Messages"
+    - "Browse Mailbox"
+    - "Start Watching"
+    - "Pause Watching"
     - "Launch at Login"
     - "Check for Updates"
     - "Quit Sentwise"

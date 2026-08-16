@@ -33,17 +33,21 @@ quits it afterward. Artifacts land in `.prowl/runs/` (gitignored).
 ## Safety
 
 Launching Sentwise uses your real settings/Keychain, so it may auto-connect to
-the live mailbox. All hunts here are **read-only** (open menu, open windows,
-assert visible) — keep them that way until there's a test-account setup. Do not
-author steps that touch drafts, sending, or bulk cleanup, and don't remove the
-`forbiddenSelectors` guardrails (`Launch at Login`, `Check for Updates`,
-`Quit Sentwise`) that block the side-effecting menu items.
+the live mailbox. All hunts here are **read-only** (open menu, open safe
+windows, assert visible) — keep them that way until there's a test-account
+setup. Do not author steps that touch drafts, sending, live watching, mailbox
+browsing/cleanup, follow-up composition, login items, Sparkle update checks, or
+app quit. Keep the `forbiddenSelectors` guardrails in sync with those surfaces;
+they block the connected-account menu entries (`New Follow-up from Transcript`,
+`Review Drafts`, `Review Skipped Messages`, `Browse Mailbox`, `Start Watching`,
+`Pause Watching`) plus `Launch at Login`, `Check for Updates`, and
+`Quit Sentwise`.
 
 ## Selector dialect (macOS target)
 
 - `statusItem` — press the app's menu bar status item (leaves the menu open)
 - `menu=<title>` — open the status menu and click the item containing `<title>`
-- `id=<axIdentifier>` — accessibility identifier (stable; preferred)
+- `id=<axIdentifier>` — accessibility identifier when the app exposes one
 - `role=button[name="Save"]` — AX role + accessible name
 - `text="…"` — case-insensitive substring of title/description/value
 - `label="…"` — exact accessibility label match

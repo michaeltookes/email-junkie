@@ -29,6 +29,9 @@ from encrypted repository secrets instead of the login Keychain.
 The version comes from the tag (`v0.1.2` → `0.1.2`); for a dispatch run it is read
 from `MARKETING_VERSION` in the project file.
 
+Release workflow runs share one concurrency group, so different tag releases do
+not overlap while publishing and updating the tap.
+
 ---
 
 ## Required repository secrets

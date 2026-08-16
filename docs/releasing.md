@@ -173,7 +173,8 @@ What `release.sh` does, step by step:
    ```
    CI skips this tap write when the tag is no longer the newest
    semantic-versioned, non-prerelease GitHub release, so an older rerun cannot
-   downgrade the cask after a newer release has shipped.
+   downgrade the cask after a newer release has shipped. CI also serializes all
+   release workflow runs so tag publish/tap updates do not overlap.
 
 ---
 

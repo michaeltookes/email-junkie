@@ -34,6 +34,10 @@ publishes anything.
 Release workflow runs share one concurrency group, so different tag releases do
 not overlap while publishing and updating the tap.
 
+For tagged releases, CI also compares `CURRENT_PROJECT_VERSION` against the
+previous stable release's Sparkle appcast build number and fails before the
+release gate if the new build is not greater.
+
 ---
 
 ## Required repository secrets
@@ -170,7 +174,8 @@ proving the plumbing without signing, notarizing, or publishing.
 
 1. Add all seven secrets above.
 2. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, add the CHANGELOG
-   `## [X.Y.Z]` section, and merge to `main`.
+   `## [X.Y.Z]` section, and merge to `main`. The build number must be greater
+   than the previous stable release's Sparkle build.
 3. Tag and push: `git tag v0.1.2 && git push origin v0.1.2`.
 4. Watch the run (`gh run watch`); confirm the GitHub release, the appcast
    asset, and the `sentwise: X.Y.Z` commit in the tap.

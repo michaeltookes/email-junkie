@@ -78,7 +78,8 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
   `v0.1.2` / `0.1.2`.
 - `CURRENT_PROJECT_VERSION` is an integer Sparkle compares as `CFBundleVersion`
   — bump it every release, even for the same marketing version, so Sparkle can
-  order builds.
+  order builds. CI tag releases fail before publishing unless it is greater than
+  the previous stable release's appcast build.
 - Both can be overridden per run: `release.sh --version 0.2.0 --build 5`.
 
 ---

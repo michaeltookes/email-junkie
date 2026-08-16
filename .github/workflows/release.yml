@@ -80,8 +80,64 @@ jobs:
             echo "Release version must be X.Y.Z; got '$v'." >&2
             exit 1
           fi
+          build="$(grep -m1 'CURRENT_PROJECT_VERSION = ' \
+            Sentwise/Sentwise.xcodeproj/project.pbxproj | sed 's/.*= //; s/;.*//')"
+          if [[ ! "$build" =~ ^[0-9]+$ ]]; then
+            echo "CURRENT_PROJECT_VERSION must be an integer; got '$build'." >&2
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
           echo "Release version: $v"
+          echo "Release build: $build"
+
+      - name: Validate Sparkle build number
+        if: env.DRY_RUN != 'true' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_BUILD: ${{ steps.version.outputs.build }}
+          CURRENT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          IFS=. read -r major minor patch <<< "$CURRENT_VERSION"
+          releases_json="$RUNNER_TEMP/releases.json"
+          previous_appcast="$RUNNER_TEMP/previous-appcast.xml"
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$releases_json"
+          previous_tag="$(jq -r \
+            --argjson major "$major" \
+            --argjson minor "$minor" \
+            --argjson patch "$patch" \
+            '
+            [
+              .[]
+              | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+              | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))}
+              | select(
+                  (.version[0] < $major)
+                  or (.version[0] == $major and .version[1] < $minor)
+                  or (.version[0] == $major and .version[1] == $minor and .version[2] < $patch)
+                )
+            ]
+            | sort_by(.version[0], .version[1], .version[2])
+            | last
+            | .tag // ""
+            ' "$releases_json")"
+          if [[ -z "$previous_tag" ]]; then
+            echo "No previous stable release found; skipping Sparkle build comparison."
+            exit 0
+          fi
+          curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL -o "$previous_appcast" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${previous_tag}/appcast.xml"
+          previous_build="$(xmllint --xpath 'string(//*[local-name()="version"][1])' "$previous_appcast")"
+          if [[ ! "$previous_build" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse Sparkle build number from $previous_tag appcast." >&2
+            exit 1
+          fi
+          if (( CURRENT_BUILD <= previous_build )); then
+            echo "CURRENT_PROJECT_VERSION ($CURRENT_BUILD) must exceed $previous_tag Sparkle build ($previous_build)." >&2
+            exit 1
+          fi
+          echo "Sparkle build $CURRENT_BUILD exceeds $previous_tag build $previous_build."
 
       # ---- release gate: lint + full test suite (always, both modes) ----------
       - name: SwiftLint (strict)

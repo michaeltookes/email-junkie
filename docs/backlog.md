@@ -43,6 +43,7 @@ Prioritized list of planned features, improvements, and technical debt for **sen
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
 29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
+    > **Status 2026-08-14:** workflow + `release.sh` fixes built on branch `release-automation` (`.github/workflows/release.yml`, `docs/ci-release.md`); awaiting secrets + the first tagged run to close (plus the carried Sparkle auto-update verification).
     Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything. The manual pipeline shipped v0.1.0 live (2026-08-14, item 11 resolved) and surfaced the fixes below.
     *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*
     - On a version tag, a workflow builds, signs, and notarizes the app and produces the DMG.

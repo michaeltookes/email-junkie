@@ -1,0 +1,374 @@
+name: Release
+
+# Turns a version-tag push into a complete Sentwise release: it runs the release
+# gate (SwiftLint strict + full test suite), signs and notarizes the app, builds
+# and notarizes the DMG, runs the launch smoke test, publishes a GitHub release
+# with the CHANGELOG section as notes, updates the Sparkle appcast, and bumps the
+# Homebrew tap cask.
+#
+# The heavy lifting lives in Distribution/scripts/release.sh — the SAME script
+# the maintainer runs locally. CI only supplies credentials from encrypted
+# secrets; it does not fork a second pipeline.
+#
+# Triggers:
+#   - push of a tag matching v*        -> full signed release + publish
+#   - workflow_dispatch (dry_run=true) -> whole plumbing unsigned, no publish,
+#                                         so the workflow is testable without
+#                                         secrets or a tag.
+#
+# Required repository secrets (values never live in the repo; see
+# docs/ci-release.md for the exact command that produces each one):
+#   MACOS_CERTIFICATE_P12            base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD       password protecting that .p12
+#   APPLE_ID                         Apple ID email (notarytool)
+#   APPLE_TEAM_ID                    10-char Apple Developer Team ID
+#   NOTARY_APP_SPECIFIC_PASSWORD     app-specific password (notarytool)
+#   SPARKLE_ED_PRIVATE_KEY           EdDSA private key (generate_keys -x export)
+#   TAP_PUSH_TOKEN                   PAT with push access to michaeltookes/homebrew-tap
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Unsigned dry run (archive + DMG layout + smoke test, no signing/notarization/publish)"
+        type: boolean
+        default: true
+
+# The publish step needs write access to create the GitHub release.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign & publish
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      # 'true' only for a workflow_dispatch run with the box checked; a tag push
+      # (or an unchecked dispatch) is always a real, signed release.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the tag and CHANGELOG are available
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          echo "DRY_RUN=$DRY_RUN"
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="$(grep -m1 'MARKETING_VERSION = ' \
+              Sentwise/Sentwise.xcodeproj/project.pbxproj | sed 's/.*= //; s/;.*//')"
+          fi
+          if [[ ! "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be X.Y.Z; got '$v'." >&2
+            exit 1
+          fi
+          build="$(grep -m1 'CURRENT_PROJECT_VERSION = ' \
+            Sentwise/Sentwise.xcodeproj/project.pbxproj | sed 's/.*= //; s/;.*//')"
+          if [[ ! "$build" =~ ^[0-9]+$ ]]; then
+            echo "CURRENT_PROJECT_VERSION must be an integer; got '$build'." >&2
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Release version: $v"
+          echo "Release build: $build"
+
+      - name: Validate Sparkle build number
+        if: env.DRY_RUN != 'true' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_BUILD: ${{ steps.version.outputs.build }}
+          CURRENT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          IFS=. read -r major minor patch <<< "$CURRENT_VERSION"
+          releases_json="$RUNNER_TEMP/releases.json"
+          previous_appcast="$RUNNER_TEMP/previous-appcast.xml"
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$releases_json"
+          previous_tag="$(jq -r \
+            --argjson major "$major" \
+            --argjson minor "$minor" \
+            --argjson patch "$patch" \
+            '
+            [
+              .[]
+              | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+              | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))}
+              | select(
+                  (.version[0] < $major)
+                  or (.version[0] == $major and .version[1] < $minor)
+                  or (.version[0] == $major and .version[1] == $minor and .version[2] < $patch)
+                )
+            ]
+            | sort_by(.version[0], .version[1], .version[2])
+            | last
+            | .tag // ""
+            ' "$releases_json")"
+          if [[ -z "$previous_tag" ]]; then
+            echo "No previous stable release found; skipping Sparkle build comparison."
+            exit 0
+          fi
+          curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL -o "$previous_appcast" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${previous_tag}/appcast.xml"
+          previous_build="$(xmllint --xpath 'string(//*[local-name()="version"][1])' "$previous_appcast")"
+          if [[ ! "$previous_build" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse Sparkle build number from $previous_tag appcast." >&2
+            exit 1
+          fi
+          if (( CURRENT_BUILD <= previous_build )); then
+            echo "CURRENT_PROJECT_VERSION ($CURRENT_BUILD) must exceed $previous_tag Sparkle build ($previous_build)." >&2
+            exit 1
+          fi
+          echo "Sparkle build $CURRENT_BUILD exceeds $previous_tag build $previous_build."
+
+      # ---- release gate: lint + full test suite (always, both modes) ----------
+      - name: SwiftLint (strict)
+        working-directory: Sentwise
+        run: |
+          command -v swiftlint >/dev/null 2>&1 || brew install swiftlint
+          swiftlint --version
+          swiftlint lint --strict
+
+      - name: Test mail package
+        run: |
+          cd Packages/SentwiseMail
+          swift test
+
+      - name: Build & test app
+        working-directory: Sentwise
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Sentwise.xcodeproj \
+            -scheme Sentwise \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+
+      # ---- signing setup (skipped on dry run) ---------------------------------
+      - name: Import Developer ID certificate
+        if: env.DRY_RUN != 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/sentwise-signing.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -base64 24)"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          # Create a throwaway keychain, unlock it, and add it to the search list
+          # so codesign/xcodebuild can find the identity.
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/xcodebuild
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/[",]//g')
+          rm -f "$CERT_PATH"
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "No Developer ID Application identity found in the imported keychain." >&2
+            exit 1
+          fi
+          {
+            echo "SIGNING_IDENTITY=$IDENTITY"
+            echo "SIGNING_KEYCHAIN=$KEYCHAIN"
+            echo "SIGNING_KEYCHAIN_PW=$KEYCHAIN_PW"
+          } >> "$GITHUB_ENV"
+          echo "Imported: $IDENTITY"
+
+      - name: Fetch Sparkle release tools (pinned)
+        if: env.DRY_RUN != 'true'
+        env:
+          SPARKLE_VERSION: "2.9.5" # keep in lockstep with the Sparkle SPM pin
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          test -x "$RUNNER_TEMP/sparkle/bin/generate_appcast"
+          echo "SPARKLE_BIN=$RUNNER_TEMP/sparkle/bin" >> "$GITHUB_ENV"
+
+      - name: Stage Sparkle EdDSA private key
+        if: env.DRY_RUN != 'true'
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          KEYFILE="$RUNNER_TEMP/sparkle_ed_private_key"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEYFILE"
+          chmod 600 "$KEYFILE"
+          echo "SPARKLE_ED_KEY_FILE=$KEYFILE" >> "$GITHUB_ENV"
+
+      - name: Install create-dmg
+        run: |
+          set -euo pipefail
+          command -v create-dmg >/dev/null 2>&1 || brew install create-dmg
+
+      # ---- the pipeline (same script as local); smoke test runs inside it ------
+      - name: Run release pipeline
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY_RUN" == "true" ]]; then
+            Distribution/scripts/release.sh --dry-run \
+              --version "${{ steps.version.outputs.version }}"
+          else
+            security unlock-keychain -p "$SIGNING_KEYCHAIN_PW" "$SIGNING_KEYCHAIN"
+            Distribution/scripts/release.sh \
+              --version "${{ steps.version.outputs.version }}"
+          fi
+
+      # ---- publish (skipped on dry run and on non-tag runs) -------------------
+      - name: Extract CHANGELOG section
+        id: changelog
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          # Same section-slice the manual flow used: everything between the
+          # '## [X.Y.Z]' heading and the next '## [' heading.
+          notes="$(awk -v ver="$v" '
+            $0 ~ ("^## \\[" ver "\\]") { grab=1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' CHANGELOG.md)"
+          # Strip leading/trailing blank lines.
+          notes="$(printf '%s\n' "$notes" | sed -e '/./,$!d' | tail -r | sed -e '/./,$!d' | tail -r)"
+          if [[ -z "$notes" ]]; then
+            notes="Release v$v"
+          fi
+          printf '%s\n' "$notes" > "$notes_file"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        if: env.DRY_RUN != 'true' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_FILE: ${{ steps.changelog.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          tag="v$v"
+          IFS=. read -r major minor patch <<< "$v"
+          assets=(
+            "dist/Sentwise-$v.dmg"
+            "dist/appcast.xml"
+            "dist/Sentwise-$v.dmg.sha256"
+          )
+          newer_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))} | select((.version[0] > '"$major"') or (.version[0] == '"$major"' and .version[1] > '"$minor"') or (.version[0] == '"$major"' and .version[1] == '"$minor"' and .version[2] > '"$patch"'))] | sort_by(.version[0], .version[1], .version[2]) | last | .tag // ""')"
+          latest_args=(--latest)
+          if [[ -n "$newer_tag" ]]; then
+            echo "Publishing $tag with --latest=false because newer stable release $newer_tag exists."
+            latest_args=(--latest=false)
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "$tag" \
+              --notes-file "$NOTES_FILE" \
+              --verify-tag
+            gh release upload "$tag" "${assets[@]}" --clobber
+            gh release edit "$tag" \
+              --draft=false \
+              "${latest_args[@]}"
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --title "$tag" \
+              --notes-file "$NOTES_FILE" \
+              "${latest_args[@]}" \
+              --verify-tag
+          fi
+
+      - name: Update Homebrew tap cask
+        if: env.DRY_RUN != 'true' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          tag="v$v"
+          IFS=. read -r major minor patch <<< "$v"
+          sha="$(cut -d' ' -f1 "dist/Sentwise-$v.dmg.sha256")"
+          newest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))}] | sort_by(.version[0], .version[1], .version[2]) | last | .tag // ""')"
+          if [[ -z "$newest_tag" ]]; then
+            echo "Could not determine the newest stable GitHub release tag." >&2
+            exit 1
+          fi
+          if [[ "$newest_tag" != "$tag" ]]; then
+            echo "Skipping Homebrew tap update for $tag because newest release is $newest_tag."
+            exit 0
+          fi
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/michaeltookes/homebrew-tap.git" \
+            "$RUNNER_TEMP/tap"
+          cask="$RUNNER_TEMP/tap/Casks/sentwise.rb"
+          tap_version="$(sed -nE 's/^  version "([^"]+)"/\1/p' "$cask" | head -1)"
+          if [[ ! "$tap_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not parse current tap cask version: '$tap_version'." >&2
+            exit 1
+          fi
+          IFS=. read -r tap_major tap_minor tap_patch <<< "$tap_version"
+          if (( tap_major > major
+            || (tap_major == major && tap_minor > minor)
+            || (tap_major == major && tap_minor == minor && tap_patch > patch) )); then
+            echo "Skipping Homebrew tap update for $v because tap already has newer version $tap_version."
+            exit 0
+          fi
+
+          # Sync the whole cask from this repo's template, then stamp version
+          # + sha256.
+          cp Distribution/sentwise.rb "$RUNNER_TEMP/tap/Casks/sentwise.rb"
+          /usr/bin/sed -i '' -E "s/^  version \".*\"/  version \"$v\"/" "$cask"
+          /usr/bin/sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$sha\"/" "$cask"
+
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/sentwise.rb
+          if git diff --cached --quiet; then
+            echo "Tap cask already up to date for $v."
+          else
+            git commit -m "sentwise: $v"
+            git push
+          fi
+
+      # ---- always clean up the signing keychain -------------------------------
+      - name: Remove signing keychain
+        if: always() && env.DRY_RUN != 'true'
+        run: |
+          if [[ -n "${SIGNING_KEYCHAIN:-}" && -f "${SIGNING_KEYCHAIN:-/nonexistent}" ]]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi

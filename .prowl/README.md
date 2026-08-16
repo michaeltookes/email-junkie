@@ -15,20 +15,34 @@ locally-linked CLI, not the npm `prowl-tools` package).
    - **Accessibility** — required for everything.
    - **Screen Recording** — only needed for screenshot steps / failure
      screenshots.
+4. **Build the app under test** from this checkout. The Prowl config points at
+   this deterministic build product so hunts do not exercise an older installed
+   Sentwise build:
+
+   ```bash
+   xcodebuild build \
+     -project Sentwise/Sentwise.xcodeproj \
+     -scheme Sentwise \
+     -configuration Debug \
+     -derivedDataPath .prowl/DerivedData \
+     CODE_SIGNING_ALLOWED=NO
+   ```
 
 ## Running
 
 From this directory's repo root:
 
 ```bash
+xcodebuild build -project Sentwise/Sentwise.xcodeproj -scheme Sentwise -configuration Debug -derivedDataPath .prowl/DerivedData CODE_SIGNING_ALLOWED=NO
 prowl list
 prowl run menu-smoke
 prowl run settings-window
 prowl run activity-history
 ```
 
-Each run launches Sentwise (via Launch Services, by bundle id), drives it, and
-quits it afterward. Artifacts land in `.prowl/runs/` (gitignored).
+Each run launches the Sentwise app at
+`.prowl/DerivedData/Build/Products/Debug/Sentwise.app`, drives it, and quits it
+afterward. Artifacts land in `.prowl/runs/` (gitignored).
 
 ## Safety
 

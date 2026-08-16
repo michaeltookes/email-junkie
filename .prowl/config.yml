@@ -4,7 +4,7 @@
 
 target:
   type: macos
-  app: com.tookes.Sentwise
+  app: .prowl/DerivedData/Build/Products/Debug/Sentwise.app
 
 browser:
   timeout: 30000        # also bounds app-launch wait for the macOS target
@@ -20,6 +20,7 @@ artifacts:
 guardrails:
   maxSteps: 25
   allowedApps:
+    - .prowl/DerivedData/Build/Products/Debug/Sentwise.app
     - com.tookes.Sentwise
   forbiddenSelectors:
     - "menu="

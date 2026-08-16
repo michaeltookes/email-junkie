@@ -299,6 +299,9 @@ jobs:
               "${latest_args[@]}" \
               --verify-tag
             gh release upload "$tag" "${assets[@]}" --clobber
+            gh release edit "$tag" \
+              --draft=false \
+              "${latest_args[@]}"
           else
             gh release create "$tag" "${assets[@]}" \
               --title "$tag" \

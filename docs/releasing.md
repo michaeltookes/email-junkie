@@ -163,7 +163,8 @@ What `release.sh` does, step by step:
 2. Upload `Sentwise-<version>.dmg`, `appcast.xml`, and the DMG `.sha256` as
    release assets. On a CI rerun for an existing release, the workflow edits the
    release notes and re-uploads those assets with `--clobber` before retrying
-   the tap update. The app's `SUFeedURL` points at
+   the tap update. If a newer stable release already exists, CI marks the stale
+   release `--latest=false`. The app's `SUFeedURL` points at
    `releases/latest/download/appcast.xml`, so the appcast must be an asset on
    the release marked **latest**.
 3. **Homebrew cask**: copy `Distribution/sentwise.rb` into the tap at
@@ -175,8 +176,9 @@ What `release.sh` does, step by step:
    ```
    CI skips this tap write when the tag is no longer the newest
    semantic-versioned, non-prerelease GitHub release, so an older rerun cannot
-   downgrade the cask after a newer release has shipped. CI also serializes all
-   release workflow runs so tag publish/tap updates do not overlap.
+   downgrade the cask after a newer release has shipped. The tap step also
+   refuses to overwrite a cloned cask that already contains a newer semantic
+   version.
 
 ---
 

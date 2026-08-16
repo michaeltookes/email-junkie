@@ -31,8 +31,10 @@ from `MARKETING_VERSION` in the project file. Both paths must resolve to
 `X.Y.Z`, and malformed tags such as `v0.2` fail before the release pipeline
 publishes anything.
 
-Release workflow runs share one concurrency group, so different tag releases do
-not overlap while publishing and updating the tap.
+Release workflow runs are grouped per ref. Cross-tag safety comes from publish
+and tap guards: stale tag reruns are published with `--latest=false`, and the
+tap step refuses to overwrite a cask that already contains a newer semantic
+version.
 
 For tagged releases, CI also compares `CURRENT_PROJECT_VERSION` against the
 previous stable release's Sparkle appcast build number and fails before the
@@ -137,13 +139,18 @@ from your Keychain — the script supports both paths.
 
 ## Homebrew tap update
 
-Before bumping the tap, the tagged workflow publishes the GitHub release. If the
-release already exists from a failed prior attempt, the workflow edits the title
-and notes from the CHANGELOG section and re-uploads the DMG, appcast, and SHA256
-assets with `--clobber` so the tap update can be retried by rerunning the job.
+Before bumping the tap, the tagged workflow publishes the GitHub release. If a
+newer stable release already exists, this release is created or edited with
+`--latest=false` so Sparkle's `releases/latest` appcast does not point at a
+stale version. If the release already exists from a failed prior attempt, the
+workflow edits the title and notes from the CHANGELOG section and re-uploads the
+DMG, appcast, and SHA256 assets with `--clobber` so the tap update can be
+retried by rerunning the job.
 The tap bump then checks the newest semantic-versioned, non-prerelease GitHub
 release and skips the cask write if this tag is stale, preventing an older rerun
-from downgrading Homebrew installs after a newer release has shipped.
+from downgrading Homebrew installs after a newer release has shipped. After
+cloning the tap, it also refuses to overwrite a cask version newer than the
+current tag, closing the race between overlapping tag jobs.
 
 On a tagged run the workflow clones `michaeltookes/homebrew-tap`, copies this
 repo's `Distribution/sentwise.rb` template over `Casks/sentwise.rb`, stamps the

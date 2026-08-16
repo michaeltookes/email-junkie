@@ -41,7 +41,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -279,21 +279,31 @@ jobs:
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
           tag="v$v"
+          IFS=. read -r major minor patch <<< "$v"
           assets=(
             "dist/Sentwise-$v.dmg"
             "dist/appcast.xml"
             "dist/Sentwise-$v.dmg.sha256"
           )
+          newer_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))} | select((.version[0] > '"$major"') or (.version[0] == '"$major"' and .version[1] > '"$minor"') or (.version[0] == '"$major"' and .version[1] == '"$minor"' and .version[2] > '"$patch"'))] | sort_by(.version[0], .version[1], .version[2]) | last | .tag // ""')"
+          latest_args=(--latest)
+          if [[ -n "$newer_tag" ]]; then
+            echo "Publishing $tag with --latest=false because newer stable release $newer_tag exists."
+            latest_args=(--latest=false)
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" \
               --title "$tag" \
               --notes-file "$NOTES_FILE" \
+              "${latest_args[@]}" \
               --verify-tag
             gh release upload "$tag" "${assets[@]}" --clobber
           else
             gh release create "$tag" "${assets[@]}" \
               --title "$tag" \
               --notes-file "$NOTES_FILE" \
+              "${latest_args[@]}" \
               --verify-tag
           fi
 
@@ -306,6 +316,7 @@ jobs:
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
           tag="v$v"
+          IFS=. read -r major minor patch <<< "$v"
           sha="$(cut -d' ' -f1 "dist/Sentwise-$v.dmg.sha256")"
           newest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
             --jq '[.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))}] | sort_by(.version[0], .version[1], .version[2]) | last | .tag // ""')"
@@ -321,11 +332,23 @@ jobs:
           git clone --depth 1 \
             "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/michaeltookes/homebrew-tap.git" \
             "$RUNNER_TEMP/tap"
+          cask="$RUNNER_TEMP/tap/Casks/sentwise.rb"
+          tap_version="$(sed -nE 's/^  version "([^"]+)"/\1/p' "$cask" | head -1)"
+          if [[ ! "$tap_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Could not parse current tap cask version: '$tap_version'." >&2
+            exit 1
+          fi
+          IFS=. read -r tap_major tap_minor tap_patch <<< "$tap_version"
+          if (( tap_major > major
+            || (tap_major == major && tap_minor > minor)
+            || (tap_major == major && tap_minor == minor && tap_patch > patch) )); then
+            echo "Skipping Homebrew tap update for $v because tap already has newer version $tap_version."
+            exit 0
+          fi
 
           # Sync the whole cask from this repo's template, then stamp version
           # + sha256.
           cp Distribution/sentwise.rb "$RUNNER_TEMP/tap/Casks/sentwise.rb"
-          cask="$RUNNER_TEMP/tap/Casks/sentwise.rb"
           /usr/bin/sed -i '' -E "s/^  version \".*\"/  version \"$v\"/" "$cask"
           /usr/bin/sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$sha\"/" "$cask"
 

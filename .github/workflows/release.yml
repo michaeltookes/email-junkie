@@ -296,7 +296,6 @@ jobs:
             gh release edit "$tag" \
               --title "$tag" \
               --notes-file "$NOTES_FILE" \
-              "${latest_args[@]}" \
               --verify-tag
             gh release upload "$tag" "${assets[@]}" --clobber
             gh release edit "$tag" \

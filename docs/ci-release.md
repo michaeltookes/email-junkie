@@ -22,12 +22,14 @@ from encrypted repository secrets instead of the login Keychain.
 
 | Trigger | What runs |
 | --- | --- |
-| Push a tag matching `v*` (e.g. `v0.1.2`) | Full signed release **and** publish (GitHub release + tap bump). |
+| Push a tag matching `v*` (must be `vX.Y.Z`, e.g. `v0.1.2`) | Full signed release **and** publish (GitHub release + tap bump). |
 | `workflow_dispatch` with **dry_run = true** (default) | Whole plumbing **unsigned** — archive, DMG layout, and launch smoke test — with no signing, notarization, or publishing. Testable with no secrets and no tag. |
 | `workflow_dispatch` with **dry_run = false** | Signs and notarizes, but because there is no tag it does **not** publish or bump the tap (a real release must come from a tag). |
 
 The version comes from the tag (`v0.1.2` → `0.1.2`); for a dispatch run it is read
-from `MARKETING_VERSION` in the project file.
+from `MARKETING_VERSION` in the project file. Both paths must resolve to
+`X.Y.Z`, and malformed tags such as `v0.2` fail before the release pipeline
+publishes anything.
 
 Release workflow runs share one concurrency group, so different tag releases do
 not overlap while publishing and updating the tap.

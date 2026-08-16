@@ -74,7 +74,8 @@ template, Sparkle wiring, DMG assets) lives under `Distribution/`.
 ## Versioning
 
 - `MARKETING_VERSION` (currently `0.1.0`) is the human version — bump per
-  release.
+  release. CI release tags and this value must use `X.Y.Z` format, e.g.
+  `v0.1.2` / `0.1.2`.
 - `CURRENT_PROJECT_VERSION` is an integer Sparkle compares as `CFBundleVersion`
   — bump it every release, even for the same marketing version, so Sparkle can
   order builds.

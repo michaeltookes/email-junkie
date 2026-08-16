@@ -240,11 +240,23 @@ jobs:
       - name: Update Homebrew tap cask
         if: env.DRY_RUN != 'true' && github.ref_type == 'tag'
         env:
+          GH_TOKEN: ${{ github.token }}
           TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
         run: |
           set -euo pipefail
           v="${{ steps.version.outputs.version }}"
+          tag="v$v"
           sha="$(cut -d' ' -f1 "dist/Sentwise-$v.dmg.sha256")"
+          newest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select((.draft | not) and (.prerelease | not) and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | {tag: .tag_name, version: (.tag_name | ltrimstr("v") | split(".") | map(tonumber))}] | sort_by(.version[0], .version[1], .version[2]) | last | .tag // ""')"
+          if [[ -z "$newest_tag" ]]; then
+            echo "Could not determine the newest stable GitHub release tag." >&2
+            exit 1
+          fi
+          if [[ "$newest_tag" != "$tag" ]]; then
+            echo "Skipping Homebrew tap update for $tag because newest release is $newest_tag."
+            exit 0
+          fi
 
           git clone --depth 1 \
             "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/michaeltookes/homebrew-tap.git" \

@@ -171,6 +171,9 @@ What `release.sh` does, step by step:
    ```bash
    brew install --cask michaeltookes/tap/sentwise
    ```
+   CI skips this tap write when the tag is no longer the newest
+   semantic-versioned, non-prerelease GitHub release, so an older rerun cannot
+   downgrade the cask after a newer release has shipped.
 
 ---
 

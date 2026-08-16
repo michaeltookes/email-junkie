@@ -132,6 +132,9 @@ Before bumping the tap, the tagged workflow publishes the GitHub release. If the
 release already exists from a failed prior attempt, the workflow edits the title
 and notes from the CHANGELOG section and re-uploads the DMG, appcast, and SHA256
 assets with `--clobber` so the tap update can be retried by rerunning the job.
+The tap bump then checks the newest semantic-versioned, non-prerelease GitHub
+release and skips the cask write if this tag is stale, preventing an older rerun
+from downgrading Homebrew installs after a newer release has shipped.
 
 On a tagged run the workflow clones `michaeltookes/homebrew-tap`, copies this
 repo's `Distribution/sentwise.rb` template over `Casks/sentwise.rb`, stamps the

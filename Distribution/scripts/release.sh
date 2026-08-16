@@ -189,7 +189,7 @@ smoke_test() {
 
   if [[ $rc -eq 0 ]]; then
     log "Launching app from the mounted DMG"
-    if open "$app"; then
+    if open -n "$app"; then
       sleep 5
       if pgrep -f "$exe" >/dev/null 2>&1; then
         log "Launch smoke test PASSED — process alive 5s after launch"

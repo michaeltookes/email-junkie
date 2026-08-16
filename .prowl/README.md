@@ -37,11 +37,11 @@ the live mailbox. All hunts here are **read-only** (open menu, open safe
 windows, assert visible) — keep them that way until there's a test-account
 setup. Do not author steps that touch drafts, sending, live watching, mailbox
 browsing/cleanup, follow-up composition, login items, Sparkle update checks, or
-app quit. Keep the `forbiddenSelectors` guardrails in sync with those surfaces;
-they block the connected-account menu entries (`New Follow-up from Transcript`,
-`Review Drafts`, `Review Skipped Messages`, `Browse Mailbox`, `Start Watching`,
-`Pause Watching`) plus `Launch at Login`, `Check for Updates`, and
-`Quit Sentwise`.
+app quit. Keep the `forbiddenSelectors` guardrails in sync with those surfaces.
+Because the macOS `menu=<title>` selector matches substrings, and Prowl's
+forbidden-selector matching is case-sensitive, the denylist uses short
+exact-case fragments (`Review`, `review`, `Browse`, `browse`, `Quit`, `quit`,
+etc.) instead of full menu titles.
 
 ## Selector dialect (macOS target)
 

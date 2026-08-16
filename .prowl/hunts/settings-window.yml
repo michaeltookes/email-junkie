@@ -1,0 +1,23 @@
+# Open the Settings window from the status-item menu and verify it appears.
+# The menu action uses the explicit AX identifier assigned to the safe Settings
+# item. Window matching uses the exact AX label Sentwise sets via
+# setAccessibilityLabel. Read-only.
+#
+# Run it:  prowl run settings-window
+
+name: settings-window
+description: Open the Settings window from the menu and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openSettings
+
+  - waitForSelector:
+      selector: label="Sentwise Settings"
+      timeout: 10000
+
+  - assert:
+      visible: label="Sentwise Settings"

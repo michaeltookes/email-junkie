@@ -1,0 +1,53 @@
+# Prowl configuration — Sentwise macOS menu bar app (experimental macOS target).
+# Requires the locally-built prowl CLI (npm link from the prowl repo) and its
+# prowl-macdriver Swift helper. See .prowl/README.md for setup and permissions.
+
+target:
+  type: macos
+  app: .prowl/DerivedData/Build/Products/Debug/Sentwise.app
+
+browser:
+  timeout: 30000        # also bounds app-launch wait for the macOS target
+
+artifacts:
+  screenshots: "on-failure"   # screenshots need Screen Recording permission
+
+# Safety guardrails. forbiddenSelectors is substring-matched against every
+# selector, so these block any hunt step from touching menu items that mutate
+# system/app state, start live mailbox work, or open send-capable surfaces.
+# Substring selector families are disabled; safe menu actions must use explicit
+# AX identifiers.
+guardrails:
+  maxSteps: 25
+  allowedApps:
+    - .prowl/DerivedData/Build/Products/Debug/Sentwise.app
+    - com.tookes.Sentwise
+  forbiddenSelectors:
+    - "menu="
+    - "text="
+    - "New"
+    - "new"
+    - "Follow"
+    - "follow"
+    - "Transcript"
+    - "transcript"
+    - "Review"
+    - "review"
+    - "Browse"
+    - "browse"
+    - "Mailbox"
+    - "mailbox"
+    - "Start"
+    - "start"
+    - "Pause"
+    - "pause"
+    - "Launch"
+    - "launch"
+    - "Login"
+    - "login"
+    - "Check"
+    - "check"
+    - "Update"
+    - "update"
+    - "Quit"
+    - "quit"

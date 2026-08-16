@@ -1,0 +1,18 @@
+# Open the Activity History window from the status-item menu and verify it
+# appears. Read-only.
+#
+# Run it:  prowl run activity-history
+
+name: activity-history
+description: Open the Activity History window and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openActivityMenu
+
+  - waitForSelector:
+      selector: label="Activity History"
+      timeout: 10000

@@ -1,0 +1,23 @@
+# Smoke test: the status item exists, its menu opens, and the safe core items
+# are present. These assertions use the explicit AX identifiers assigned to
+# safe NSMenuItems. Read-only.
+#
+# Run it:  prowl run menu-smoke
+
+name: menu-smoke
+description: Open the Sentwise status-item menu and verify safe core items exist
+
+steps:
+  # `statusItem` is the macOS target's magic selector: find the app's menu bar
+  # extra and press it, leaving the menu open for the assertions below.
+  - click:
+      selector: statusItem
+
+  - assert:
+      visible: id=openSettings
+
+  - assert:
+      visible: id=openActivityMenu
+
+  - assert:
+      visible: id=openSetupAssistant

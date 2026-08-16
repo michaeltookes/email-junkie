@@ -1,0 +1,105 @@
+import Foundation
+
+/// In-memory persistence for isolated app runs that must not touch the user's
+/// Application Support data. Production app launches use `PersistenceService`.
+final class MemoryPersistenceProvider: PersistenceProvider {
+    private let lock = NSLock()
+    private var settings: Settings
+    private var voiceProfile: VoiceProfile?
+    private var processedMessages: ProcessedMessages
+    private var pendingDrafts: [Draft]
+    private var approvedDraftIdentities: Set<String>
+    private var activityEvents: [ActivityEvent]
+
+    init(
+        settings: Settings = .default,
+        voiceProfile: VoiceProfile? = nil,
+        processedMessages: ProcessedMessages = ProcessedMessages(),
+        pendingDrafts: [Draft] = [],
+        approvedDraftIdentities: Set<String> = [],
+        activityEvents: [ActivityEvent] = []
+    ) {
+        self.settings = settings.validated()
+        self.voiceProfile = voiceProfile
+        self.processedMessages = processedMessages
+        self.pendingDrafts = pendingDrafts
+        self.approvedDraftIdentities = approvedDraftIdentities
+        self.activityEvents = activityEvents
+    }
+
+    func loadSettings() -> Settings {
+        withLock { settings }
+    }
+
+    func saveSettings(_ settings: Settings) {
+        withLock {
+            self.settings = settings.validated()
+        }
+    }
+
+    func saveSettingsSync(_ settings: Settings) throws {
+        saveSettings(settings)
+    }
+
+    func loadVoiceProfile() -> VoiceProfile? {
+        withLock { voiceProfile }
+    }
+
+    func saveVoiceProfile(_ profile: VoiceProfile) {
+        withLock {
+            voiceProfile = profile
+        }
+    }
+
+    func removeVoiceProfile() {
+        withLock {
+            voiceProfile = nil
+        }
+    }
+
+    func loadProcessedMessages() -> ProcessedMessages {
+        withLock { processedMessages }
+    }
+
+    func saveProcessedMessages(_ processed: ProcessedMessages) {
+        withLock {
+            processedMessages = processed
+        }
+    }
+
+    func loadPendingDrafts() -> [Draft] {
+        withLock { pendingDrafts }
+    }
+
+    func savePendingDraftsSync(_ drafts: [Draft]) throws {
+        withLock {
+            pendingDrafts = drafts
+        }
+    }
+
+    func loadApprovedDraftIdentities() -> Set<String> {
+        withLock { approvedDraftIdentities }
+    }
+
+    func saveApprovedDraftIdentitiesSync(_ identities: Set<String>) throws {
+        withLock {
+            approvedDraftIdentities = identities
+        }
+    }
+
+    func loadActivityEvents() -> [ActivityEvent] {
+        withLock { activityEvents }
+    }
+
+    func saveActivityEvents(_ events: [ActivityEvent]) {
+        withLock {
+            activityEvents = events
+        }
+    }
+
+    private func withLock<Value>(_ body: () throws -> Value) rethrows -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}

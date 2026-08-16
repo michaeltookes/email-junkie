@@ -170,16 +170,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Setup Assistant…
         let setup = NSMenuItem(title: "Setup Assistant…", action: #selector(openOnboardingMenu), keyEquivalent: "")
         setup.target = self
+        setup.setAccessibilityIdentifier("openSetupAssistant")
         items.append(setup)
 
         // Settings…
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
+        settings.setAccessibilityIdentifier("openSettings")
         items.append(settings)
 
         // Activity History… (always available; the log persists across launches).
         let activity = NSMenuItem(title: "Activity History…", action: #selector(openActivityMenu), keyEquivalent: "")
         activity.target = self
+        activity.setAccessibilityIdentifier("openActivityMenu")
         items.append(activity)
 
         items.append(.separator())

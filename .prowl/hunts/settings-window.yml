@@ -1,8 +1,7 @@
 # Open the Settings window from the status-item menu and verify it appears.
-# `menu=<title>` opens the status menu and clicks the item whose title contains
-# the text (case-insensitive) — the trailing ellipsis in "Settings…" doesn't
-# need to be typed. Window matching uses text= (substring of the AX title/label
-# Sentwise sets via setAccessibilityLabel). Read-only.
+# The menu action uses the explicit AX identifier assigned to the safe Settings
+# item. Window matching uses the exact AX label Sentwise sets via
+# setAccessibilityLabel. Read-only.
 #
 # Run it:  prowl run settings-window
 
@@ -11,11 +10,14 @@ description: Open the Settings window from the menu and verify it appears
 
 steps:
   - click:
-      selector: menu=Settings
+      selector: statusItem
+
+  - click:
+      selector: id=openSettings
 
   - waitForSelector:
-      selector: text="Sentwise Settings"
+      selector: label="Sentwise Settings"
       timeout: 10000
 
   - assert:
-      visible: text="Sentwise Settings"
+      visible: label="Sentwise Settings"

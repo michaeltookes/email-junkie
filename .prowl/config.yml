@@ -14,13 +14,16 @@ artifacts:
 
 # Safety guardrails. forbiddenSelectors is substring-matched against every
 # selector, so these block any hunt step from touching menu items that mutate
-# system/app state, start live mailbox work, or open send-capable surfaces. Keep
-# entries short enough to catch partial `menu=<title>` selectors.
+# system/app state, start live mailbox work, or open send-capable surfaces.
+# Substring selector families are disabled; safe menu actions must use explicit
+# AX identifiers.
 guardrails:
   maxSteps: 25
   allowedApps:
     - com.tookes.Sentwise
   forbiddenSelectors:
+    - "menu="
+    - "text="
     - "New"
     - "new"
     - "Follow"

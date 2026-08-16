@@ -8,8 +8,11 @@ description: Open the Activity History window and verify it appears
 
 steps:
   - click:
-      selector: menu=Activity History
+      selector: statusItem
+
+  - click:
+      selector: id=openActivityMenu
 
   - waitForSelector:
-      selector: text="Activity History"
+      selector: label="Activity History"
       timeout: 10000

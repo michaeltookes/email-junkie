@@ -38,16 +38,17 @@ windows, assert visible) — keep them that way until there's a test-account
 setup. Do not author steps that touch drafts, sending, live watching, mailbox
 browsing/cleanup, follow-up composition, login items, Sparkle update checks, or
 app quit. Keep the `forbiddenSelectors` guardrails in sync with those surfaces.
-Because the macOS `menu=<title>` selector matches substrings, and Prowl's
-forbidden-selector matching is case-sensitive, the denylist uses short
-exact-case fragments (`Review`, `review`, `Browse`, `browse`, `Quit`, `quit`,
-etc.) instead of full menu titles.
+Because the macOS substring selectors can resolve short values like `Q` or `Fo`
+to unsafe menu items, this config forbids `menu=` and `text=` selectors. Menu
+actions must use explicit safe AX identifiers (`id=openSettings`,
+`id=openActivityMenu`, `id=openSetupAssistant`), and window checks should use
+exact `label=` selectors.
 
 ## Selector dialect (macOS target)
 
 - `statusItem` — press the app's menu bar status item (leaves the menu open)
-- `menu=<title>` — open the status menu and click the item containing `<title>`
+- `menu=<title>` — disabled by this repo's guardrails; use safe `id=` selectors
 - `id=<axIdentifier>` — accessibility identifier when the app exposes one
 - `role=button[name="Save"]` — AX role + accessible name
-- `text="…"` — case-insensitive substring of title/description/value
+- `text="…"` — disabled by this repo's guardrails; use exact `label=` where possible
 - `label="…"` — exact accessibility label match

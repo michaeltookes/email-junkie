@@ -1,10 +1,11 @@
 name: Claude PR Description
 
-# Suggest PR descriptions: when a PR is opened with no body, Claude writes a
-# candidate description from the diff into the workflow summary. GitHub's PR
-# body update APIs do not expose a documented compare-and-swap guard, so this
-# workflow deliberately avoids editing the PR body and cannot overwrite an
-# author-written description.
+# Suggest PR descriptions: when a same-repo PR is opened with no authored body,
+# Claude writes a candidate description from the diff into the workflow summary.
+# The unchanged default PR template is treated as empty. GitHub's PR body update
+# APIs do not expose a documented compare-and-swap guard, so this workflow
+# deliberately avoids editing the PR body and cannot overwrite an author-written
+# description.
 #
 # Portable by design: no repo-specific content below, so this file can be
 # dropped into any repo with the Claude GitHub app installed.
@@ -15,13 +16,10 @@ on:
 
 jobs:
   suggest-description:
-    # Empty-body check: `== ''` also matches a null body (GitHub expression
-    # comparisons coerce null to ''). Same-repo head gate: fork PRs run
-    # without secrets, so the action could only fail there — and a fork
-    # head is untrusted input this workflow should not process anyway.
-    if: |
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.body == ''
+    # Same-repo head gate: fork PRs run without secrets, so the action could
+    # only fail there — and a fork head is untrusted input this workflow should
+    # not process anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # A missing description is cosmetic. This job must never leave a failing
     # check on the PR: a red here would block the watcher's merge-ready gate
@@ -39,19 +37,68 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Check PR description state
+        id: description_state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          def normalized(value):
+              lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+              return "\n".join(line.rstrip() for line in lines).strip()
+
+          def template_body():
+              path = Path(".github/PULL_REQUEST_TEMPLATE.md")
+              if not path.exists():
+                  return None
+              return path.read_text(encoding="utf-8")
+
+          body = subprocess.check_output(
+              [
+                  "gh",
+                  "pr",
+                  "view",
+                  os.environ["PR_NUMBER"],
+                  "--repo",
+                  os.environ["REPOSITORY"],
+                  "--json",
+                  "body",
+                  "--jq",
+                  ".body // \"\"",
+              ],
+              text=True,
+          )
+          current = normalized(body)
+          template = template_body()
+          template_matches = template is not None and current == normalized(template)
+          should_suggest = current == "" or template_matches
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"should_suggest={'true' if should_suggest else 'false'}\n")
+          PY
+
       - name: Generate PR description from the diff
+        if: steps.description_state.outputs.should_suggest == 'true'
         id: describe
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: false
           prompt: |
-            Pull request ${{ github.repository }}#${{ github.event.pull_request.number }} was opened with an empty description. Return a suggested description written from its diff.
+            Pull request ${{ github.repository }}#${{ github.event.pull_request.number }} was opened with no authored description. Return a suggested description written from its diff.
 
-            1. Re-check the current body first: `gh pr view ${{ github.event.pull_request.number }} --json body`. If it is no longer empty — the author added a description after opening — stop immediately without changing anything.
-            2. Read the change: `gh pr diff ${{ github.event.pull_request.number }}` (and `gh pr view ${{ github.event.pull_request.number }} --json title,commits` for commit-message context).
-            3. Compose a concise Markdown description: a 1-3 sentence summary of what the change does and why, then a short bullet list of the main changes grouped by area (source, tests, docs, config). Describe behavior, not file-by-file mechanics. Only state motivation that is evident from the diff or commit messages — do not invent rationale.
-            4. Return structured output only: `should_suggest: true` and `body: <the description>` when the body is still empty; otherwise `should_suggest: false` and `body: ""`.
+            1. Read the change: `gh pr diff ${{ github.event.pull_request.number }}` (and `gh pr view ${{ github.event.pull_request.number }} --json title,commits` for commit-message context).
+            2. Compose a concise Markdown description: a 1-3 sentence summary of what the change does and why, then a short bullet list of the main changes grouped by area (source, tests, docs, config). Describe behavior, not file-by-file mechanics. Only state motivation that is evident from the diff or commit messages — do not invent rationale.
+            3. Return structured output only: `should_suggest: true` and `body: <the description>`. If you cannot produce a non-empty description from the diff, return `should_suggest: false` and `body: ""`.
 
             Do nothing else: no comments, no reviews, no labels, no code changes, and no PR body edits.
           claude_args: |
@@ -61,7 +108,7 @@ jobs:
             --json-schema '{"type":"object","properties":{"should_suggest":{"type":"boolean"},"body":{"type":"string"}},"required":["should_suggest","body"],"additionalProperties":false}'
 
       - name: Publish suggested PR description
-        if: fromJSON(steps.describe.outputs.structured_output).should_suggest == true
+        if: steps.description_state.outputs.should_suggest == 'true' && fromJSON(steps.describe.outputs.structured_output).should_suggest == true
         shell: bash
         env:
           BODY_JSON: ${{ steps.describe.outputs.structured_output }}
@@ -69,15 +116,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          current_body="$(gh pr view '${{ github.event.pull_request.number }}' --repo '${{ github.repository }}' --json body --jq '.body // ""')"
-          if [ -n "$current_body" ]; then
-            exit 0
-          fi
-
           python3 <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
+
+          def normalized(value):
+              lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+              return "\n".join(line.rstrip() for line in lines).strip()
+
+          def template_body():
+              path = Path(".github/PULL_REQUEST_TEMPLATE.md")
+              if not path.exists():
+                  return None
+              return path.read_text(encoding="utf-8")
+
+          current_body = subprocess.check_output(
+              [
+                  "gh",
+                  "pr",
+                  "view",
+                  "${{ github.event.pull_request.number }}",
+                  "--repo",
+                  "${{ github.repository }}",
+                  "--json",
+                  "body",
+                  "--jq",
+                  ".body // \"\"",
+              ],
+              text=True,
+          )
+          current = normalized(current_body)
+          template = template_body()
+          if current and (template is None or current != normalized(template)):
+              raise SystemExit(0)
 
           data = json.loads(os.environ["BODY_JSON"])
           body = data.get("body", "")
@@ -91,8 +164,9 @@ jobs:
           with Path(summary).open("a", encoding="utf-8") as output:
               output.write("## Suggested PR description\n\n")
               output.write(
-                  "Claude generated this because the PR body was empty when it checked. "
-                  "Apply it manually only if the PR body is still empty.\n\n"
+                  "Claude generated this because the PR body was blank or still matched "
+                  "the untouched PR template when it checked. Apply it manually only if "
+                  "the PR body still has no authored description.\n\n"
               )
               output.write(body.strip())
               output.write("\n")

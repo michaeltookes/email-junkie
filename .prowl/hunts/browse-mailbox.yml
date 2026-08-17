@@ -1,0 +1,20 @@
+# Mailbox browser: open the Browse Mailbox window and verify it appears. The
+# fixture account's `.invalid` IMAP host can never resolve, so the window's
+# connection attempt fails fast and harmlessly — this hunt asserts window
+# presence only. Search/cleanup actions are forbidden by guardrails.
+#
+# Run it:  prowl run browse-mailbox
+
+name: browse-mailbox
+description: Open the Browse Mailbox window and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openBrowseMailbox
+
+  - waitForSelector:
+      selector: label="Browse Mailbox"
+      timeout: 10000

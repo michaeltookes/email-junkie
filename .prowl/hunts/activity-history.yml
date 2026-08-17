@@ -1,5 +1,6 @@
 # Open the Activity History window from the status-item menu and verify it
-# appears. Read-only.
+# appears. The seeded fixture keeps history empty; this asserts the window
+# itself. Read-only.
 #
 # Run it:  prowl run activity-history
 

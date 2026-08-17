@@ -52,6 +52,43 @@ final class ProwlHuntRuntimeTests: XCTestCase {
         XCTAssertTrue(runtime.makeSecretStore() is InMemorySecretStore)
     }
 
+    func testProwlRuntimeSeedsConnectedFixtureAccount() throws {
+        let runtime = ProwlHuntRuntime(isEnabled: true)
+        let persistence = runtime.makePersistenceProvider()
+        let secrets = runtime.makeSecretStore()
+
+        let settings = persistence.loadSettings()
+        XCTAssertEqual(settings.mailEmail, ProwlHuntRuntime.fixtureAccountEmail)
+        XCTAssertEqual(settings.savedAccounts.map(\.id), [ProwlHuntRuntime.fixtureAccountEmail])
+        XCTAssertTrue(settings.onboardingCompleted)
+        // The fixture must never be able to reach a real server or LLM.
+        XCTAssertTrue(settings.mailHost.hasSuffix(".invalid"))
+        XCTAssertTrue(ProwlHuntRuntime.fixtureAccountEmail.hasSuffix(".invalid"))
+        XCTAssertTrue(settings.llmVerifiedModel.isEmpty)
+
+        let password = try secrets.value(
+            for: .mailAppPassword(email: ProwlHuntRuntime.fixtureAccountEmail)
+        )
+        XCTAssertEqual(password, ProwlHuntRuntime.fixtureAppPassword)
+
+        let drafts = persistence.loadPendingDrafts()
+        XCTAssertEqual(drafts.map(\.sourceSubject), ["Prowl hunt fixture"])
+    }
+
+    @MainActor
+    func testAppStateWithSeededFixtureExposesAccountGatedMenuSurfaces() {
+        let runtime = ProwlHuntRuntime(isEnabled: true)
+        let appState = AppState(
+            persistence: runtime.makePersistenceProvider(),
+            secrets: runtime.makeSecretStore(),
+            notifier: NullDraftNotifier()
+        )
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertTrue(appState.hasReviewWindowContent)
+        XCTAssertFalse(appState.canWatch)
+    }
+
     func testProductionRuntimeUsesLiveStoresAndStartupSideEffects() {
         let runtime = ProwlHuntRuntime(isEnabled: false)
 

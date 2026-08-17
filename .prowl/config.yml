@@ -1,6 +1,11 @@
 # Prowl configuration — Sentwise macOS menu bar app (experimental macOS target).
 # Requires the locally-built prowl CLI (npm link from the prowl repo) and its
 # prowl-macdriver Swift helper. See .prowl/README.md for setup and permissions.
+#
+# Hunt mode launches with a seeded in-memory fixture account (see
+# ProwlHuntRuntime.swift) so the account-gated surfaces — follow-up composer,
+# review window, mailbox browser — are reachable. The fixture uses `.invalid`
+# hosts and no LLM key, so nothing can reach a real mail server or provider.
 
 target:
   type: macos
@@ -13,41 +18,127 @@ artifacts:
   screenshots: "on-failure"   # screenshots need Screen Recording permission
 
 # Safety guardrails. forbiddenSelectors is substring-matched against every
-# selector, so these block any hunt step from touching menu items that mutate
-# system/app state, start live mailbox work, or open send-capable surfaces.
-# Substring selector families are disabled; safe menu actions must use explicit
-# AX identifiers.
+# selector. Hunts are open-and-assert only: they may open windows but never
+# trigger an action that mutates state, dispatches mail, calls an LLM, runs a
+# mailbox search, or touches system settings. The substring selector families
+# (`menu=`, `text=`) stay disabled because short substrings can resolve to
+# unsafe menu items; menu actions must use the explicit AX identifiers the app
+# assigns to safe items (`id=openSettings`, `id=openActivityMenu`,
+# `id=openSetupAssistant`, `id=openFollowUpComposer`, `id=openReviewWindow`,
+# `id=openBrowseMailbox`).
 guardrails:
   maxSteps: 25
   allowedApps:
     - .prowl/DerivedData/Build/Products/Debug/Sentwise.app
     - com.tookes.Sentwise
   forbiddenSelectors:
+    # Substring selector families — too easy to hit an unsafe element.
     - "menu="
     - "text="
-    - "New"
-    - "new"
-    - "Follow"
-    - "follow"
-    - "Transcript"
-    - "transcript"
-    - "Review"
-    - "review"
-    - "Browse"
-    - "browse"
-    - "Mailbox"
-    - "mailbox"
+    # Mail dispatch / draft mutation inside the composer and review windows.
+    - "Send"
+    - "send"
+    - "Approve"
+    - "approve"
+    - "Deny"
+    - "deny"
+    - "Discard"
+    - "discard"
+    - "Delete"
+    - "delete"
+    - "Save"
+    - "save"
+    - "Generate"
+    - "generate"
+    - "Draft follow-up"
+    - "Draft reply"
+    - "Draft a reply to this message"
+    - "Draft anyway"
+    - "Reply body"
+    - "Follow-up recipients"
+    - "Follow-up subject"
+    - "Paste transcript text"
+    - "Choose File"
+    - "Clear"
+    - "Dismiss"
+    - "Cancel"
+    - "Regenerate"
+    # Live-connection actions (settings test, mailbox search, watching).
+    - "Connect"
+    - "connect"
+    - "Test"
+    - "test"
+    - "Search"
+    - "search"
     - "Start"
     - "start"
     - "Pause"
     - "pause"
-    - "Launch"
-    - "launch"
+    - "Search keyword"
+    - "Filter by sender"
+    - "Since date"
+    - "Before date"
+    - "Select message from"
+    - "Check all"
+    - "Load more"
+    - "View body"
+    - "View message"
+    - "Open message from"
+    - "Preview cleanup"
+    - "Preview recent inbox messages"
+    - "Folder"
+    - "Show"
+    - "From"
+    - "Cleanup"
+    - "Mark read"
+    - "Archive"
+    - "Move to Trash"
+    - "Stop"
+    # System-level toggles and app lifecycle.
     - "Login"
     - "login"
+    - "Launch"
+    - "launch"
     - "Check"
     - "check"
     - "Update"
     - "update"
     - "Quit"
     - "quit"
+    # Settings/setup controls exposed by open-and-assert window hunts.
+    - "Launch Sentwise at login"
+    - "Inbox poll interval in seconds"
+    - "What approving a draft does"
+    - "On approve"
+    - "Auto-send undo window"
+    - "Undo window"
+    - "Watch a folder for new call transcripts"
+    - "Choose"
+    - "Email address"
+    - "App password"
+    - "IMAP host"
+    - "IMAP port"
+    - "Port"
+    - "Add another account"
+    - "Add sender to allowlist"
+    - "Add sender to blocklist"
+    - "Add"
+    - "Switch to"
+    - "Remove "
+    - "AI provider"
+    - "AI model"
+    - "AI provider base URL"
+    - "AI provider API key"
+    - "Provider"
+    - "Model"
+    - "Base URL"
+    - "API key"
+    - "Learn my voice"
+    - "Re-learn my voice"
+    - "Forget voice profile"
+    - "Filter"
+    - "Clear History"
+    - "Back"
+    - "Continue"
+    - "Skip for now"
+    - "Finish"

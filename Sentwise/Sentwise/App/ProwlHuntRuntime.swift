@@ -1,4 +1,5 @@
 import Foundation
+import SentwiseMail
 
 /// Runtime switches for local Prowl accessibility hunts. The documented Prowl
 /// app bundle lives under `.prowl/DerivedData`, which enables an isolated mode
@@ -29,11 +30,68 @@ struct ProwlHuntRuntime {
     }
 
     func makePersistenceProvider() -> PersistenceProvider {
-        isEnabled ? MemoryPersistenceProvider() : PersistenceService.shared
+        isEnabled
+            ? MemoryPersistenceProvider(
+                settings: Self.fixtureSettings,
+                pendingDrafts: [Self.fixturePendingDraft]
+            )
+            : PersistenceService.shared
     }
 
     func makeSecretStore() -> SecretStore {
-        isEnabled ? InMemorySecretStore() : KeychainStore.shared
+        isEnabled
+            ? InMemorySecretStore(seed: [
+                .mailAppPassword(email: Self.fixtureAccountEmail): Self.fixtureAppPassword
+            ])
+            : KeychainStore.shared
+    }
+
+    // MARK: - Seeded fixture (hunt mode only)
+
+    /// Hunt mode seeds a fake connected account so the account-gated menu
+    /// surfaces (follow-up composer, review window, mailbox browser) exist and
+    /// hunts can open them. The `.invalid` TLD is reserved by RFC 2606 and never
+    /// resolves, so nothing in the fixture can reach a real mail server, and no
+    /// LLM key is seeded so watching stays unavailable.
+    static let fixtureAccountEmail = "hunt.fixture@sentwise.invalid"
+    static let fixtureAppPassword = "prowl-hunt-fixture-password"
+    static let fixtureMailHost = "imap.sentwise.invalid"
+
+    static var fixtureSettings: Settings {
+        Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: fixtureAccountEmail,
+            mailHost: fixtureMailHost,
+            mailPort: 993,
+            savedAccounts: [
+                SavedMailAccount(email: fixtureAccountEmail, host: fixtureMailHost, port: 993)
+            ],
+            onboardingCompleted: true
+        )
+    }
+
+    /// One pending draft so `hasReviewWindowContent` is true and the Review
+    /// Drafts menu item (and window) are reachable. Guardrails forbid approving
+    /// or sending it; dispatch would fail against the `.invalid` host anyway.
+    static var fixturePendingDraft: Draft {
+        Draft(
+            id: 1,
+            sourceUIDValidity: 1,
+            sourceAccountEmail: fixtureAccountEmail,
+            sourceMailHost: fixtureMailHost,
+            sourceMailPort: 993,
+            sourceMailbox: "INBOX",
+            sourceSubject: "Prowl hunt fixture",
+            sourceFrom: MailAddress(name: "Hunt Fixture", email: "counterpart@sentwise.invalid"),
+            sourceReplyTo: nil,
+            sourceMessageID: "<prowl-hunt-fixture@sentwise.invalid>",
+            incomingBody: "Seeded incoming message so the review window has content during hunts.",
+            replySubject: "Re: Prowl hunt fixture",
+            body: "Seeded reply draft. Hunts open this window read-only and never approve or send.",
+            model: "prowl-hunt-fixture",
+            generatedAt: Date(timeIntervalSince1970: 1_755_000_000)
+        )
     }
 
     static func isEnabled(

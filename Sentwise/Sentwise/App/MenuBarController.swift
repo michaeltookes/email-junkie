@@ -110,6 +110,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 keyEquivalent: "n"
             )
             followUp.target = self
+            followUp.setAccessibilityIdentifier("openFollowUpComposer")
             items.append(followUp)
         }
 
@@ -121,6 +122,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 keyEquivalent: "r"
             )
             review.target = self
+            review.setAccessibilityIdentifier("openReviewWindow")
             items.append(review)
         }
 
@@ -132,6 +134,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 keyEquivalent: "b"
             )
             browse.target = self
+            browse.setAccessibilityIdentifier("openBrowseMailbox")
             items.append(browse)
         }
 

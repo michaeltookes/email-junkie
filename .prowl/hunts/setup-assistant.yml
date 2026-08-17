@@ -1,0 +1,20 @@
+# Onboarding surface (item 64 work happens here): open the Setup Assistant
+# from the status-item menu and verify its window appears. The seeded fixture
+# marks onboarding complete, so this exercises the manual re-entry path.
+# Read-only — no fields are filled and no connection test is run.
+#
+# Run it:  prowl run setup-assistant
+
+name: setup-assistant
+description: Open the Setup Assistant window and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openSetupAssistant
+
+  - waitForSelector:
+      selector: label="Sentwise Setup"
+      timeout: 10000

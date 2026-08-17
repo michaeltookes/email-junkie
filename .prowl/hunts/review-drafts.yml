@@ -1,0 +1,20 @@
+# Approval surface: open the Review Drafts window and verify it appears. The
+# menu item exists because hunt mode seeds one pending fixture draft. Opens
+# only — approving/denying is forbidden by guardrails, and dispatch would fail
+# against the fixture's `.invalid` host anyway.
+#
+# Run it:  prowl run review-drafts
+
+name: review-drafts
+description: Open the Review Drafts window and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openReviewWindow
+
+  - waitForSelector:
+      selector: label="Review Drafts"
+      timeout: 10000

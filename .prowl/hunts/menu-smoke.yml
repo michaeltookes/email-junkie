@@ -1,11 +1,12 @@
-# Smoke test: the status item exists, its menu opens, and the safe core items
-# are present. These assertions use the explicit AX identifiers assigned to
-# safe NSMenuItems. Read-only.
+# Smoke test: the status item exists, its menu opens, and every hunt-safe
+# menu action is present — including the account-gated items unlocked by the
+# seeded fixture account (follow-up composer, review window, mailbox browser).
+# Read-only.
 #
 # Run it:  prowl run menu-smoke
 
 name: menu-smoke
-description: Open the Sentwise status-item menu and verify safe core items exist
+description: Open the status-item menu and verify all safe actions exist
 
 steps:
   # `statusItem` is the macOS target's magic selector: find the app's menu bar
@@ -13,11 +14,23 @@ steps:
   - click:
       selector: statusItem
 
+  # Always-present items.
+  - assert:
+      visible: id=openSetupAssistant
+
   - assert:
       visible: id=openSettings
 
   - assert:
       visible: id=openActivityMenu
 
+  # Account-gated items — only exist because hunt mode seeds a fixture
+  # account and one pending draft. If these fail, the seeding regressed.
   - assert:
-      visible: id=openSetupAssistant
+      visible: id=openFollowUpComposer
+
+  - assert:
+      visible: id=openReviewWindow
+
+  - assert:
+      visible: id=openBrowseMailbox

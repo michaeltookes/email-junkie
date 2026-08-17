@@ -1,0 +1,21 @@
+# Flagship workflow surface: open the "New Follow-up from Transcript" composer
+# from the status-item menu and verify its window appears. Opens only — never
+# fills the transcript, generates, or sends (guardrails forbid those actions,
+# and the fixture has no LLM key). Window matching uses the exact AX label set
+# in FollowUpComposerWindow.
+#
+# Run it:  prowl run follow-up-composer
+
+name: follow-up-composer
+description: Open the follow-up composer window and verify it appears
+
+steps:
+  - click:
+      selector: statusItem
+
+  - click:
+      selector: id=openFollowUpComposer
+
+  - waitForSelector:
+      selector: label="New Follow-up"
+      timeout: 10000

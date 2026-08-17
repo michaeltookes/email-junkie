@@ -30,14 +30,17 @@ locally-linked CLI, not the npm `prowl-tools` package).
 
 ## Running
 
-From this directory's repo root:
+From the repo root:
 
 ```bash
-xcodebuild build -project Sentwise/Sentwise.xcodeproj -scheme Sentwise -configuration Debug -derivedDataPath .prowl/DerivedData CODE_SIGNING_ALLOWED=NO
 prowl list
-prowl run menu-smoke
-prowl run settings-window
-prowl run activity-history
+prowl run menu-smoke          # status-item menu opens; all safe actions exist
+prowl run follow-up-composer  # flagship: New Follow-up window opens
+prowl run review-drafts       # approval surface: Review Drafts window opens
+prowl run browse-mailbox      # Browse Mailbox window opens
+prowl run setup-assistant     # onboarding window opens (item 64 surface)
+prowl run settings-window     # Settings window opens (item 65 surface)
+prowl run activity-history    # Activity History window opens
 ```
 
 Each run launches the Sentwise app at
@@ -46,37 +49,76 @@ afterward. That bundle path automatically enables Sentwise's Prowl hunt mode
 before app startup automation runs. Artifacts land in `.prowl/runs/`
 (gitignored).
 
-## Safety
+## Hunt mode: isolation + seeded fixture
 
-Prowl hunt mode isolates these runs from the user's live Sentwise profile:
-settings, processed-message state, pending drafts, activity history, voice
-profile, and secrets use in-memory stores instead of Application Support and
-Keychain. Startup side effects are also disabled before UI is presented:
-Sparkle startup, notification authorization, reachability monitoring, inbox
-watcher auto-resume, transcript-folder watcher auto-resume, and first-run
-onboarding auto-open.
+Hunt mode (see `Sentwise/Sentwise/App/ProwlHuntRuntime.swift`) isolates runs
+from the user's live Sentwise profile: settings, processed-message state,
+pending drafts, activity history, voice profile, and secrets use in-memory
+stores instead of Application Support and Keychain. Startup side effects are
+disabled before UI is presented: Sparkle startup, notification authorization,
+reachability monitoring, inbox watcher auto-resume, transcript-folder watcher
+auto-resume, and first-run onboarding auto-open.
+
+The in-memory stores are **seeded with a fake connected account** so the
+account-gated menu surfaces exist and hunts can open every product window:
+
+- Account `hunt.fixture@sentwise.invalid` on host `imap.sentwise.invalid` —
+  the `.invalid` TLD (RFC 2606) never resolves, so nothing in the fixture can
+  reach a real mail server. This unlocks **New Follow-up from Transcript** and
+  **Browse Mailbox** (whose connection attempt fails fast and harmlessly).
+- One pending fixture draft, which unlocks **Review Drafts (1)**.
+- Onboarding marked complete, so the menu is in its normal steady state.
+- **No LLM key and no verified model**, so watching stays unavailable and no
+  provider can be called.
 
 The `.prowl/DerivedData` app path is part of that safety boundary. If you point
 `target.app` somewhere else, do not present the hunts as live-account-safe
 unless that build is launched with `SENTWISE_PROWL_HUNT_MODE=1` or
 `--sentwise-prowl-hunt-mode` and the isolation still applies.
 
-All hunts here are **read-only** (open menu, open safe windows, assert visible)
-— keep them that way until there's a test-account setup. Do not author steps
-that touch drafts, sending, live watching, mailbox browsing/cleanup, follow-up
-composition, login items, Sparkle update checks, or app quit. Keep the
-`forbiddenSelectors` guardrails in sync with those surfaces. Because the macOS
-substring selectors can resolve short values like `Q` or `Fo` to unsafe menu
-items, this config forbids `menu=` and `text=` selectors. Menu actions must use
-explicit safe AX identifiers (`id=openSettings`, `id=openActivityMenu`,
-`id=openSetupAssistant`), and window checks should use exact `label=`
-selectors.
+## Safety rules for authoring hunts
+
+All hunts are **open-and-assert only**: open the menu, open windows, assert
+presence. Even though hunt mode is isolated, do not author steps that activate
+controls inside the opened windows — no Generate, Send, Approve, Deny, Save,
+Delete, Search, Test Connection, Start/Pause Watching, Launch at Login,
+Check for Updates, or Quit. The `forbiddenSelectors` guardrails in
+`config.yml` enforce this by substring — keep them in sync with any new
+interactive surfaces.
+
+Because the macOS substring selectors can resolve short values like `Q` or
+`Fo` to unsafe menu items, this config forbids `menu=` and `text=` selectors.
+Menu actions must use the explicit safe AX identifiers assigned in
+`MenuBarController.swift`:
+
+| Identifier | Menu item |
+|---|---|
+| `id=openSetupAssistant` | Setup Assistant… |
+| `id=openSettings` | Settings… |
+| `id=openActivityMenu` | Activity History… |
+| `id=openFollowUpComposer` | New Follow-up from Transcript… (fixture-gated) |
+| `id=openReviewWindow` | Review Drafts (N)… (fixture-gated) |
+| `id=openBrowseMailbox` | Browse Mailbox… (fixture-gated) |
+
+Window presence checks use `waitForSelector` with the exact AX label each
+window sets via `setAccessibilityLabel` (`label=` is a step selector; it is
+not recognized inside `assert`, so rely on `waitForSelector` failing the hunt
+when the window never appears):
+
+| AX label | Window |
+|---|---|
+| `label="New Follow-up"` | Follow-up composer |
+| `label="Review Drafts"` | Review/approval window |
+| `label="Browse Mailbox"` | Mailbox browser |
+| `label="Sentwise Setup"` | Onboarding / setup assistant |
+| `label="Sentwise Settings"` | Settings |
+| `label="Activity History"` | Activity history |
 
 ## Selector dialect (macOS target)
 
 - `statusItem` — press the app's menu bar status item (leaves the menu open)
-- `menu=<title>` — disabled by this repo's guardrails; use safe `id=` selectors
 - `id=<axIdentifier>` — accessibility identifier when the app exposes one
+- `label="…"` — exact accessibility label match (steps only, not assertions)
 - `role=button[name="Save"]` — AX role + accessible name
-- `text="…"` — disabled by this repo's guardrails; use exact `label=` where possible
-- `label="…"` — exact accessibility label match
+- `menu=<title>` — disabled by this repo's guardrails; use safe `id=` selectors
+- `text="…"` — disabled by this repo's guardrails

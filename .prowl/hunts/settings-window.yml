@@ -1,7 +1,7 @@
-# Open the Settings window from the status-item menu and verify it appears.
-# The menu action uses the explicit AX identifier assigned to the safe Settings
-# item. Window matching uses the exact AX label Sentwise sets via
-# setAccessibilityLabel. Read-only.
+# Settings surface (item 65 restyle work happens here): open the Settings
+# window from the status-item menu and verify it appears. Window matching uses
+# the exact AX label Sentwise sets via setAccessibilityLabel. Read-only — no
+# values are changed and no connection test is run.
 #
 # Run it:  prowl run settings-window
 
@@ -18,6 +18,3 @@ steps:
   - waitForSelector:
       selector: label="Sentwise Settings"
       timeout: 10000
-
-  - assert:
-      visible: label="Sentwise Settings"

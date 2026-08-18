@@ -13,7 +13,7 @@ extension AppState {
     var mailCredentials: MailAccountCredentials {
         MailAccountCredentials(
             email: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: mailAppPassword.trimmingCharacters(in: .whitespacesAndNewlines),
+            appPassword: MailAccountCredentials.normalizedAppPassword(mailAppPassword),
             host: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
             port: mailPort
         )
@@ -33,7 +33,7 @@ extension AppState {
         connectionError = nil
         let credentials = MailAccountCredentials(
             email: credentials.email.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: credentials.appPassword.trimmingCharacters(in: .whitespacesAndNewlines),
+            appPassword: MailAccountCredentials.normalizedAppPassword(credentials.appPassword),
             host: credentials.host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: credentials.port
         )

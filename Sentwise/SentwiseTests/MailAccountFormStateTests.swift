@@ -15,6 +15,16 @@ final class MailAccountFormStateTests: XCTestCase {
         XCTAssertEqual(form.credentials.port, 993)
     }
 
+    func testCredentialsStripInteriorWhitespaceFromPastedAppPassword() {
+        var form = MailAccountFormState()
+
+        form.updateEmailFromUser("me@gmail.com")
+        // Pasted verbatim in Google's display grouping, with stray edge spaces.
+        form.appPassword = "  abcd efgh ijkl mnop  "
+
+        XCTAssertEqual(form.credentials.appPassword, "abcdefghijklmnop")
+    }
+
     func testExplicitHostIsUsedForCredentialGuidance() {
         var form = MailAccountFormState()
 

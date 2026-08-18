@@ -15,7 +15,7 @@ struct MailAccountFormState: Equatable {
     var credentials: MailAccountCredentials {
         MailAccountCredentials(
             email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: appPassword.trimmingCharacters(in: .whitespacesAndNewlines),
+            appPassword: MailAccountCredentials.normalizedAppPassword(appPassword),
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: port
         )

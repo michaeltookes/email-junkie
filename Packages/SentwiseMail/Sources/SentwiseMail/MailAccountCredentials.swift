@@ -44,4 +44,14 @@ public struct MailAccountCredentials: Equatable, Sendable {
     static func derivedSMTPHost(from host: String) -> String {
         host.hasPrefix("imap.") ? "smtp." + host.dropFirst("imap.".count) : host
     }
+
+    /// Strips ALL whitespace — interior included, not just the edges — from a
+    /// pasted app password. Google, Yahoo, and Apple display generated passwords
+    /// in grouped form (e.g. `xxxx xxxx xxxx xxxx`); users paste them verbatim,
+    /// so edge-trimming alone leaves interior spaces that break authentication.
+    /// `.whitespacesAndNewlines` also covers non-breaking spaces and tabs, so a
+    /// copy that picked up exotic separators still normalizes cleanly.
+    public static func normalizedAppPassword(_ raw: String) -> String {
+        raw.components(separatedBy: .whitespacesAndNewlines).joined()
+    }
 }

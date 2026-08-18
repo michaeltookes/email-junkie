@@ -9,6 +9,30 @@ final class MailAccountCredentialsTests: XCTestCase {
         XCTAssertEqual(credentials.port, 993)
     }
 
+    func testNormalizedAppPasswordStripsInteriorWhitespace() {
+        // Google/Yahoo/Apple all display generated passwords in grouped form.
+        XCTAssertEqual(
+            MailAccountCredentials.normalizedAppPassword("abcd efgh ijkl mnop"),
+            "abcdefghijklmnop"
+        )
+    }
+
+    func testNormalizedAppPasswordStripsEdgesTabsNewlinesAndNonBreakingSpaces() {
+        // Non-breaking space (U+00A0), tab, and newline are all covered by
+        // .whitespacesAndNewlines, so a copy that picked them up still works.
+        XCTAssertEqual(
+            MailAccountCredentials.normalizedAppPassword("  ab\u{00A0}cd\tef\ngh  "),
+            "abcdefgh"
+        )
+    }
+
+    func testNormalizedAppPasswordLeavesCompactPasswordsUnchanged() {
+        XCTAssertEqual(
+            MailAccountCredentials.normalizedAppPassword("abcdefghijklmnop"),
+            "abcdefghijklmnop"
+        )
+    }
+
     func testIsCompleteRequiresAllFields() {
         XCTAssertTrue(
             MailAccountCredentials(email: "me@gmail.com", appPassword: "pw").isComplete

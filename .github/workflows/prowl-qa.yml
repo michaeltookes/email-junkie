@@ -8,16 +8,16 @@
 # provide. Grant both to whatever hosts the runner agent (Terminal / launchd
 # context) in System Settings → Privacy & Security before the first run.
 #
-# Starts as manually-triggered while the runner is being stood up. Once a run
-# is green end-to-end, promote it to a PR gate by uncommenting the
-# pull_request trigger below.
+# Runs as a PR gate (promoted 2026-08-18 after the first green end-to-end run
+# on the self-hosted runner) and stays manually triggerable via
+# workflow_dispatch.
 
 name: Prowl QA
 
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches: [main]
+  pull_request:
+    branches: [main]
 
 # The hunts drive a real GUI session on the runner — two runs at once would
 # fight over the same screen/menu bar. Never run concurrently.

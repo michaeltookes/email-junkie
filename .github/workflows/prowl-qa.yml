@@ -8,9 +8,9 @@
 # provide. Grant both to whatever hosts the runner agent (Terminal / launchd
 # context) in System Settings → Privacy & Security before the first run.
 #
-# Runs as a PR gate (promoted 2026-08-18 after the first green end-to-end run
-# on the self-hosted runner) and stays manually triggerable via
-# workflow_dispatch.
+# Runs as a PR gate for same-repository PR heads (promoted 2026-08-18 after the
+# first green end-to-end run on the self-hosted runner) and stays manually
+# triggerable via workflow_dispatch.
 
 name: Prowl QA
 
@@ -32,6 +32,11 @@ env:
 
 jobs:
   prowl-qa:
+    # Fork PR code is untrusted input for a persistent self-hosted GUI runner.
+    # Keep this job on manual runs and same-repository PR heads only.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS]
     timeout-minutes: 30
 

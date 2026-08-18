@@ -19,12 +19,6 @@ on:
   pull_request:
     branches: [main]
 
-# The hunts drive a real GUI session on the runner — two runs at once would
-# fight over the same screen/menu bar. Never run concurrently.
-concurrency:
-  group: prowl-qa
-  cancel-in-progress: false
-
 # Keep in sync deliberately: the CLI and helper are both built from this source
 # tag until the macOS target ships in the published npm package.
 env:
@@ -37,6 +31,9 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
+    # The hunts drive a real GUI session. The single eligible self-hosted macOS
+    # runner serializes runs through its native queue while preserving every PR
+    # gate run.
     runs-on: [self-hosted, macOS]
     timeout-minutes: 30
 

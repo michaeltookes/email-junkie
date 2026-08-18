@@ -108,6 +108,39 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(appState.onboardingResumeStep, .sendBehavior)
     }
 
+    // MARK: - Continue-disabled helper text
+
+    func testConnectStepsExplainWhyContinueIsDisabledWhenNothingConnected() {
+        let (appState, _) = makeDisconnected()
+
+        XCTAssertEqual(
+            appState.onboardingContinueBlockedReason(for: .connectAccount),
+            "Run Test Connection to continue."
+        )
+        XCTAssertEqual(
+            appState.onboardingContinueBlockedReason(for: .connectProvider),
+            "Run Test Connection to continue."
+        )
+    }
+
+    func testConnectStepHintClearsOnceThatStepIsConnected() {
+        let (appState, _) = makeAccountOnly()
+
+        // Account connected → no hint on that step, but the provider still gates.
+        XCTAssertNil(appState.onboardingContinueBlockedReason(for: .connectAccount))
+        XCTAssertEqual(
+            appState.onboardingContinueBlockedReason(for: .connectProvider),
+            "Run Test Connection to continue."
+        )
+    }
+
+    func testNonConnectStepsNeverShowAContinueHint() {
+        let (appState, _) = makeDisconnected()
+
+        XCTAssertNil(appState.onboardingContinueBlockedReason(for: .sendBehavior))
+        XCTAssertNil(appState.onboardingContinueBlockedReason(for: .voice))
+    }
+
     // MARK: - Reconcile (already-configured install)
 
     func testReconcileMarksLegacyConfiguredInstallCompleteAndSkipsFlow() {

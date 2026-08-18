@@ -74,77 +74,82 @@ struct CredentialGuidance: Equatable {
 
     static func forKind(_ kind: EmailProviderKind) -> CredentialGuidance {
         switch kind {
-        case .gmail:
-            return CredentialGuidance(
-                providerName: "Gmail",
-                credentialName: "app password",
-                steps: [
-                    "Turn on 2-Step Verification in your Google Account — app passwords require it.",
-                    "Go to myaccount.google.com → Security → App passwords.",
-                    "Create a password for Mail, then paste the 16-character password here."
-                ],
-                url: URL(string: "https://myaccount.google.com/apppasswords"),
-                appPasswordDistinction: "Make sure this is a Google app password from your "
-                    + "Google Account — not an Apple/iCloud app-specific password. Both look "
-                    + "like a grouped 16-character code."
-            )
-        case .att:
-            return CredentialGuidance(
-                providerName: "AT&T",
-                credentialName: "Secure Mail Key",
-                steps: [
-                    "Sign in at signin.att.net.",
-                    "Go to Profile → Sign-in info → Manage secure mail keys.",
-                    "Select the email address you entered, then Add secure mail key.",
-                    "Copy the key and paste it here."
-                ],
-                url: URL(string: "https://signin.att.net"),
-                appPasswordDistinction: "Make sure this is an AT&T Secure Mail Key from "
-                    + "signin.att.net — not an Apple or Google app password."
-            )
-        case .yahoo:
-            return CredentialGuidance(
-                providerName: "Yahoo",
-                credentialName: "app password",
-                steps: [
-                    "Sign in at account.yahoo.com → Account security.",
-                    "Choose Generate app password (or Manage app passwords), name it, and generate.",
-                    "Copy the password and paste it here."
-                ],
-                url: URL(string: "https://login.yahoo.com/account/security"),
-                appPasswordDistinction: "Make sure this is a Yahoo app password from your "
-                    + "Yahoo account — not an Apple or Google app password."
-            )
-        case .aol:
-            return CredentialGuidance(
-                providerName: "AOL",
-                credentialName: "app password",
-                steps: [
-                    "Sign in at login.aol.com → Account security.",
-                    "Choose Generate app password (or Manage app passwords).",
-                    "Generate one for Mail, then paste it here."
-                ],
-                url: URL(string: "https://login.aol.com/account/security"),
-                appPasswordDistinction: "Make sure this is an AOL app password from your "
-                    + "AOL account — not an Apple or Google app password."
-            )
-        case .icloud:
-            return CredentialGuidance(
-                providerName: "iCloud",
-                credentialName: "app-specific password",
-                steps: [
-                    "Sign in at appleid.apple.com.",
-                    "Enable two-factor authentication if needed, then go to "
-                        + "Sign-In and Security → App-Specific Passwords.",
-                    "Create one for Sentwise, then paste it here."
-                ],
-                url: URL(string: "https://appleid.apple.com"),
-                appPasswordDistinction: "Make sure this is an Apple app-specific password from "
-                    + "appleid.apple.com — not a Google app password. Both look like a grouped "
-                    + "16-character code."
-            )
+        case .gmail: return gmailGuidance
+        case .att: return attGuidance
+        case .yahoo: return yahooGuidance
+        case .aol: return aolGuidance
+        case .icloud: return iCloudGuidance
         }
     }
+
+    static let gmailGuidance = CredentialGuidance(
+        providerName: "Gmail",
+        credentialName: "app password",
+        steps: [
+            "Turn on 2-Step Verification in your Google Account — app passwords require it.",
+            "Go to myaccount.google.com → Security → App passwords.",
+            "Create a password for Mail, then paste the 16-character password here."
+        ],
+        url: URL(string: "https://myaccount.google.com/apppasswords"),
+        appPasswordDistinction: "Make sure this is a Google app password from your "
+            + "Google Account — not an Apple/iCloud app-specific password. Both look "
+            + "like a grouped 16-character code."
+    )
+
+    static let attGuidance = CredentialGuidance(
+        providerName: "AT&T",
+        credentialName: "Secure Mail Key",
+        steps: [
+            "Sign in at signin.att.net.",
+            "Go to Profile → Sign-in info → Manage secure mail keys.",
+            "Select the email address you entered, then Add secure mail key.",
+            "Copy the key and paste it here."
+        ],
+        url: URL(string: "https://signin.att.net"),
+        appPasswordDistinction: "Make sure this is an AT&T Secure Mail Key from "
+            + "signin.att.net — not an Apple or Google app password."
+    )
+
+    static let yahooGuidance = CredentialGuidance(
+        providerName: "Yahoo",
+        credentialName: "app password",
+        steps: [
+            "Sign in at account.yahoo.com → Account security.",
+            "Choose Generate app password (or Manage app passwords), name it, and generate.",
+            "Copy the password and paste it here."
+        ],
+        url: URL(string: "https://login.yahoo.com/account/security"),
+        appPasswordDistinction: "Make sure this is a Yahoo app password from your "
+            + "Yahoo account — not an Apple or Google app password."
+    )
+
+    static let aolGuidance = CredentialGuidance(
+        providerName: "AOL",
+        credentialName: "app password",
+        steps: [
+            "Sign in at login.aol.com → Account security.",
+            "Choose Generate app password (or Manage app passwords).",
+            "Generate one for Mail, then paste it here."
+        ],
+        url: URL(string: "https://login.aol.com/account/security"),
+        appPasswordDistinction: "Make sure this is an AOL app password from your "
+            + "AOL account — not an Apple or Google app password."
+    )
+
+    static let iCloudGuidance = CredentialGuidance(
+        providerName: "iCloud",
+        credentialName: "app-specific password",
+        steps: [
+            "Sign in at appleid.apple.com.",
+            "Enable two-factor authentication if needed, then go to "
+                + "Sign-In and Security → App-Specific Passwords.",
+            "Create one for Sentwise, then paste it here."
+        ],
+        url: URL(string: "https://appleid.apple.com"),
+        appPasswordDistinction: "Make sure this is an Apple app-specific password from "
+            + "appleid.apple.com — not a Google app password. Both look like a grouped "
+            + "16-character code."
+    )
 
     /// Fallback for unrecognized domains. IMAP password requirements vary, so
     /// keep this conditional instead of claiming every provider needs a separate

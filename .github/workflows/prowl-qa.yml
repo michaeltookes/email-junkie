@@ -25,8 +25,8 @@ concurrency:
   group: prowl-qa
   cancel-in-progress: false
 
-# Keep in sync deliberately: bump both together after verifying a new Prowl
-# release locally. The helper is built from the same tag the CLI shipped from.
+# Keep in sync deliberately: the CLI and helper are both built from this source
+# tag until the macOS target ships in the published npm package.
 env:
   PROWL_VERSION: 0.1.4
 
@@ -39,11 +39,11 @@ jobs:
       - name: Checkout Sentwise
         uses: actions/checkout@v4
 
-      - name: Checkout Prowl (helper source, pinned to the CLI release tag)
+      - name: Checkout Prowl (CLI/helper source tag)
         uses: actions/checkout@v4
         with:
           repository: prowl-tools/prowl
-          ref: v0.1.4
+          ref: v${{ env.PROWL_VERSION }}
           path: prowl-src
 
       - name: Set up Node
@@ -51,8 +51,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Prowl CLI
-        run: npm install -g "prowl-tools@${PROWL_VERSION}"
+      - name: Build and link Prowl CLI
+        working-directory: prowl-src
+        run: |
+          npm install
+          npm run build
+          npm link
 
       - name: Build prowl-macdriver helper
         working-directory: prowl-src/macdriver

@@ -126,10 +126,11 @@ when the window never appears):
 ## CI (Prowl QA workflow)
 
 `.github/workflows/prowl-qa.yml` runs the full hunt suite (`prowl ci --junit`)
-against a fresh hunt-mode build on a **self-hosted macOS runner**. It installs
-`prowl-tools` from npm (pinned via `PROWL_VERSION`), builds the
-`prowl-macdriver` helper from the matching `prowl-tools/prowl` release tag, and
-fails fast with a clear message if the runner lacks Accessibility permission.
+against a fresh hunt-mode build on a **self-hosted macOS runner**. It checks out
+the matching `prowl-tools/prowl` source tag (pinned via `PROWL_VERSION`), then
+builds and links both the CLI and `prowl-macdriver` helper from that source. The
+job fails fast with a clear message if the runner lacks Accessibility
+permission.
 
 Runner requirements (one-time, per machine):
 - macOS with Xcode (the workflow builds both Sentwise and the Swift helper)

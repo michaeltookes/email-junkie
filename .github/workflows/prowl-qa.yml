@@ -8,22 +8,16 @@
 # provide. Grant both to whatever hosts the runner agent (Terminal / launchd
 # context) in System Settings → Privacy & Security before the first run.
 #
-# Starts as manually-triggered while the runner is being stood up. Once a run
-# is green end-to-end, promote it to a PR gate by uncommenting the
-# pull_request trigger below.
+# Runs as a PR gate for same-repository PR heads (promoted 2026-08-18 after the
+# first green end-to-end run on the self-hosted runner) and stays manually
+# triggerable via workflow_dispatch.
 
 name: Prowl QA
 
 on:
   workflow_dispatch:
-  # pull_request:
-  #   branches: [main]
-
-# The hunts drive a real GUI session on the runner — two runs at once would
-# fight over the same screen/menu bar. Never run concurrently.
-concurrency:
-  group: prowl-qa
-  cancel-in-progress: false
+  pull_request:
+    branches: [main]
 
 # Keep in sync deliberately: the CLI and helper are both built from this source
 # tag until the macOS target ships in the published npm package.
@@ -32,6 +26,14 @@ env:
 
 jobs:
   prowl-qa:
+    # Fork PR code is untrusted input for a persistent self-hosted GUI runner.
+    # Keep this job on manual runs and same-repository PR heads only.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    # The hunts drive a real GUI session. The single eligible self-hosted macOS
+    # runner serializes runs through its native queue while preserving every PR
+    # gate run.
     runs-on: [self-hosted, macOS]
     timeout-minutes: 30
 

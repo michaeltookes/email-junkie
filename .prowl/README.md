@@ -122,3 +122,25 @@ when the window never appears):
 - `role=button[name="Save"]` — AX role + accessible name
 - `menu=<title>` — disabled by this repo's guardrails; use safe `id=` selectors
 - `text="…"` — disabled by this repo's guardrails
+
+## CI (Prowl QA workflow)
+
+`.github/workflows/prowl-qa.yml` runs the full hunt suite (`prowl ci --junit`)
+against a fresh hunt-mode build on a **self-hosted macOS runner**. It checks out
+the matching `prowl-tools/prowl` source tag (pinned via `PROWL_VERSION`), then
+builds and links both the CLI and `prowl-macdriver` helper from that source. The
+job fails fast with a clear message if the runner lacks Accessibility
+permission.
+
+Runner requirements (one-time, per machine):
+- macOS with Xcode (the workflow builds both Sentwise and the Swift helper)
+- **Accessibility** permission granted to the process hosting the runner agent
+  (plus **Screen Recording** if failure screenshots are wanted)
+- A logged-in GUI session — the hunts drive a real menu bar and real windows,
+  so the runner cannot be a headless/SSH-only box
+- Register the runner with labels `self-hosted, macOS`
+
+The workflow is `workflow_dispatch`-only until the runner is proven; promote it
+to a PR gate by uncommenting the `pull_request` trigger. Runs never execute
+concurrently (a `concurrency` group serializes them — two hunts fighting over
+one screen would flake).

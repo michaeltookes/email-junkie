@@ -14,6 +14,11 @@ struct CredentialGuidance: Equatable {
     let steps: [String]
     /// A deep link to the provider's credential page, when one is stable.
     let url: URL?
+    /// One line disambiguating this provider's credential from the other
+    /// grouped-code-string app passwords users confuse it with — most often
+    /// Apple vs Google, since both look like `xxxx xxxx xxxx xxxx`. `nil` for
+    /// the generic fallback, which isn't tied to a specific provider.
+    let appPasswordDistinction: String?
     /// Custom note for providers whose normal-password behavior varies.
     private let passwordNoteOverride: String?
 
@@ -22,12 +27,14 @@ struct CredentialGuidance: Equatable {
         credentialName: String,
         steps: [String],
         url: URL?,
+        appPasswordDistinction: String? = nil,
         passwordNoteOverride: String? = nil
     ) {
         self.providerName = providerName
         self.credentialName = credentialName
         self.steps = steps
         self.url = url
+        self.appPasswordDistinction = appPasswordDistinction
         self.passwordNoteOverride = passwordNoteOverride
     }
 
@@ -76,7 +83,10 @@ struct CredentialGuidance: Equatable {
                     "Go to myaccount.google.com → Security → App passwords.",
                     "Create a password for Mail, then paste the 16-character password here."
                 ],
-                url: URL(string: "https://myaccount.google.com/apppasswords")
+                url: URL(string: "https://myaccount.google.com/apppasswords"),
+                appPasswordDistinction: "Make sure this is a Google app password from your "
+                    + "Google Account — not an Apple/iCloud app-specific password. Both look "
+                    + "like a grouped 16-character code."
             )
         case .att:
             return CredentialGuidance(
@@ -88,7 +98,9 @@ struct CredentialGuidance: Equatable {
                     "Select the email address you entered, then Add secure mail key.",
                     "Copy the key and paste it here."
                 ],
-                url: URL(string: "https://signin.att.net")
+                url: URL(string: "https://signin.att.net"),
+                appPasswordDistinction: "Make sure this is an AT&T Secure Mail Key from "
+                    + "signin.att.net — not an Apple or Google app password."
             )
         case .yahoo:
             return CredentialGuidance(
@@ -99,7 +111,9 @@ struct CredentialGuidance: Equatable {
                     "Choose Generate app password (or Manage app passwords), name it, and generate.",
                     "Copy the password and paste it here."
                 ],
-                url: URL(string: "https://login.yahoo.com/account/security")
+                url: URL(string: "https://login.yahoo.com/account/security"),
+                appPasswordDistinction: "Make sure this is a Yahoo app password from your "
+                    + "Yahoo account — not an Apple or Google app password."
             )
         case .aol:
             return CredentialGuidance(
@@ -110,7 +124,9 @@ struct CredentialGuidance: Equatable {
                     "Choose Generate app password (or Manage app passwords).",
                     "Generate one for Mail, then paste it here."
                 ],
-                url: URL(string: "https://login.aol.com/account/security")
+                url: URL(string: "https://login.aol.com/account/security"),
+                appPasswordDistinction: "Make sure this is an AOL app password from your "
+                    + "AOL account — not an Apple or Google app password."
             )
         case .icloud:
             return CredentialGuidance(
@@ -122,7 +138,10 @@ struct CredentialGuidance: Equatable {
                         + "Sign-In and Security → App-Specific Passwords.",
                     "Create one for Sentwise, then paste it here."
                 ],
-                url: URL(string: "https://appleid.apple.com")
+                url: URL(string: "https://appleid.apple.com"),
+                appPasswordDistinction: "Make sure this is an Apple app-specific password from "
+                    + "appleid.apple.com — not a Google app password. Both look like a grouped "
+                    + "16-character code."
             )
         }
     }

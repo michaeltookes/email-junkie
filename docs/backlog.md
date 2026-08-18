@@ -190,14 +190,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - If sandboxed: the folder picker persists a security-scoped bookmark; launch resolves it and calls `startAccessingSecurityScopedResource`; a stale bookmark is detected and surfaced through the existing `transcriptFolderError` state ("choose the folder again in Settings").
     - If not sandboxed: close this item by documenting that decision.
 
-64. **Onboarding friction: app-password paste normalization + explain the disabled Continue**
-    Two frictions found dogfooding v0.1.1's first-run setup (2026-08-14), both of which would hit the non-technical ICP harder: a Google app password pasted in Google's display format (`xxxx xxxx xxxx xxxx`) fails because interior whitespace isn't stripped (only edges are trimmed), and the Continue button is silently disabled until Test Connection succeeds, with nothing telling the user that's the gate.
-    *As Marcus, I want setup to accept my app password exactly as Google shows it to me and to tell me what's blocking Continue, so that I don't conclude the app is broken on the first screen.*
-    - App-password fields strip ALL whitespace (interior included) before storage/auth — Google, Yahoo, and Apple all display generated passwords with grouping separators.
-    - While Continue is disabled on the connect steps, visible helper text states the reason ("Run Test Connection to continue") — same pattern on the AI-provider step.
-    - Consider auto-running the connection test on valid-looking input, or turning the primary button into "Test & Continue" so one action does both.
-    - The Apple-vs-Google app-password confusion is real (both look like grouped code strings); the existing per-provider guidance (item 43) gets one line distinguishing "this is a GOOGLE app password, not an Apple one."
-
 65. **Native macOS Settings window (ContainerBar-style toolbar tabs + About pane)**
     The current Settings screen doesn't look or feel like a native macOS app. Restyle it to the pattern proven in the maintainer's ContainerBar app: a fixed-size settings window with a native `NSToolbar` of tab icons (à la System Settings / every polished menu-bar app), grouped-form panes, and a branded About tab.
     *As Marcus, I want Settings to look like a real Mac app, so that a tool asking for my email credentials feels trustworthy and polished.*

@@ -158,6 +158,41 @@ final class CredentialGuidanceTests: XCTestCase {
         )
     }
 
+    // MARK: - Apple-vs-Google disambiguation
+
+    /// Gmail and Apple app passwords both look like grouped 16-character code
+    /// strings, so the guidance must say which one this provider needs.
+    func testGmailGuidanceDistinguishesFromAppleAppPassword() {
+        let distinction = CredentialGuidance.forKind(.gmail).appPasswordDistinction
+        XCTAssertNotNil(distinction)
+        XCTAssertTrue(distinction!.contains("Google app password"))
+        XCTAssertTrue(distinction!.contains("Apple"))
+    }
+
+    func testICloudGuidanceDistinguishesFromGoogleAppPassword() {
+        let distinction = CredentialGuidance.forKind(.icloud).appPasswordDistinction
+        XCTAssertNotNil(distinction)
+        XCTAssertTrue(distinction!.contains("Apple app-specific password"))
+        XCTAssertTrue(distinction!.contains("Google"))
+    }
+
+    /// Every recognized provider gets a distinction line that names Apple and/or
+    /// Google, the credentials users most often paste by mistake.
+    func testEveryRecognizedProviderHasAnAppleOrGoogleDistinction() {
+        for kind in EmailProviderKind.allCases {
+            let distinction = CredentialGuidance.forKind(kind).appPasswordDistinction
+            XCTAssertNotNil(distinction, "\(kind) must disambiguate its credential")
+            XCTAssertTrue(
+                distinction!.contains("Apple") || distinction!.contains("Google"),
+                "\(kind) distinction must reference Apple or Google"
+            )
+        }
+    }
+
+    func testGenericGuidanceHasNoProviderDistinction() {
+        XCTAssertNil(CredentialGuidance.generic.appPasswordDistinction)
+    }
+
     // MARK: - Generic fallback
 
     /// An unrecognized domain must still get usable, non-Gmail-specific advice

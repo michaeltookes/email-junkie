@@ -18,6 +18,13 @@ struct AppPasswordGuidanceView: View {
                     .font(.caption)
                     .foregroundStyle(.primary)
 
+                if let distinction = guidance.appPasswordDistinction {
+                    Label(distinction, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 ForEach(Array(guidance.steps.enumerated()), id: \.offset) { index, step in
                     Text("\(index + 1). \(step)")
                         .font(.caption)

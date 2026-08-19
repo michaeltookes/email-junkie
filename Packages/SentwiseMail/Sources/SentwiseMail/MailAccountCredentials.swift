@@ -44,4 +44,12 @@ public struct MailAccountCredentials: Equatable, Sendable {
     static func derivedSMTPHost(from host: String) -> String {
         host.hasPrefix("imap.") ? "smtp." + host.dropFirst("imap.".count) : host
     }
+
+    /// Strips grouping whitespace from providers whose generated app passwords
+    /// are displayed as separated code blocks (e.g. `xxxx xxxx xxxx xxxx`).
+    /// Use this only when the credential is known to be one of those generated
+    /// passwords; ordinary IMAP passwords can legitimately contain spaces.
+    public static func normalizedGroupedAppPassword(_ raw: String) -> String {
+        raw.components(separatedBy: .whitespacesAndNewlines).joined()
+    }
 }

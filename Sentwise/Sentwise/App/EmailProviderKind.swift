@@ -1,4 +1,5 @@
 import Foundation
+import SentwiseMail
 
 /// A recognized email provider, classified from an address's domain. Drives both
 /// the IMAP-host suggestion (item 41) and the connect-screen credential guidance
@@ -83,6 +84,19 @@ enum EmailProviderKind: Equatable, CaseIterable {
     private static let yahooHostSuffixes = ["yahoo.com", "ymail.com", "rocketmail.com"]
     private static let aolHostSuffixes = ["aol.com"]
     private static let icloudHostSuffixes = ["mail.me.com", "mail.icloud.com"]
+}
+
+enum MailCredentialPasswordNormalization {
+    static func normalized(_ raw: String, email _: String, host: String) -> String {
+        guard usesGroupedGeneratedCredential(host: host) else {
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return MailAccountCredentials.normalizedGroupedAppPassword(raw)
+    }
+
+    private static func usesGroupedGeneratedCredential(host: String) -> Bool {
+        EmailProviderKind.forHost(host) != nil
+    }
 }
 
 private extension String {

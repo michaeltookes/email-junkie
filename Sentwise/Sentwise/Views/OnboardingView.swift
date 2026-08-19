@@ -25,6 +25,9 @@ struct OnboardingView: View {
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if let reason = appState.onboardingContinueBlockedReason(for: step) {
+                continueBlockedHint(reason)
+            }
             Divider()
             navigationBar
         }
@@ -67,6 +70,21 @@ struct OnboardingView: View {
         case .sendBehavior: OnboardingSendBehaviorStep()
         case .voice: OnboardingVoiceStep()
         }
+    }
+
+    /// Explains why Continue is disabled, so the gate on the connect steps isn't
+    /// silent. Placed just above the navigation bar, next to the button it's about.
+    private func continueBlockedHint(_ reason: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+            Text(reason)
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Navigation

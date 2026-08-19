@@ -50,6 +50,23 @@ extension AppState {
         isAccountConnected && isLLMConnected
     }
 
+    /// Helper text explaining why Continue is disabled on a connect step, or
+    /// `nil` once the step's prerequisite is satisfied (so nothing needs saying).
+    ///
+    /// Both connect steps gate advancing on a passing live test, but nothing on
+    /// the screen said so — the button was just silently disabled. Surfacing the
+    /// reason is what unblocks a non-technical first-run user.
+    func onboardingContinueBlockedReason(for step: OnboardingStep) -> String? {
+        switch step {
+        case .connectAccount:
+            return isAccountConnected ? nil : "Run Test Connection to continue."
+        case .connectProvider:
+            return isLLMConnected ? nil : "Run Test Connection to continue."
+        case .sendBehavior, .voice:
+            return nil
+        }
+    }
+
     /// Marks onboarding complete, persists the flag, and starts watching from an
     /// idle state if the account + provider are ready. Idempotent.
     func completeOnboarding() {

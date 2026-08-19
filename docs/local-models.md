@@ -43,7 +43,10 @@ works. This guide covers Ollama (the default) and LM Studio.
 4. **Test Connection.** Click **Test Connection**. On success the provider shows
    **Connected** and drafting/voice-learning use the local model. If it fails,
    make sure the Ollama server is running (`ollama serve`, or just run any
-   `ollama run <model>` once) and that the model name matches exactly.
+   `ollama run <model>` once) and that the model name matches exactly. During
+   first-run onboarding the **Continue** button stays disabled until this test
+   passes; the screen says so ("Run Test Connection to continue") so the gate
+   isn't a mystery.
 
 ## LM Studio
 

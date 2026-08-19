@@ -3,7 +3,7 @@ import XCTest
 @testable import Sentwise
 
 @MainActor
-final class AppStateConnectionPasswordNormalizationTests: XCTestCase {
+final class AppStateConnectionPasswordTests: XCTestCase {
 
     private func makeAppState(provider: MailProvider, secrets: SecretStore) -> AppState {
         AppState(

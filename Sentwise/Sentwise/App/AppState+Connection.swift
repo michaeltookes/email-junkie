@@ -11,10 +11,16 @@ extension AppState {
 
     /// Builds credentials from the current inputs.
     var mailCredentials: MailAccountCredentials {
-        MailAccountCredentials(
-            email: mailEmail.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: MailAccountCredentials.normalizedAppPassword(mailAppPassword),
-            host: mailHost.trimmingCharacters(in: .whitespacesAndNewlines),
+        let email = mailEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = mailHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        return MailAccountCredentials(
+            email: email,
+            appPassword: MailCredentialPasswordNormalization.normalized(
+                mailAppPassword,
+                email: email,
+                host: host
+            ),
+            host: host,
             port: mailPort
         )
     }
@@ -31,10 +37,16 @@ extension AppState {
     /// success, adopts it as the active account.
     func testConnection(with credentials: MailAccountCredentials) async {
         connectionError = nil
+        let email = credentials.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = credentials.host.trimmingCharacters(in: .whitespacesAndNewlines)
         let credentials = MailAccountCredentials(
-            email: credentials.email.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: MailAccountCredentials.normalizedAppPassword(credentials.appPassword),
-            host: credentials.host.trimmingCharacters(in: .whitespacesAndNewlines),
+            email: email,
+            appPassword: MailCredentialPasswordNormalization.normalized(
+                credentials.appPassword,
+                email: email,
+                host: host
+            ),
+            host: host,
             port: credentials.port
         )
         guard credentials.isComplete else {

@@ -13,10 +13,16 @@ struct MailAccountFormState: Equatable {
     private var hostEnteredBeforeEmail = false
 
     var credentials: MailAccountCredentials {
-        MailAccountCredentials(
-            email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-            appPassword: MailAccountCredentials.normalizedAppPassword(appPassword),
-            host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        return MailAccountCredentials(
+            email: trimmedEmail,
+            appPassword: MailCredentialPasswordNormalization.normalized(
+                appPassword,
+                email: trimmedEmail,
+                host: trimmedHost
+            ),
+            host: trimmedHost,
             port: port
         )
     }

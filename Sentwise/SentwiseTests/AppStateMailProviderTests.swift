@@ -421,6 +421,28 @@ final class AppStateMailProviderTests: XCTestCase {
         XCTAssertFalse(app.supportsAllMailFolder, "iCloud has no all-mail folder")
     }
 
+    // MARK: - mailCredentials password normalization
+
+    func testMailCredentialsPreserveInteriorWhitespaceForGenericPassword() {
+        let app = makeAppState()
+
+        app.updateMailEmailFromUser("me@example.org")
+        app.updateMailHostFromUser("imap.example.org")
+        app.mailAppPassword = "  correct horse  battery staple  "
+
+        XCTAssertEqual(app.mailCredentials.appPassword, "correct horse  battery staple")
+    }
+
+    func testMailCredentialsStripInteriorWhitespaceForExplicitProviderHost() {
+        let app = makeAppState()
+
+        app.updateMailHostFromUser("imap.gmail.com")
+        app.updateMailEmailFromUser("me@company.example")
+        app.mailAppPassword = "  abcd efgh ijkl mnop  "
+
+        XCTAssertEqual(app.mailCredentials.appPassword, "abcdefghijklmnop")
+    }
+
     // MARK: - supportsAllMailFolder
 
     func testAllMailSupportTracksProvider() {

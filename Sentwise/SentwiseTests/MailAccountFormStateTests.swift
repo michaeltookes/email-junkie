@@ -25,6 +25,26 @@ final class MailAccountFormStateTests: XCTestCase {
         XCTAssertEqual(form.credentials.appPassword, "abcdefghijklmnop")
     }
 
+    func testCredentialsPreserveInteriorWhitespaceForGenericPassword() {
+        var form = MailAccountFormState()
+
+        form.updateEmailFromUser("me@example.org")
+        form.updateHostFromUser("imap.example.org")
+        form.appPassword = "  correct horse  battery staple  "
+
+        XCTAssertEqual(form.credentials.appPassword, "correct horse  battery staple")
+    }
+
+    func testCredentialsStripInteriorWhitespaceForExplicitProviderHost() {
+        var form = MailAccountFormState()
+
+        form.updateHostFromUser("imap.gmail.com")
+        form.updateEmailFromUser("me@company.example")
+        form.appPassword = "  abcd efgh ijkl mnop  "
+
+        XCTAssertEqual(form.credentials.appPassword, "abcdefghijklmnop")
+    }
+
     func testExplicitHostIsUsedForCredentialGuidance() {
         var form = MailAccountFormState()
 

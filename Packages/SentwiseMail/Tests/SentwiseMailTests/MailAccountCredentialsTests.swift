@@ -9,26 +9,26 @@ final class MailAccountCredentialsTests: XCTestCase {
         XCTAssertEqual(credentials.port, 993)
     }
 
-    func testNormalizedAppPasswordStripsInteriorWhitespace() {
+    func testNormalizedGroupedAppPasswordStripsInteriorWhitespace() {
         // Google/Yahoo/Apple all display generated passwords in grouped form.
         XCTAssertEqual(
-            MailAccountCredentials.normalizedAppPassword("abcd efgh ijkl mnop"),
+            MailAccountCredentials.normalizedGroupedAppPassword("abcd efgh ijkl mnop"),
             "abcdefghijklmnop"
         )
     }
 
-    func testNormalizedAppPasswordStripsEdgesTabsNewlinesAndNonBreakingSpaces() {
+    func testNormalizedGroupedAppPasswordStripsEdgesTabsNewlinesAndNonBreakingSpaces() {
         // Non-breaking space (U+00A0), tab, and newline are all covered by
         // .whitespacesAndNewlines, so a copy that picked them up still works.
         XCTAssertEqual(
-            MailAccountCredentials.normalizedAppPassword("  ab\u{00A0}cd\tef\ngh  "),
+            MailAccountCredentials.normalizedGroupedAppPassword("  ab\u{00A0}cd\tef\ngh  "),
             "abcdefgh"
         )
     }
 
-    func testNormalizedAppPasswordLeavesCompactPasswordsUnchanged() {
+    func testNormalizedGroupedAppPasswordLeavesCompactPasswordsUnchanged() {
         XCTAssertEqual(
-            MailAccountCredentials.normalizedAppPassword("abcdefghijklmnop"),
+            MailAccountCredentials.normalizedGroupedAppPassword("abcdefghijklmnop"),
             "abcdefghijklmnop"
         )
     }

@@ -87,6 +87,26 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(provider.lastCredentials?.appPassword, "verified-pw")
     }
 
+    func testTestConnectionWithGenericCredentialsPreservesInteriorPasswordWhitespace() async {
+        let secrets = InMemorySecretStore()
+        let provider = FakeAppMailProvider(result: .success(()))
+        let appState = makeAppState(provider: provider, secrets: secrets)
+
+        await appState.testConnection(with: MailAccountCredentials(
+            email: "me@example.org",
+            appPassword: "  correct horse  battery staple  ",
+            host: "imap.example.org",
+            port: 993
+        ))
+
+        XCTAssertTrue(appState.isAccountConnected)
+        XCTAssertEqual(provider.lastCredentials?.appPassword, "correct horse  battery staple")
+        XCTAssertEqual(
+            try? secrets.value(for: .mailAppPassword(email: "me@example.org")),
+            "correct horse  battery staple"
+        )
+    }
+
     func testTestConnectionDoesNotConnectWhenPasswordSaveFails() async {
         let secrets = AppStateFailingSecretStore(seed: [.mailAppPassword: "old-pw"])
         secrets.failOnSet = .mailAppPassword(email: "me@gmail.com")

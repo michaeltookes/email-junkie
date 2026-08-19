@@ -35,6 +35,16 @@ final class MailAccountFormStateTests: XCTestCase {
         XCTAssertEqual(form.credentials.appPassword, "correct horse  battery staple")
     }
 
+    func testCredentialsPreserveInteriorWhitespaceForRecognizedEmailWithCustomHost() {
+        var form = MailAccountFormState()
+
+        form.updateEmailFromUser("me@gmail.com")
+        form.updateHostFromUser("imap.proxy.example")
+        form.appPassword = "  correct horse  battery staple  "
+
+        XCTAssertEqual(form.credentials.appPassword, "correct horse  battery staple")
+    }
+
     func testCredentialsStripInteriorWhitespaceForExplicitProviderHost() {
         var form = MailAccountFormState()
 

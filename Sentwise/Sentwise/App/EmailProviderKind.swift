@@ -87,15 +87,15 @@ enum EmailProviderKind: Equatable, CaseIterable {
 }
 
 enum MailCredentialPasswordNormalization {
-    static func normalized(_ raw: String, email: String, host: String) -> String {
-        guard usesGroupedGeneratedCredential(email: email, host: host) else {
+    static func normalized(_ raw: String, email _: String, host: String) -> String {
+        guard usesGroupedGeneratedCredential(host: host) else {
             return raw.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return MailAccountCredentials.normalizedGroupedAppPassword(raw)
     }
 
-    private static func usesGroupedGeneratedCredential(email: String, host: String) -> Bool {
-        EmailProviderKind.forEmail(email) != nil || EmailProviderKind.forHost(host) != nil
+    private static func usesGroupedGeneratedCredential(host: String) -> Bool {
+        EmailProviderKind.forHost(host) != nil
     }
 }
 

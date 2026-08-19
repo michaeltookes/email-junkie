@@ -5,6 +5,17 @@ All notable changes to Sentwise are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-19
+
+### Fixed
+
+- **App passwords paste correctly now** — pasting an app password exactly as your provider displays it (grouped like `xxxx xxxx xxxx xxxx`) works: interior spaces are stripped automatically for Gmail, Yahoo, AOL, AT&T, and iCloud accounts. Previously only leading/trailing spaces were removed and setup failed with a confusing authentication error.
+
+### Changed
+
+- **Setup explains what's blocking Continue** — while the Continue button is disabled on the mail-account and AI-provider steps, visible helper text now says "Run Test Connection to continue" instead of leaving the button silently grayed out.
+- **Clearer app-password guidance** — the per-provider setup instructions now spell out which kind of app password you need (e.g. "a GOOGLE app password, not an Apple one" for Gmail) — the two look identical and are easy to mix up.
+
 ## [0.1.1] - 2026-08-14
 
 ### Fixed

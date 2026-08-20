@@ -103,7 +103,7 @@ extension AppState {
 
     static func managedMessage(for error: Error) -> String {
         switch error {
-        case ClerkError.transport:
+        case ClerkError.transport, LLMError.transport:
             return "Couldn't reach Sentwise sign-in. Check your connection and try again."
         case ClerkError.http(_, let message):
             return message ?? "Sign-in failed. Please try again."

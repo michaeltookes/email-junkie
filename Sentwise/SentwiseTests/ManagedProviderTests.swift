@@ -28,6 +28,18 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertEqual(Settings(schemaVersion: 15, pollIntervalSeconds: 300).llmProvider, "managed")
     }
 
+    // MARK: - Error messages
+
+    func testManagedMessageMapsTransportErrorsToCouldNotReach() {
+        let expected = "Couldn't reach Sentwise sign-in. Check your connection and try again."
+        // A transport failure while minting a token surfaces as LLMError.transport.
+        XCTAssertEqual(AppState.managedMessage(for: LLMError.transport("offline")), expected)
+        // Clerk-layer transport failures map to the same message.
+        XCTAssertEqual(AppState.managedMessage(for: ClerkError.transport("dns")), expected)
+        // Not-signed-in stays its own message.
+        XCTAssertEqual(AppState.managedMessage(for: LLMError.managedNotSignedIn), "Sign-in didn't stick. Please try again.")
+    }
+
     // MARK: - Settings migration (14 -> 15)
 
     private func migrate(_ settings: Settings, secrets: SecretStore) -> Settings {

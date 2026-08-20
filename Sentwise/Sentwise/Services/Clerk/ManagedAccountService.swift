@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "ManagedAccountService")
 
 /// Orchestrates the managed-inference account (backlog 56a): the Clerk email-code
 /// sign-in, secure storage of the device/session credentials, and on-demand
@@ -35,7 +38,13 @@ actor ManagedAccountService: ManagedSessionProviding {
     func startSignIn(email: String) async throws {
         let handle = try await clerk.sendEmailCode(email: email, clientToken: storedClientToken ?? "")
         pendingSignIn = handle
-        try? persistClientToken(handle.clientToken)
+        // Persisting the rotated device token early is best-effort; a Keychain
+        // failure here must not abort sign-in — the token is re-persisted on verify.
+        do {
+            try persistClientToken(handle.clientToken)
+        } catch {
+            logger.error("Failed to persist Clerk client token during sign-in: \(error.localizedDescription)")
+        }
     }
 
     /// Completes sign-in with the OTP code. On success stores the session id and
@@ -83,6 +92,10 @@ actor ManagedAccountService: ManagedSessionProviding {
             // Device token or session no longer valid — force a fresh sign-in.
             signOut()
             throw LLMError.managedNotSignedIn
+        } catch let error as ClerkError {
+            // Network/transport (or other non-auth) Clerk failure minting a token —
+            // surface as a transport error so the user sees the "couldn't reach" message.
+            throw LLMError.transport(String(describing: error))
         }
     }
 

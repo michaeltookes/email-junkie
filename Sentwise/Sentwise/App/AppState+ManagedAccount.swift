@@ -122,6 +122,25 @@ extension AppState {
 
     // MARK: - Migration (item 56a)
 
+    /// Runs all launch-time settings migrations in order: the saved-accounts move
+    /// (item 48) then the managed-inference default (item 56a). Keeps `AppState.init`
+    /// short by chaining both here.
+    static func fullyMigratedSettings(
+        loaded: Settings,
+        secrets: SecretStore,
+        persistence: PersistenceProvider
+    ) -> Settings {
+        let accountsMigrated = migratedSavedAccountsSettings(
+            loaded, secrets: secrets, persistence: persistence
+        )
+        return migratedManagedInferenceSettings(
+            accountsMigrated,
+            originalSchemaVersion: loaded.schemaVersion,
+            secrets: secrets,
+            persistence: persistence
+        )
+    }
+
     /// Moves an existing install with no configured BYO provider onto managed
     /// inference. A configured BYO user (a stored key or a verified model) keeps
     /// their provider. Runs once, gated on the original schema version.

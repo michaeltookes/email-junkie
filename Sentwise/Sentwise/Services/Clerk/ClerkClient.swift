@@ -48,8 +48,8 @@ struct ClerkURLSessionTransport: ClerkHTTPTransport {
         let statusCode = http?.statusCode ?? -1
         var lowered: [String: String] = [:]
         for (key, value) in (http?.allHeaderFields ?? [:]) {
-            if let k = key as? String, let v = value as? String {
-                lowered[k.lowercased()] = v
+            if let name = key as? String, let stringValue = value as? String {
+                lowered[name.lowercased()] = stringValue
             }
         }
         return ClerkHTTPResponse(statusCode: statusCode, headers: lowered, body: data)
@@ -60,9 +60,9 @@ struct ClerkURLSessionTransport: ClerkHTTPTransport {
         allowed.insert(charactersIn: "-._~")
         return form
             .map { key, value in
-                let k = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
-                let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
-                return "\(k)=\(v)"
+                let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
+                let encodedValue = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+                return "\(encodedKey)=\(encodedValue)"
             }
             .joined(separator: "&")
     }

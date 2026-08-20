@@ -89,19 +89,18 @@ final class AppState: ObservableObject {
 
     // MARK: - Managed inference account (item 56a)
 
-    /// The signed-in managed-inference account email, for "Connected as …".
+    /// Signed-in managed account email, for "Connected as …".
     @Published var managedAccountEmail: String
     /// Whether a managed account is signed in (device + session tokens stored).
     @Published var isManagedSignedIn: Bool = false
-    /// The current stage of the email-code sign-in flow.
+    /// Stage of the email-code sign-in flow.
     @Published var managedSignInStage: ManagedSignInStage = .idle
     /// Whether a managed sign-in / sign-out request is in flight.
     @Published var isManagedBusy: Bool = false
-    /// A user-facing message describing the last managed-account error, if any.
+    /// Last managed-account error, if any.
     @Published var managedError: String?
-    /// The email typed into the managed sign-in form.
+    /// Email and OTP code typed into the managed sign-in form.
     @Published var managedEmailInput: String = ""
-    /// The OTP code typed into the managed sign-in form.
     @Published var managedCodeInput: String = ""
 
     // MARK: - Voice Profile
@@ -346,9 +345,7 @@ final class AppState: ObservableObject {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
-        // Build the managed account from the same secret store, and wire it into
-        // the production LLM service as the session-token provider. Tests that
-        // inject a fake `llm` bypass this path.
+        // Managed account (item 56a) + wire it as the LLM session provider.
         let managedAccount = ManagedAccountService(secrets: secrets)
         self.managedAccount = managedAccount
         self.llm = llm ?? LLMService(managedSessionProvider: managedAccount)
@@ -362,19 +359,7 @@ final class AppState: ObservableObject {
         // original (pre-migration) settings drive the schema-version-sensitive
         // guidance/onboarding checks below so those one-shot migrations still fire.
         let loadedSettings = persistence.loadSettings()
-        let accountsMigrated = Self.migratedSavedAccountsSettings(
-            loadedSettings,
-            secrets: secrets,
-            persistence: persistence
-        )
-        // Move an existing install with no configured BYO provider onto managed
-        // inference (item 56a). Uses the original schema version so it fires once.
-        let settings = Self.migratedManagedInferenceSettings(
-            accountsMigrated,
-            originalSchemaVersion: loadedSettings.schemaVersion,
-            secrets: secrets,
-            persistence: persistence
-        )
+        let settings = Self.fullyMigratedSettings(loaded: loadedSettings, secrets: secrets, persistence: persistence)
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.sendDelaySeconds = settings.sendDelaySeconds
@@ -411,8 +396,7 @@ final class AppState: ObservableObject {
         self.verifiedLLMModel = settings.llmVerifiedModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         self.managedAccountEmail = settings.managedAccountEmail
-        self.isManagedSignedIn = secrets.hasValue(for: .managedClientToken)
-            && secrets.hasValue(for: .managedSessionID)
+        self.isManagedSignedIn = secrets.hasValue(for: .managedClientToken) && secrets.hasValue(for: .managedSessionID)
 
         self.voiceProfile = persistence.loadVoiceProfile()
 

@@ -42,18 +42,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
    - ✅ Connected-account indicator and a "disconnect" action in Settings (disconnect clears the token, keeps credentials).
    - ⬜ **Remaining:** verify the live end-to-end consent flow against a real Google client; **empirically verify refresh-token lifetime** (Testing vs Production) and document the setup so users avoid weekly re-auth; optionally show the connected account's email address; consider server-side token revocation on disconnect.
 
-29. **CD release automation** — *elevated from Medium 2026-08-13 (solo ship-fast strategy)*
-    > **Status 2026-08-14:** workflow + `release.sh` fixes built on branch `release-automation` (`.github/workflows/release.yml`, `docs/ci-release.md`); awaiting secrets + the first tagged run to close (plus the carried Sparkle auto-update verification).
-    Automate the item 11 release pipeline via GitHub Actions on tagged releases. Elevated because the solo, ship-fast-and-often strategy depends on near-zero distance from "code works" to "users have it" — a weekly Sparkle release cadence needs tagging a version to do everything. The manual pipeline shipped v0.1.0 live (2026-08-14, item 11 resolved) and surfaced the fixes below.
-    *As a maintainer, I want tagged releases built and shipped automatically, so that cutting a release is one push, not a manual checklist.*
-    - On a version tag, a workflow builds, signs, and notarizes the app and produces the DMG.
-    - It publishes a GitHub release, updates the Sparkle appcast, and bumps the Homebrew cask.
-    - Signing secrets are handled securely via encrypted CI secrets.
-    - Mirrors the existing Prompter release workflow / `release-prep` skill steps.
-    - **Fixes found during the v0.1.0 manual release (2026-08-14):** `release.sh` must propagate step failures (it exited 0 while the appcast step had failed); the appcast step must guard against stale artifacts in `dist/` (a leftover dry-run DMG with the same bundle version aborted `generate_appcast`); staple the notarization ticket to the **app before the DMG is built** (currently only the DMG gets stapled) ; modernize the cask's `depends_on macos: ">= :sonoma"` line, which trips a deprecation notice on install (all three tap casks share it).
-    - **Launch smoke test (added 2026-08-14 after the v0.1.0 launch crash):** the pipeline MUST launch the exported, signed app and verify the process survives startup before publishing anything. v0.1.0 shipped notarized, Gatekeeper-accepted, and 905-tests-green yet crashed instantly at launch (missing `LD_RUNPATH_SEARCH_PATHS`; fixed on branch `fix-release-rpath`) — signatures and unit tests validate a binary without ever executing it, so an explicit launch check is the only gate that catches dyld-level breakage.
-    - **Carried from item 11:** verify Sparkle auto-update end-to-end when the first 0.1.x ships through this pipeline — an installed v0.1.0 must discover, download, signature-verify, and install the update from the published appcast. (Unverifiable with only one release in existence.)
-
 57. **Landing page / marketing site** — *⚠️ discussion required before building; lives in its own repo*
     The public site where people find the product, understand it in 30 seconds, and pay: positioning, pricing/checkout, download, and the Windows-demand waitlist.
     > **Do not start building from this item.** Scope, stack, hosting, domain, and copy need a dedicated discussion first, and the site goes in **its own repository**, not sentwise. This item exists so the work isn't forgotten and its requirements are captured.

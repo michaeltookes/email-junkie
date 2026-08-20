@@ -34,7 +34,7 @@ final class ManagedInferenceLiveTests: XCTestCase {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        XCTAssertEqual(status, 200, "unexpected /v1/me status; body: \(String(decoding: data, as: UTF8.self))")
+        XCTAssertEqual(status, 200, "unexpected /v1/me status; body: \(String(bytes: data, encoding: .utf8) ?? "")")
 
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertNotNil(object["userId"] as? String)

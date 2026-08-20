@@ -100,6 +100,25 @@ Menu actions must use the explicit safe AX identifiers assigned in
 | `id=openReviewWindow` | Review Drafts (N)… (fixture-gated) |
 | `id=openBrowseMailbox` | Browse Mailbox… (fixture-gated) |
 
+### Managed-inference sign-in controls (item 56a)
+
+The onboarding "Choose your AI" step and Settings → AI tab carry the
+managed-inference sign-in surface. These SwiftUI controls set `accessibilityIdentifier`
+values (resolved by `id=` selectors). Sign-in is **disabled in hunt mode**, and
+every activation of these controls is additionally forbidden in `config.yml` —
+hunts may only assert their presence, never drive account auth:
+
+| Identifier | Control |
+|---|---|
+| `id=useManagedInference` | "Use Sentwise AI" (selects the managed provider) |
+| `id=managedEmailField` | Email field for the sign-in code |
+| `id=managedSendCodeButton` | "Send sign-in code" |
+| `id=managedCodeField` | One-time-code field |
+| `id=managedVerifyButton` | "Verify & connect" |
+| `id=managedSignOutButton` | "Sign out" of the managed account |
+| `id=useOwnProviderDisclosure` | "Use your own AI provider instead" disclosure |
+| `id=byoProviderPicker` | Bring-your-own provider picker |
+
 Window presence checks use `waitForSelector` with the exact AX label each
 window sets via `setAccessibilityLabel` (`label=` is a step selector; it is
 not recognized inside `assert`, so rely on `waitForSelector` failing the hunt

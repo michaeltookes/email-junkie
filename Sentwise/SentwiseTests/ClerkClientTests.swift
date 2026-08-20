@@ -42,7 +42,8 @@ final class ClerkClientTests: XCTestCase {
     func testSendEmailCodeCreatesAndPreparesFirstFactor() async throws {
         let transport = FakeClerkTransport([
             clerkResponse(
-                #"{"response":{"id":"sia_1","status":"needs_first_factor","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_9"}]}}"#,
+                #"{"response":{"id":"sia_1","status":"needs_first_factor","#
+                    + #""supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_9"}]}}"#,
                 clientToken: "client_A"
             ),
             clerkResponse(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B")

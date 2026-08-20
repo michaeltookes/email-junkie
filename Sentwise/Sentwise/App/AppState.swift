@@ -87,6 +87,23 @@ final class AppState: ObservableObject {
     /// The resolved model id that last passed a connection test.
     var verifiedLLMModel: String
 
+    // MARK: - Managed inference account (item 56a)
+
+    /// The signed-in managed-inference account email, for "Connected as …".
+    @Published var managedAccountEmail: String
+    /// Whether a managed account is signed in (device + session tokens stored).
+    @Published var isManagedSignedIn: Bool = false
+    /// The current stage of the email-code sign-in flow.
+    @Published var managedSignInStage: ManagedSignInStage = .idle
+    /// Whether a managed sign-in / sign-out request is in flight.
+    @Published var isManagedBusy: Bool = false
+    /// A user-facing message describing the last managed-account error, if any.
+    @Published var managedError: String?
+    /// The email typed into the managed sign-in form.
+    @Published var managedEmailInput: String = ""
+    /// The OTP code typed into the managed sign-in form.
+    @Published var managedCodeInput: String = ""
+
     // MARK: - Voice Profile
 
     /// The learned voice profile, or `nil` if none has been learned yet.
@@ -276,6 +293,10 @@ final class AppState: ObservableObject {
     /// Internal (not private) so the `AppState+Voice` extension can reach it.
     let mailProvider: MailProvider
     let llm: LLMProviding
+    /// The managed-inference account (item 56a): Clerk sign-in + session-token
+    /// minting. Also the `ManagedSessionProviding` behind the production LLM
+    /// service, so managed drafting authenticates with the account session.
+    let managedAccount: ManagedAccountService
     /// Posts draft-ready notifications and routes their actions back.
     let notifier: DraftNotifying
     /// Set by the menu-bar controller so a notification "open" action (or a
@@ -318,14 +339,19 @@ final class AppState: ObservableObject {
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
-        llm: LLMProviding = LLMService(),
+        llm: LLMProviding? = nil,
         notifier: DraftNotifying = NullDraftNotifier(),
         reachability: NetworkReachabilityMonitoring = NetworkReachabilityMonitor()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
-        self.llm = llm
+        // Build the managed account from the same secret store, and wire it into
+        // the production LLM service as the session-token provider. Tests that
+        // inject a fake `llm` bypass this path.
+        let managedAccount = ManagedAccountService(secrets: secrets)
+        self.managedAccount = managedAccount
+        self.llm = llm ?? LLMService(managedSessionProvider: managedAccount)
         self.notifier = notifier
         self.reachability = reachability
         self.isOnline = reachability.isOnline
@@ -336,8 +362,16 @@ final class AppState: ObservableObject {
         // original (pre-migration) settings drive the schema-version-sensitive
         // guidance/onboarding checks below so those one-shot migrations still fire.
         let loadedSettings = persistence.loadSettings()
-        let settings = Self.migratedSavedAccountsSettings(
+        let accountsMigrated = Self.migratedSavedAccountsSettings(
             loadedSettings,
+            secrets: secrets,
+            persistence: persistence
+        )
+        // Move an existing install with no configured BYO provider onto managed
+        // inference (item 56a). Uses the original schema version so it fires once.
+        let settings = Self.migratedManagedInferenceSettings(
+            accountsMigrated,
+            originalSchemaVersion: loadedSettings.schemaVersion,
             secrets: secrets,
             persistence: persistence
         )
@@ -376,6 +410,9 @@ final class AppState: ObservableObject {
         self.llmBaseURL = settings.llmBaseURL
         self.verifiedLLMModel = settings.llmVerifiedModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+        self.managedAccountEmail = settings.managedAccountEmail
+        self.isManagedSignedIn = secrets.hasValue(for: .managedClientToken)
+            && secrets.hasValue(for: .managedSessionID)
 
         self.voiceProfile = persistence.loadVoiceProfile()
 

@@ -9,7 +9,7 @@ import SwiftUI
 /// The raw value doubles as the toolbar label and the window title (which follows
 /// the selected tab). The window's accessibility *label* is separate and stays
 /// `"Sentwise Settings"` so the Prowl `settings-window` hunt keeps matching it.
-enum SettingsTab: String, CaseIterable, Identifiable {
+enum SettingsTab: String, CaseIterable, Hashable, Identifiable {
     case general = "General"
     case account = "Account"
     case ai = "AI"
@@ -67,9 +67,39 @@ struct SettingsContentView: View {
     }
 }
 
+/// Keeps each SwiftUI settings pane hosted while the window is open so tab
+/// switches do not reset pane-local `@State`.
+@MainActor
+final class SettingsPaneControllerCache {
+    private let makeRootView: (SettingsTab) -> AnyView
+    private var controllers: [SettingsTab: NSHostingController<AnyView>] = [:]
+
+    init(makeRootView: @escaping (SettingsTab) -> AnyView) {
+        self.makeRootView = makeRootView
+    }
+
+    var cachedTabCount: Int {
+        controllers.count
+    }
+
+    func controller(for tab: SettingsTab) -> NSHostingController<AnyView> {
+        if let controller = controllers[tab] {
+            return controller
+        }
+
+        let controller = NSHostingController(rootView: makeRootView(tab))
+        controllers[tab] = controller
+        return controller
+    }
+
+    func removeAll() {
+        controllers.removeAll()
+    }
+}
+
 /// Owns the Settings window and its native toolbar (item 65). Replaces the old
 /// SwiftUI `TabView`-in-a-window with a `NSToolbar` of tab icons plus an
-/// `NSHostingController` swapped per tab — the pattern proven in ContainerBar and
+/// `NSHostingController` cached per tab — the pattern proven in ContainerBar and
 /// used by System Settings and other polished menu-bar apps.
 ///
 /// One instance is owned by `MenuBarController`; `AppState` and `UpdateManager`
@@ -87,7 +117,12 @@ final class SettingsWindowController: NSObject, NSToolbarDelegate, NSWindowDeleg
     private let updateManager: UpdateManager
 
     private var window: NSWindow?
-    private var hostingController: NSHostingController<AnyView>?
+    private lazy var paneControllerCache = SettingsPaneControllerCache { [appState, updateManager] tab in
+        AnyView(
+            SettingsContentView(selectedTab: tab, updateManager: updateManager)
+                .environmentObject(appState)
+        )
+    }
     private var selectedTab: SettingsTab = .general
 
     init(appState: AppState, updateManager: UpdateManager) {
@@ -127,9 +162,7 @@ final class SettingsWindowController: NSObject, NSToolbarDelegate, NSWindowDeleg
         window.toolbar = toolbar
         window.toolbarStyle = .preference
 
-        let hosting = NSHostingController(rootView: contentView(for: selectedTab))
-        hostingController = hosting
-        window.contentViewController = hosting
+        window.contentViewController = paneControllerCache.controller(for: selectedTab)
 
         window.center()
         window.setFrameAutosaveName("SentwiseSettingsWindow")
@@ -139,26 +172,24 @@ final class SettingsWindowController: NSObject, NSToolbarDelegate, NSWindowDeleg
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func contentView(for tab: SettingsTab) -> AnyView {
-        AnyView(
-            SettingsContentView(selectedTab: tab, updateManager: updateManager)
-                .environmentObject(appState)
-        )
-    }
-
     private func updateContent(for tab: SettingsTab) {
+        guard tab != selectedTab else {
+            window?.title = tab.rawValue
+            return
+        }
+
         selectedTab = tab
-        hostingController?.rootView = contentView(for: tab)
+        window?.contentViewController = paneControllerCache.controller(for: tab)
         window?.title = tab.rawValue
     }
 
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        // Drop the window/hosting controller so the next open rebuilds them; keep
+        // Drop the window/hosting controllers so the next open rebuilds them; keep
         // `selectedTab` so reopening returns to the tab the user last viewed.
         window = nil
-        hostingController = nil
+        paneControllerCache.removeAll()
     }
 
     // MARK: - NSToolbarDelegate

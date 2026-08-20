@@ -11,7 +11,7 @@ Prioritized list of planned features, improvements, and technical debt for **sen
 
 **v1 design decisions:**
 - **Platform:** native macOS menu-bar app (Swift), following the Prompter distribution pattern (DMG + Homebrew cask + Sparkle auto-update). **Affirmed over an Electron rewrite 2026-08-12** — validate on macOS first (the ICP skews Mac); measure Windows demand via a landing-page waitlist (item 57) and revisit Tauri/Electron only if it fills.
-- **Approval channel:** native macOS notification first. (Slack is a future item.)
+- **Approval channel:** native macOS notification first; Slack as a peer channel is item 30 (post-launch).
 - **Email provider:** Gmail first. (Outlook/M365 and IMAP/SMTP are future items.)
 - **Send behavior:** user-configurable — auto-send on approve *or* save-as-draft.
 - **LLM access:** pluggable provider architecture — **managed inference is the default** (bundled, no keys; item 56); BYO-any-provider and a local-model option remain as the power/privacy path (item 59).
@@ -29,6 +29,35 @@ Prioritized list of planned features, improvements, and technical debt for **sen
 ## High Priority
 
 > Resolved items are recorded in [`resolved.md`](./resolved.md). Item numbers are stable IDs — they are not reused or renumbered when items are completed.
+
+> **Launch plan (owner decision 2026-08-20) — the High tier is ordered for a paid public launch:** 56 (managed inference — top priority) → 59 (sign-in-and-go onboarding, depends on 56a) → 66/67 + 69 (first-hour experience) → 24 (signatures) → 61 (live loop observed) → 36 (feedback channel) → 71 (README/quickstart) → 73 (account pane) → 72 (legal/policy/support, in parallel with 56c) → 75 (Workspace app-password guidance) → 57 (landing page + checkout, in its own repo) → 74 (clean-Mac verification + 1.0 release, closes last). Slack (30), native capture (54), and the transcript test plan (70) are deliberately **deferred** until after launch feedback.
+
+56. **Licensing, billing, and the managed-inference service (open core / paid binary)** — *⬆️ TOP PRIORITY (owner decision 2026-08-20)*
+    > **Decision 2026-08-20:** launch **with** managed inference, not BYO-key-only. Rationale: the primary ICP (Marcus) has never heard of an API key and a key-paste in onboarding deters exactly the first-time users we need; bundling inference also lets the product charge from day one. BYO-key/local remains the escape hatch (item 59), never the default. The beta-with-technical-users shortcut was considered and rejected.
+    The monetization plumbing behind the 2026-08-12 pricing decisions: public source, licensed binaries, subscription checkout, and — per the managed-inference decision — the stateless proxy that bundles drafting into the subscription so users never touch an API key.
+    *As the maintainer, I want people to pay one price that includes the AI, so that non-technical buyers convert without becoming an LLM customer somewhere else; as Marcus, I want nothing to set up or pay for beyond the subscription itself.*
+    - **Open core / paid binary:** source stays public on GitHub (self-compilers welcome); the signed, notarized, Sparkle-updating binary requires a license. The license is an **account/sign-in** (required for inference metering anyway).
+    - **Managed-inference proxy:** app → serverless proxy → model provider. **Stateless by design** — no storage, no content logging, request/response held in memory only — under **zero-retention terms** with the provider. This design is load-bearing for the "no storage, no training" claim and must be verifiable in the public source.
+    - **Metering & margin protection:** per-account token metering, rate limits, and abuse prevention; margin monitoring for the maintainer; a **fair-use policy in the pricing terms from day one** so heavy users don't silently eat the margin — with "switch to your own key for unlimited" (item 59) as the pressure-release valve.
+    - Full-featured **trial** (14 days or first N calls — exact mechanic TBD); trial state survives reinstall reasonably.
+    - **Individual** tier ~$15–20/mo or annual equivalent, **inference included** (unit cost is single-digit cents per follow-up); **Team** tier (3+ seats, adds CRM logging — item 55 — and centralized billing) as a follow-on; Enterprise explicitly parked.
+    - Checkout via a **merchant-of-record** (Paddle / Lemon Squeezy class) so a solo maintainer isn't handling global sales tax; in-app license validation with an offline grace period (drafting may need the network; the app must not brick offline).
+    - Final pricing, trial mechanics, and provider choices to be settled in the item 57 pre-build discussion.
+    - **Phasing (added 2026-08-20):**
+      - **56a — Account + proxy (unblocks onboarding):** sign-in (magic-link/OAuth via a hosted auth provider), a stateless serverless proxy that accepts the app's session token and forwards drafting requests to the model provider under zero-retention terms, and an `LLMProvider` implementation in the app (`ManagedInferenceClient`) selected by default. Trial state lives server-side against the account. Ships in its own repo (`sentwise-service`) with the proxy's no-storage design readable in public source. Prowl hunt mode stubs the managed client (no network) so hunts stay offline-safe.
+      - **56b — Metering + limits:** per-account token metering, daily/monthly caps with the fair-use policy, rate limiting, abuse controls, margin dashboard for the maintainer; the app shows remaining allowance and the "switch to your own key for unlimited" valve.
+      - **56c — Checkout + licensing:** merchant-of-record checkout (Paddle / Lemon Squeezy), subscription state synced to the account, in-app license check with offline grace, trial → paid → lapsed states handled in the UI; Team tier deferred.
+    - **Decisions needed before 56a starts (the item 57 discussion):** auth provider, proxy host (Cloudflare Workers / Vercel / Lambda), model provider(s) and confirmed zero-retention terms, trial mechanic (days vs. calls), price point, MoR vendor, service repo name.
+
+59. **Onboarding: sign-in-and-go default + guided power-user model options**
+    Assume every user is non-technical. The default onboarding is **sign in, start trial, draft** — managed inference (item 56) means no API keys, no provider choice, no billing beyond our checkout. The BYO-key/local path remains as a fully guided **power/privacy option in Settings**, never a gate in onboarding. *(Reworked 2026-08-12: originally specced a zero-key on-device default with a BYO wizard as the primary upgrade path; superseded same day by the managed-inference decision.)*
+    *As Marcus, I want the app drafting for me minutes after install with nothing to configure, so that I never have to understand what an API key is; as Sam, I want a guided way to plug in my own key or local model, so that no server is ever in my loop.*
+    - **Default path:** install → sign in / start trial → connect mailbox → drafting works. No model decisions surfaced at all.
+    - **Power/privacy path (Settings, "Use your own AI"):** pick a provider → the app opens the exact key-creation console page → short numbered checklist (with screenshots) → paste → live test call → green check + "Saved to your Keychain." Mirrors the existing IMAP "Test Connection" pattern; the privacy upgrade ("we're never in the loop") stated plainly.
+    - **OpenRouter one-click:** OpenRouter's PKCE flow provisions a key for the user with no manual copying — the featured easy path for BYO (one account, every major model behind one key).
+    - **Honest about BYO friction:** the wizard states plainly that the provider will ask for payment details, so users aren't surprised mid-flow.
+    - **Local-model option** (Ollama / on-device class) presented alongside BYO, with a quality-expectation note driven by the item 58 harness.
+    - Key storage/validation reuses existing Keychain + connected-state UI conventions; disconnect/replace supported per provider; switching back to managed is one click.
 
 3. **Gmail connection (OAuth)** — *PARKED (superseded by item 32 as the primary path); engine kept for a future bundled-client option*
    > **Parked 2026-07-03:** BYO OAuth proved too high-friction for non-developers, so IMAP + app password (item 32) is now the primary connection path. The OAuth engine stays in the codebase for a possible future "bundled verified client + CASA" revival. Known parked bug: loopback listener throws `NWError 22` on start. The ✅ items below are built; the ⬜ items are only relevant if OAuth is revived.
@@ -53,7 +82,124 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - Basic discoverability: SEO fundamentals, OG/social cards, and a home for a demo video.
     - Held in a separate repo with its own deployment; all stack/hosting/analytics decisions deferred to the pre-build discussion.
 
+66. **Close reply-worthiness gaps for transactional mail** — *2026-08-20 walkthrough finding*
+    The item-17 heuristics catch marketing/bulk mail (106 `bulkOrListMail` + 67 `noReplySender` skips on the live account) but transactional mail leaks through to Review Drafts: Stripe/Anthropic receipts (`invoice+statements@`, Reply-To `support@`), Amazon order mail (`auto-confirm@`, `shipment-tracking@`, `order-update@`), AWS budget alerts (`budgets@costalerts.amazonaws.com`), and recruiting blasts — none carry `List-Unsubscribe`/`Auto-Submitted` headers and none match the no-reply local-part token lists. Worse, the check evaluates **only the reply target** (`Reply-To` when present, else `From`), so GitHub notifications from `notifications@github.com` — which the exact token list *would* catch — evade it via their `reply+…@reply.github.com` Reply-To.
+    *As Priya, I want the watcher to recognize receipts, order updates, and system notifications as not needing a reply, so that Review Drafts contains only mail a human should answer.*
+    - Evaluate **both** `From` and `Reply-To` local parts; skip when either is a no-reply/automated pattern.
+    - Broaden the local-part token lists with transactional patterns (e.g. `invoice`, `receipt`, `billing`, `order-update`, `auto-confirm`, `shipment`, `tracking`, `budgets`, `alerts`), keeping the conservative bias — measure each token against real correspondence (e.g. a genuine `support@` conversation must still draft).
+    - Unit tests cover every leaked sender observed in the 2026-08-20 pending-drafts snapshot (Anthropic/Stripe, Amazon ×3 variants, GitHub, AWS budgets, applytojob.com).
+    - Verify against the live account (headless XCTest, per QA preference): a fresh watch pass over the same inbox produces zero drafts for the known-transactional senders and still drafts personal mail.
+
+67. **LLM relevance gate for watcher drafts**
+    Use the model's own judgment as the final "is this truly worth a reply?" filter — the drafting LLM already recognizes junk (the Anthropic receipt draft came back with `needsInfo`: "This is an automated receipt email and it's unclear what reply you'd like to send"), but the draft is enqueued anyway.
+    *As Priya, I want mail that even the AI considers automated or reply-less routed to the skip log instead of Review Drafts, so that the review queue only ever contains sendable drafts.*
+    - When a generation returns a needs-info/automated verdict with an empty body (or a dedicated not-reply-worthy signal added to the drafting prompt), the message is recorded as skipped with a visible reason instead of enqueued as a pending draft.
+    - "Draft anyway" override from the skip log still works for these.
+    - Consider a cheap pre-classification call before full drafting to save tokens; decision documented either way.
+    - Heuristics (item 17/66) remain the first line — the LLM gate is the backstop, not a replacement.
+
+69. **Redesign the Review Drafts window** — *2026-08-20 walkthrough finding*
+    The approval surface (`PendingDraftsView.swift`) crams the draft queue and a 100-entry Skipped section into one scroll, and message rendering is hard to read: subjects show raw RFC 2047 encoded-words (`=?UTF-8?Q?…`), bodies are plain `Text` so GitHub/marketing mail displays literal `###`/`**` markdown and stripped-HTML artifacts, and long machine Reply-To addresses wrap across multiple lines in the "Proposed reply" header.
+    *As Priya, I want a review window where each draft is legible at a glance and skipped mail lives in its own tab, so that approving a day's drafts takes seconds instead of scrolling through clutter.*
+    - **Skipped becomes its own tab** (e.g. "Drafts | Skipped") with a dedicated view; the drafts tab shows only reviewable drafts. Skipped keeps its reason badges, "Draft anyway", dismiss, and Clear actions.
+    - MIME encoded-word subjects are decoded everywhere they're displayed (draft list, skipped list, notifications).
+    - Incoming-message rendering is readable: proper typography/spacing, sensible handling of markdown-ish and HTML-derived plain text; long addresses truncate with full value on hover/expand.
+    - Overall layout decluttered so the primary actions (Approve/Deny) and the proposed reply are the visual focus.
+    - The `review-drafts` Prowl hunt still passes: window keeps its `Review Drafts` AX label; any new tab controls get safe `id=` AX identifiers, added to the README table and kept out of / consistent with `forbiddenSelectors`.
+
+24. **Email signature handling**
+    Respect the user's signature so drafts look right.
+    *As Priya, I want drafts to use my normal signature correctly, so that replies don't drop it or double it up.*
+    - Signature policy is configurable (use Gmail's, a custom one, or none).
+    - Generated drafts neither omit an expected signature nor duplicate one already present.
+    - Quoted history below the signature is handled correctly.
+
+61. **Live exercise of the watcher → notification → approve loop**
+    The one check split out of item 9 when it closed (2026-08-13): the full autonomous loop — a real fresh inbound message triggers watch → draft → native notification → approve → dispatch — has never been observed end-to-end on a live account with a watcher-produced draft. Both dispatch paths are now individually live-verified (items 9/44); this is about the loop as a whole, and daily dogfooding of the app will likely cover it naturally.
+    *As the maintainer, I want the autonomous loop observed working end-to-end at least once on a live account, so that the core product promise is verified as a system, not just as parts.*
+    - A fresh inbound message on a connected account produces a draft and a native notification without any manual triggering.
+    - Approving from the notification dispatches per the configured send behavior (both settings observed, or the second covered by the item 9/44 live tests).
+    - The observation is recorded (activity-history entries or a note here), then this item closes.
+
+36. **Feedback channel + diagnostics / log export** — *promoted to High 2026-08-20 (launch prerequisite)*
+    Developer-facing logs for OSS bug reports.
+    *As Sam, I want to export diagnostic logs, so that I can file a useful bug report without leaking email content.*
+    - A "export diagnostics" action produces redacted logs (no message bodies/PII by default).
+    - Distinct from the user-facing activity history (item 21).
+    - Log verbosity is configurable.
+    - **Launch scope (2026-08-20):** a "Send Feedback…" menu/Settings action that opens a pre-filled GitHub issue (or mailto) with app version, macOS version, and an attached redacted log bundle — the minimum so a stranger's failure reaches the maintainer.
+
+71. **README + quickstart rewrite (the front door until item 57 ships)**
+    The README still says *"Status: early development… features are being built out"*, lists shipped features under "Planned features", and says "No subscription" — the opposite of the current strategy. Until the landing page exists, the README is what every prospective user reads.
+    *As a first-time visitor, I want to understand in 30 seconds what Sentwise does, that it's ready, and how to install and start, so that I download instead of bouncing.*
+    - Status/positioning reflects the 2026-08-12 direction: post-call follow-up flagship, inbox drafting, local-first privacy, subscription with inference included, BYO-key/local as the power option.
+    - **Quickstart** covering install (DMG / `brew install --cask`), sign-in/trial, Gmail 2FA + app password with screenshots, first voice-learn, and first draft; a second path for the BYO-key option.
+    - Shipped features listed as shipped; roadmap links to the backlog; a short FAQ on privacy (what leaves the Mac and when).
+    - Kept in sync by `/update-docs` when launch-tier items close.
+
+72. **Legal, policy, and support foundations for a paid launch**
+    A paid product with sign-in needs the documents and channels the rest of the stack depends on: the merchant-of-record won't enable checkout without Terms and a Privacy Policy, the auth provider links to them, and the "no storage, no training" claim needs a written policy behind it.
+    *As a prospective customer, I want to read exactly what Sentwise does with my mail, my calls, and my payment, and know how to get help, so that I can trust a small company with my inbox.*
+    - **Privacy Policy** that is accurate to the architecture: what stays on the Mac (mail, voice profile, transcripts), what transits the proxy and under what retention terms (none), what the account stores (email, subscription, usage counters — never content), Slack caveat if/when item 30 ships.
+    - **Terms of Service** incl. the **fair-use policy** referenced by item 56b, refund policy, and trial terms; reviewed against the MoR's requirements.
+    - **Security page / disclosure contact** (security@) and a short "how we handle your credentials" explainer (Keychain, app passwords, no server-side mail credentials).
+    - **Support channel:** support@sentwise.ai mailbox with a stated response expectation, linked from the app (item 36) and the site (item 57).
+    - Hosted on the sentwise.ai domain (with item 57 or a minimal static page before it); versioned in a repo so changes are reviewable.
+
+73. **Account & subscription pane in Settings**
+    With an account behind the app (item 56), the user needs one place to see and manage it; today Settings has no notion of an account at all.
+    *As Marcus, I want to see my plan, trial days left, and usage, and fix billing or sign out without hunting, so that the subscription never feels like a black box.*
+    - Sign in / sign out; shows account email, plan (Trial / Individual), trial days remaining or renewal date.
+    - Usage this period vs. allowance (from item 56b) with the "switch to your own key for unlimited" link into the item 59 power path.
+    - "Manage billing" opens the MoR customer portal; lapsed/past-due state explained with a clear call to action; the app degrades gracefully (BYO-key still works, managed drafting pauses with a reason shown).
+    - **Delete account** (server-side data removal incl. usage counters; local data untouched unless the user also chooses to reset) — required for a credible privacy posture.
+    - Lives as a toolbar tab in the native Settings window (item 65); Prowl hunt-safe AX identifiers, disabled/stubbed in hunt mode.
+
+74. **Launch readiness: clean-Mac verification, security pass, and the 1.0 release**
+    The last item to close before inviting the public. Every release so far was tested on the maintainer's own configured Mac; a stranger's experience — Gatekeeper, fresh Keychain, no prior Application Support, TCC prompts — has never been observed.
+    *As the maintainer, I want proof that a first-time user on a clean Mac gets from download to first draft without help, so that launch day isn't debugging day.*
+    - **Clean-machine run** (fresh macOS user account or VM): DMG install via browser download (Gatekeeper/notarization path), `brew install --cask` path, first-run onboarding with sign-in/trial + Gmail app password, voice learn, first inbox draft, first transcript follow-up, approve via notification, Sparkle update from the previous version. Every friction point logged as a backlog item.
+    - **Security pass** via `/security-review` on the app and the service repo: token handling, proxy auth, Keychain usage, log redaction, dependency audit.
+    - **Release hygiene:** version **1.0.0** via `/release-prep`; CHANGELOG written for humans; cask and appcast verified from a machine that isn't the maintainer's; GitHub release notes link the quickstart (item 71).
+    - Launch checklist recorded in `docs/` and ticked; this item closes when the public link goes out.
+
+75. **Google Workspace accounts where app passwords are disabled**
+    The primary ICP works on a company Google Workspace account, and many Workspace admins disable app passwords (or enforce security keys), which makes the IMAP + app-password path (item 32) fail outright — exactly the user we're launching for. Today this surfaces as a generic authentication error.
+    *As Marcus on a company Workspace account, I want Sentwise to tell me plainly when my admin has disabled app passwords and what my options are, so that I don't conclude the app is broken.*
+    - Detect the Workspace-specific IMAP failure modes (app passwords disabled, IMAP disabled by admin, 2-Step Verification not enrolled) and show targeted guidance in onboarding/Settings instead of a generic error, reusing the item 43 `CredentialGuidance` pattern.
+    - Offer the user a one-line "Ask your admin" message to forward, and a **"notify me when sign-in-with-Google is available"** capture so demand for reviving the bundled OAuth client + CASA path (parked item 3) is measured, not guessed.
+    - Record the failure class in activity history (no credentials) so the maintainer can see how often launch users hit it.
+    - Decision checkpoint recorded after launch: if a meaningful share of sign-ups hit this, un-park item 3.
+
 ## Medium Priority
+
+30. **Slack approval channel** — *spec expanded 2026-08-20; deferred to post-launch (Medium) by the 2026-08-20 launch decision*
+    Post each ready draft to Slack with Approve/Deny actions as a peer of the native macOS notification, so approval works from any device the user has Slack on.
+    *As a Slack-native user, I want drafts posted to Slack with approve/deny actions, so that approval fits my existing workflow.*
+    - **Transport: Slack Socket Mode.** A local-first app has no public URL for Slack's interactive-component callbacks, so the Mac holds a persistent WebSocket (`apps.connections.open` with an app-level `xapp-` token) and receives button payloads over it. Envelopes are acked within Slack's 3 s window; reconnect with backoff on drop; while disconnected the native notification path is unaffected.
+    - **Setup (opt-in, Settings → new "Slack" section):** the repo ships a Slack **app manifest** (`docs/slack-app-manifest.yml` — Socket Mode + interactivity on; bot scopes `chat:write`, `im:write`; app-level scope `connections:write`) so the user creates the app with one paste. They enter the bot token (`xoxb-`), the app-level token (`xapp-`), and a destination (channel ID or "DM me"); tokens live in the Keychain via `SecretStore` (`slack.botToken`, `slack.appToken`). A **Test** button posts a hello message. Settings schema 14 → 15.
+    - **Message:** Block Kit mirroring the native notification — sender/recipients, subject, a bounded preview of the proposed reply, and buttons **Approve** (title reflects send behavior via `NotificationService.approveActionTitle(for:)`: "Send" vs "Save to Drafts"), **Deny**, **Open in Sentwise** (custom URL scheme → review window). Needs-info and recipient-needed drafts post with only "Open in Sentwise", matching the native notification categories.
+    - **Routing:** introduce an `ApprovalChannel` abstraction so native notifications and Slack are peers. Slack actions map onto the existing `DraftNotificationAction` (`approve(sendBehavior)` / `deny` / `open`) and flow through `AppState.handleNotificationAction`, so every guard (unsaved inline edits, stale-thread warning, auto-send undo countdown) applies identically. The cases that today open the review window instead of acting reply in the Slack thread with "Open Sentwise to review this one" rather than silently doing nothing.
+    - **Lifecycle sync:** draft identity ↔ Slack message `ts` mapping is persisted. Approving/denying in either channel updates the Slack message to a terminal state (✅ Sent / 📝 Saved to Drafts / ❌ Discarded / ↩️ Undone) and clears the native notification, and vice-versa; regeneration replaces the preview in place.
+    - **Privacy disclosure:** posting draft text to Slack puts mail content on Slack's servers — the one channel that breaks "nothing leaves the machine" — so the opt-in copy says so plainly, and a **metadata-only mode** (sender + subject + buttons, no body) is offered. Default off; disabled in Prowl hunt mode.
+    - **Tests:** Socket Mode client against a fake WebSocket server (connect, ack, reconnect on `disconnect` envelope), Block Kit payload builder snapshots, action-routing parity (every `DraftNotificationAction` path reachable via Slack), lifecycle-sync, and a headless live test gated on `SENTWISE_SLACK_TEST_*` env vars that posts to a private test channel and round-trips an approve.
+
+70. **Transcript → follow-up (item 51) test plan and dogfood** — *2026-08-20; prerequisite for judging items 53/54*
+    Item 51 shipped with ~100 unit tests but no realistic fixture corpus, no end-to-end test, and no live verification. Before building capture (54) or platform pickup (53), prove the existing paste/file/watched-folder path produces send-worthy follow-ups from real-world transcripts.
+    *As Marcus, I want confidence that whatever transcript my tools export turns into a correct, sendable follow-up, so that I can trust the workflow on a real deal.*
+    - **Fixture corpus** under `Sentwise/SentwiseTests/Fixtures/Transcripts/` with realistic sales-call content: Zoom VTT export, Teams VTT (`<v Name>` tags), Granola/Fathom Markdown, Otter `.txt`, SRT, an unlabeled transcript, a ~2-hour transcript (forces `TranscriptChunker`), plus edge cases — BOM/CRLF, empty file, unsupported extension, a file still being written (exercises `PendingFileStability`), Zoom's nested `~/Documents/Zoom/<date> <title>/` folder layout.
+    - **End-to-end test with a fake LLM and fake mail provider:** file → `TranscriptParser` → `FollowUpGenerator` → pending draft → approve → dispatched to recipients with no threading headers; and the watched-folder variant on a real temp directory.
+    - **Headless live test (QA preference — no click-throughs):** env-gated XCTest against the live Gmail account and a real LLM key: ingest a fixture → generate → save-as-draft → verify via IMAP that the draft exists in Drafts with the expected recipients/subject → delete it. Skips cleanly when the env vars are absent.
+    - **Output quality rubric** applied to the fixture corpus (initially by hand, later an LLM-judge eval): accurate recap, next steps with owners, no invented commitments, proposed next meeting only when the transcript supports one, voice-profile match.
+    - **Prowl hunt depth:** add a deterministic **fake LLM provider to hunt mode** so a hunt can seed a transcript into the hunt-mode watched folder and assert a "Review Drafts (2)" menu item / pending follow-up appears — the first hunt that goes beyond open-and-assert; requires a scoped relaxation of `forbiddenSelectors` documented in the README.
+    - **Owner dogfood script:** five real-call scenarios (Zoom local recording → watched folder; Granola export → drag-drop; Teams VTT → file picker; paste from a notetaker; a call with no clear next steps) with expected outcomes, run and notes captured before items 53/54 start.
+
+68. **Diagnose GitHub-notification draft leak + surface header-fetch degradation**
+    Two GitHub PR notifications were drafted on 2026-08-20 even though GitHub mail carries `List-Id`/`List-Unsubscribe` headers that the (demonstrably working) bulk check should catch. Either the per-message header fetch failed silently — `fetchReplyWorthinessHeaders` degrades to sender-only evaluation on any error, logged but invisible to the user — or the drafts came from a manual "Draft anyway" override, which the activity log doesn't distinguish from watcher drafts.
+    *As Priya, I want to trust that a draft in my review queue means the filters really passed it, so that a silent degradation doesn't quietly turn junk filtering off.*
+    - Reproduce the GitHub-notification case (headless XCTest against the live account, per QA preference) and fix the root cause if it's a fetch/parse bug.
+    - `draftCreated` activity events record their origin (watcher vs. forced override) so leaks are diagnosable after the fact.
+    - Repeated header-fetch failures surface visibly (watch status or activity log), not just in the unified log.
 
 20. **Voice profile refresh / re-learn**
     Keep the profile current.
@@ -68,13 +214,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - Token/usage tracked per run and per day.
     - Configurable caps pause drafting when exceeded, with a clear notification.
     - Estimated cost visible in the activity log/settings.
-
-24. **Email signature handling**
-    Respect the user's signature so drafts look right.
-    *As Priya, I want drafts to use my normal signature correctly, so that replies don't drop it or double it up.*
-    - Signature policy is configurable (use Gmail's, a custom one, or none).
-    - Generated drafts neither omit an expected signature nor duplicate one already present.
-    - Quoted history below the signature is handled correctly.
 
 25. **Voice-profile cold start**
     Graceful behavior when there's little or no Sent history.
@@ -125,16 +264,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - **Voice profile stays model-independent:** the learned style guide is injected identically regardless of provider, so switching models changes fluency, not identity.
     - The approval step remains the backstop: the bar is "consistently good enough that approval is a tap," not perfection.
 
-59. **Onboarding: sign-in-and-go default + guided power-user model options**
-    Assume every user is non-technical. The default onboarding is **sign in, start trial, draft** — managed inference (item 56) means no API keys, no provider choice, no billing beyond our checkout. The BYO-key/local path remains as a fully guided **power/privacy option in Settings**, never a gate in onboarding. *(Reworked 2026-08-12: originally specced a zero-key on-device default with a BYO wizard as the primary upgrade path; superseded same day by the managed-inference decision.)*
-    *As Marcus, I want the app drafting for me minutes after install with nothing to configure, so that I never have to understand what an API key is; as Sam, I want a guided way to plug in my own key or local model, so that no server is ever in my loop.*
-    - **Default path:** install → sign in / start trial → connect mailbox → drafting works. No model decisions surfaced at all.
-    - **Power/privacy path (Settings, "Use your own AI"):** pick a provider → the app opens the exact key-creation console page → short numbered checklist (with screenshots) → paste → live test call → green check + "Saved to your Keychain." Mirrors the existing IMAP "Test Connection" pattern; the privacy upgrade ("we're never in the loop") stated plainly.
-    - **OpenRouter one-click:** OpenRouter's PKCE flow provisions a key for the user with no manual copying — the featured easy path for BYO (one account, every major model behind one key).
-    - **Honest about BYO friction:** the wizard states plainly that the provider will ask for payment details, so users aren't surprised mid-flow.
-    - **Local-model option** (Ollama / on-device class) presented alongside BYO, with a quality-expectation note driven by the item 58 harness.
-    - Key storage/validation reuses existing Keychain + connected-state UI conventions; disconnect/replace supported per provider; switching back to managed is one click.
-
 52. **Calendar awareness: auto-fill follow-up recipients and context**
     Match an ingested transcript (item 51) to the call's calendar event so the follow-up is pre-addressed and context-enriched.
     *As Marcus, I want the follow-up pre-addressed to everyone on the meeting invite, so that I never copy email addresses by hand.*
@@ -143,17 +272,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - Attendee emails pre-fill To/Cc (external attendees To, same-domain colleagues Cc — configurable), fully editable before approval.
     - Event title, attendee names/companies, and description enrich the drafting prompt.
     - Degrades gracefully: no matching event → the item 51 flow proceeds with empty recipients.
-
-56. **Licensing, billing, and the managed-inference service (open core / paid binary)**
-    The monetization plumbing behind the 2026-08-12 pricing decisions: public source, licensed binaries, subscription checkout, and — per the managed-inference decision — the stateless proxy that bundles drafting into the subscription so users never touch an API key.
-    *As the maintainer, I want people to pay one price that includes the AI, so that non-technical buyers convert without becoming an LLM customer somewhere else; as Marcus, I want nothing to set up or pay for beyond the subscription itself.*
-    - **Open core / paid binary:** source stays public on GitHub (self-compilers welcome); the signed, notarized, Sparkle-updating binary requires a license. The license is an **account/sign-in** (required for inference metering anyway).
-    - **Managed-inference proxy:** app → serverless proxy → model provider. **Stateless by design** — no storage, no content logging, request/response held in memory only — under **zero-retention terms** with the provider. This design is load-bearing for the "no storage, no training" claim and must be verifiable in the public source.
-    - **Metering & margin protection:** per-account token metering, rate limits, and abuse prevention; margin monitoring for the maintainer; a **fair-use policy in the pricing terms from day one** so heavy users don't silently eat the margin — with "switch to your own key for unlimited" (item 59) as the pressure-release valve.
-    - Full-featured **trial** (14 days or first N calls — exact mechanic TBD); trial state survives reinstall reasonably.
-    - **Individual** tier ~$15–20/mo or annual equivalent, **inference included** (unit cost is single-digit cents per follow-up); **Team** tier (3+ seats, adds CRM logging — item 55 — and centralized billing) as a follow-on; Enterprise explicitly parked.
-    - Checkout via a **merchant-of-record** (Paddle / Lemon Squeezy class) so a solo maintainer isn't handling global sales tax; in-app license validation with an offline grace period (drafting may need the network; the app must not brick offline).
-    - Final pricing, trial mechanics, and provider choices to be settled in the item 57 pre-build discussion.
 
 62. **Cross-call deal memory (local) — continuity across follow-ups**
     Inspired by the momentum.io teardown (their "Deep Research" analyzes deal data across conversations — cloud-side, org-facing); ours is the local-first, rep-facing translation. Past transcripts and sent follow-ups already live on the user's machine — use them, so the third call with a prospect drafts like a third call, not a first.
@@ -179,13 +297,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - If not sandboxed: close this item by documenting that decision.
 
 ## Low Priority
-
-30. **Slack approval channel**
-    Optional Slack integration for users who live in Slack.
-    *As a Slack-native user, I want drafts posted to Slack with approve/deny actions, so that approval fits my existing workflow.*
-    - Opt-in, configured in Settings.
-    - Posts drafts to a channel/DM with approve/deny actions.
-    - Approve/deny routes through the same send/draft path as the native UX.
 
 31. **Outlook / Microsoft 365 support**
     Add an Outlook/M365 provider behind the email-provider abstraction.
@@ -221,13 +332,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - Off by default, fully disclosed, opt-in only.
     - No email content ever included.
 
-36. **Diagnostics / log export**
-    Developer-facing logs for OSS bug reports.
-    *As Sam, I want to export diagnostic logs, so that I can file a useful bug report without leaking email content.*
-    - A "export diagnostics" action produces redacted logs (no message bodies/PII by default).
-    - Distinct from the user-facing activity history (item 21).
-    - Log verbosity is configurable.
-
 37. **Gmail push (watch API) real-time option**
     True real-time inbox updates as an upgrade over polling.
     *As Priya, I want near-instant drafts when mail arrives, so that I'm not waiting on a poll interval.*
@@ -257,7 +361,12 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - **On-device transcription** (Apple Speech / whisper.cpp class); speaker diarization is *not* required for v1 — a next-steps email doesn't need per-speaker attribution.
     - Call start/end detection (mic-in-use heuristics plus a manual control), with call-end automatically triggering the item 51 workflow.
     - A clearly visible "transcribing" indicator whenever capture is active, and a documented consent/disclosure story (two-party-consent jurisdictions) **before** this ships.
-    - **Gate:** do not start until item 51 has paying/active users asking for automatic capture.
+    - **Phased plan (added 2026-08-20):**
+      - **54a — Manual capture MVP.** Menu-bar "Start Call Capture" / "Stop & Draft Follow-up". Mic via `AVAudioEngine`; system audio via a Core Audio **process tap** (`CATapDescription` / `AudioHardwareCreateProcessTap`, macOS 14.2+ → bump `MACOSX_DEPLOYMENT_TARGET` 14.0 → 14.2), which captures whatever the user hears regardless of Zoom/Meet/Teams in an app or a browser. Streams mixed to 16 kHz mono in a temp file inside the app's container and **securely deleted once transcription completes** — audio is never retained. Capturing mic and system audio as separate streams gives "You:" / "Them:" attribution for free, without diarization. Always-visible indicator (status-item icon swap + menu line). Output is an `IngestedTranscript` via a new `CaptureTranscriptSource` into the item 51 pipeline — the composer opens pre-filled; nothing is auto-sent.
+      - **54b — Transcription engine spike (decide before building 54a's transcription step).** Compare on one real ~30-minute sales-call recording: Apple `SpeechAnalyzer`/`SpeechTranscriber` (macOS 26+, on-device, long-form), `SFSpeechRecognizer` with `requiresOnDeviceRecognition` (macOS 14+, but short-request limits force chunking and quality is weaker), and bundled **whisper.cpp** (Metal; +150 MB–1.5 GB app size depending on model). Criteria: word-error rate on call audio, time-to-transcript, app size, minimum macOS. Expected outcome: `SpeechAnalyzer` when available with whisper.cpp as the macOS 14–15 fallback — or require macOS 26 for capture and say so on the landing page.
+      - **54c — Automatic call detection.** Trigger = default input device in use (`kAudioDevicePropertyDeviceIsRunningSomewhere`) **and** a known conferencing process running (zoom.us, Microsoft Teams, Webex, Slack huddle, or a browser whose front tab title matches Meet/Teams). First version **asks** ("Looks like a call started — capture it?") rather than starting silently; call end = mic released for N seconds → stop → item 51 workflow. Per-app allow/ignore list in Settings.
+      - **54d — Consent & disclosure (before any external release of 54c).** Just-in-time TCC explanations (Microphone; audio-capture/Screen Recording as the tap requires), a first-use consent sheet covering two-party-consent jurisdictions and recommending the user disclose recording, and a `docs/` page. Ships alongside 54a for dogfood, hardened before release.
+    - **Gate (revised 2026-08-20):** the original "wait for paying users" gate is waived for **owner dogfooding**; build order across items 30, 54, and 70 is decided after planning. 54b → 54a is the first slice; 54c/54d precede any release.
 
 55. **CRM logging (HubSpot first, Salesforce later) — Team-tier differentiator**
     After a follow-up is approved, log the call summary and sent email to the CRM against the right contact/deal.
@@ -267,9 +376,3 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - Off by default, per-call opt-out; failures never block the email send itself.
     - Positioned as the **Team-tier** feature in the item 56 pricing model — the follow-up email sells to the rep, CRM hygiene sells to the manager who holds budget.
 
-61. **Live exercise of the watcher → notification → approve loop**
-    The one check split out of item 9 when it closed (2026-08-13): the full autonomous loop — a real fresh inbound message triggers watch → draft → native notification → approve → dispatch — has never been observed end-to-end on a live account with a watcher-produced draft. Both dispatch paths are now individually live-verified (items 9/44); this is about the loop as a whole, and daily dogfooding of the app will likely cover it naturally.
-    *As the maintainer, I want the autonomous loop observed working end-to-end at least once on a live account, so that the core product promise is verified as a system, not just as parts.*
-    - A fresh inbound message on a connected account produces a draft and a native notification without any manual triggering.
-    - Approving from the notification dispatches per the configured send behavior (both settings observed, or the second covered by the item 9/44 live tests).
-    - The observation is recorded (activity-history entries or a note here), then this item closes.

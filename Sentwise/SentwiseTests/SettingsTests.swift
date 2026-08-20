@@ -1,12 +1,40 @@
+import SwiftUI
 import XCTest
 @testable import Sentwise
 
-/// Unit tests for the `Settings` model.
+/// Unit tests for the `Settings` model and settings-window support code.
 ///
 /// These are intentionally small — they exist so the CI pipeline has a real
 /// test target to run and a place for future logic tests (voice profile,
 /// stale-thread detection, provider selection, etc.) to live.
 final class SettingsTests: XCTestCase {
+
+    @MainActor
+    func testSettingsPaneControllerCacheReusesPaneControllerForTab() {
+        let cache = SettingsPaneControllerCache { tab in
+            AnyView(Text(tab.rawValue))
+        }
+
+        let accountController = cache.controller(for: .account)
+        let generalController = cache.controller(for: .general)
+
+        XCTAssertTrue(accountController === cache.controller(for: .account))
+        XCTAssertFalse(accountController === generalController)
+        XCTAssertEqual(cache.cachedTabCount, 2)
+    }
+
+    @MainActor
+    func testSettingsPaneControllerCacheClearsControllers() {
+        let cache = SettingsPaneControllerCache { tab in
+            AnyView(Text(tab.rawValue))
+        }
+
+        let firstAccountController = cache.controller(for: .account)
+        cache.removeAll()
+
+        XCTAssertFalse(firstAccountController === cache.controller(for: .account))
+        XCTAssertEqual(cache.cachedTabCount, 1)
+    }
 
     func testDefaultUsesCurrentSchemaVersion() {
         XCTAssertEqual(Settings.default.schemaVersion, Settings.currentSchemaVersion)

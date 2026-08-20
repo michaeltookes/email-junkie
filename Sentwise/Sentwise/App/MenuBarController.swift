@@ -15,9 +15,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let appState: AppState
     private let updateManager: UpdateManager
 
-    /// The settings window, created lazily.
-    private var settingsWindow: NSWindow?
-    private var settingsCloseObserver: NSObjectProtocol?
+    /// The native settings window (item 65), managed by its own controller.
+    private let settingsWindowController: SettingsWindowController
 
     /// The draft-review window, created lazily.
     private var reviewWindow: NSWindow?
@@ -43,6 +42,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     init(appState: AppState, updateManager: UpdateManager) {
         self.appState = appState
         self.updateManager = updateManager
+        self.settingsWindowController = SettingsWindowController(
+            appState: appState,
+            updateManager: updateManager
+        )
         super.init()
         setupStatusItem()
         // A notification "open" action (or approve/deny while closed) surfaces
@@ -53,9 +56,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     deinit {
-        if let observer = settingsCloseObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
         if let observer = reviewCloseObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -408,39 +408,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openSettings() {
-        if settingsWindow == nil {
-            let view = SettingsView()
-                .environmentObject(appState)
-
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Sentwise Settings"
-            window.contentView = NSHostingView(rootView: view)
-            window.center()
-            window.isReleasedWhenClosed = false
-            window.setAccessibilityLabel("Sentwise Settings")
-            settingsWindow = window
-
-            settingsCloseObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    if let observer = self?.settingsCloseObserver {
-                        NotificationCenter.default.removeObserver(observer)
-                        self?.settingsCloseObserver = nil
-                    }
-                    self?.settingsWindow = nil
-                }
-            }
-        }
-
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsWindowController.show()
     }
 }

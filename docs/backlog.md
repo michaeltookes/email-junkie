@@ -178,16 +178,6 @@ Prioritized list of planned features, improvements, and technical debt for **sen
     - If sandboxed: the folder picker persists a security-scoped bookmark; launch resolves it and calls `startAccessingSecurityScopedResource`; a stale bookmark is detected and surfaced through the existing `transcriptFolderError` state ("choose the folder again in Settings").
     - If not sandboxed: close this item by documenting that decision.
 
-65. **Native macOS Settings window (ContainerBar-style toolbar tabs + About pane)**
-    The current Settings screen doesn't look or feel like a native macOS app. Restyle it to the pattern proven in the maintainer's ContainerBar app: a fixed-size settings window with a native `NSToolbar` of tab icons (à la System Settings / every polished menu-bar app), grouped-form panes, and a branded About tab.
-    *As Marcus, I want Settings to look like a real Mac app, so that a tool asking for my email credentials feels trustworthy and polished.*
-    - **Reference implementation** (read it, mirror the architecture): `~/Desktop/Current Projects/Container Bar App/ContainerBar/Sources/ContainerBar/Views/Settings/` — `SettingsWindow.swift` (a `SettingsTab` enum with SF Symbol icons + `SettingsWindowController: NSObject, NSToolbarDelegate` hosting per-tab SwiftUI panes in an `NSHostingController`, ~550×400), per-pane files (`GeneralSettingsPane`, `ConnectionSettingsPane`, …), and `AboutPane.swift`.
-    - Native toolbar tabs with SF Symbols; window title follows the selected tab; fixed-size, non-resizable panes in macOS grouped-form styling (`.formStyle(.grouped)` sections with headers and footnote captions, like the screenshot's Display/Appearance/Startup groups).
-    - Sentwise's existing pane views map across (suggested tabs): **General** (poll interval, send behavior + undo window, watched transcript folder, launch at login), **Account** (mail connection incl. provider guidance), **AI** (provider/model/key/test), **Rules** (sender allow/blocklist), **About**. Implementer may adjust the grouping; every existing setting and action must survive the move.
-    - **About pane**: the Sentwise owl icon, app name, version + build read from the bundle (`CFBundleShortVersionString`/`CFBundleVersion`), copyright, links (GitHub repo, sentwise.ai), and the Check for Updates action — mirroring `AboutPane.swift`.
-    - Onboarding keeps its own flow (this item restyles Settings, not the setup assistant); the item 64 fixes should land first or alongside so the Account pane inherits them.
-    - VoiceOver labels and keyboard navigation preserved across the new chrome.
-
 ## Low Priority
 
 30. **Slack approval channel**

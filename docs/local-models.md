@@ -28,8 +28,9 @@ works. This guide covers Ollama (the default) and LM Studio.
    you enter in the **Model** field in Sentwise. Run `ollama list` to see
    what you have.
 
-3. **Select the provider in Sentwise.** Open **Settings → AI provider**
-   (or the onboarding "Choose your AI" step) and set:
+3. **Select the provider in Sentwise.** Open **Settings → AI** (the AI tab in
+   the Settings window's toolbar; or the onboarding "Choose your AI" step) and
+   set:
 
    - **Provider:** `Local (Ollama)`
    - **Model:** leave blank to use `llama3.1`, or type the exact name of a model

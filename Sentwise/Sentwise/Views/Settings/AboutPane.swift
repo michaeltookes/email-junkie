@@ -6,14 +6,11 @@ import SwiftUI
 /// the bundle, the local-first privacy statement, links to the repo and
 /// sentwise.ai, the Check for Updates action, and copyright.
 ///
-/// The updater is injected as plain values plus a closure rather than the
-/// `UpdateManager` object so this view stays a value type with no observation —
-/// the Settings content is rebuilt each time the tab is shown, which is enough
-/// for a one-shot "check now" button.
+/// The updater is observed directly because the Settings window keeps this pane
+/// hosted while the window is open; Sparkle's availability can change while the
+/// cached pane remains mounted.
 struct AboutPane: View {
-    let canCheckForUpdates: Bool
-    let updatesUnavailableReason: String?
-    let checkForUpdates: () -> Void
+    @ObservedObject var updateManager: UpdateManager
 
     private var appIcon: NSImage {
         if let named = NSImage(named: "AppIcon") {
@@ -69,14 +66,15 @@ struct AboutPane: View {
 
             VStack(spacing: 4) {
                 Button("Check for Updates…") {
-                    checkForUpdates()
+                    updateManager.checkForUpdates()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .disabled(!canCheckForUpdates)
+                .disabled(!updateManager.canCheckForUpdates)
                 .accessibilityLabel("Check for Sentwise updates")
 
-                if !canCheckForUpdates, let reason = updatesUnavailableReason {
+                if !updateManager.canCheckForUpdates,
+                   let reason = updateManager.unavailableReason {
                     Text(reason)
                         .font(.caption2)
                         .multilineTextAlignment(.center)

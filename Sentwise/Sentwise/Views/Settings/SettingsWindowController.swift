@@ -53,11 +53,7 @@ struct SettingsContentView: View {
             case .rules:
                 SenderRulesSettingsView()
             case .about:
-                AboutPane(
-                    canCheckForUpdates: updateManager.canCheckForUpdates,
-                    updatesUnavailableReason: updateManager.unavailableReason,
-                    checkForUpdates: { updateManager.checkForUpdates() }
-                )
+                AboutPane(updateManager: updateManager)
             }
         }
         .frame(

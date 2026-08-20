@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import os
 import Sparkle
 
@@ -13,7 +14,8 @@ private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Updates
 ///
 /// The API surface (`isConfigured`, `canCheckForUpdates`, `unavailableReason`,
 /// `startUpdater()`, `checkForUpdates()`) is unchanged from the earlier no-op
-/// stub, so `MenuBarController` needs no changes.
+/// stub, so `MenuBarController` needs no changes. The object is observable so
+/// cached Settings panes can track Sparkle's transient availability changes.
 ///
 /// - Note: The updater verifies downloads against the `SUPublicEDKey` in
 ///   Info.plist. Until a real EdDSA keypair is generated at release time (see
@@ -21,19 +23,20 @@ private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Updates
 ///   fail signature verification rather than install — the app still launches
 ///   and runs normally.
 @MainActor
-final class UpdateManager {
+final class UpdateManager: ObservableObject {
 
     /// The standard Sparkle controller. Created with `startingUpdater: false`
     /// so we can start it explicitly (and catch a start failure gracefully)
     /// rather than letting Sparkle pop a modal alert at launch.
     private let updaterController: SPUStandardUpdaterController
+    private var canCheckForUpdatesObservation: NSKeyValueObservation?
 
     /// Whether the updater started successfully (feed + key wired).
-    private(set) var isConfigured: Bool = false
+    @Published private(set) var isConfigured: Bool = false
 
     /// Why update checks are unavailable (shown as a menu tooltip). `nil` once
     /// the updater is running.
-    private(set) var unavailableReason: String? =
+    @Published private(set) var unavailableReason: String? =
         "Auto-update starts once the app finishes launching."
 
     init() {
@@ -42,11 +45,21 @@ final class UpdateManager {
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
+
+        canCheckForUpdatesObservation = updaterController.updater.observe(
+            \.canCheckForUpdates,
+            options: [.new]
+        ) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
+        }
     }
 
     /// Whether the updater can currently check for updates. Sparkle exposes this
     /// as a KVO property that is briefly false while a check is in flight; the
-    /// menu is rebuilt on demand so it always reflects the live value.
+    /// menu is rebuilt on demand and Settings observes KVO invalidations so both
+    /// surfaces reflect the live value.
     var canCheckForUpdates: Bool {
         isConfigured && updaterController.updater.canCheckForUpdates
     }

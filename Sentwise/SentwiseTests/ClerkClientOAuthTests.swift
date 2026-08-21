@@ -78,6 +78,7 @@ final class ClerkClientOAuthTests: XCTestCase {
         let request = transport.requests[0]
         XCTAssertTrue(request.url.absoluteString.contains("/v1/client/sign_ins/sia_1"))
         XCTAssertTrue(request.url.absoluteString.contains("rotating_token_nonce=nonce_xyz"))
+        XCTAssertEqual(request.method, "GET", "Clerk completes native OAuth by reloading the sign-in, not posting to it")
         XCTAssertEqual(request.headers["authorization"], "Bearer client_A")
     }
 

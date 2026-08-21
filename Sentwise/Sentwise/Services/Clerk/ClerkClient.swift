@@ -24,6 +24,18 @@ struct ClerkHTTPResponse: Sendable {
 /// as a protocol so `ClerkClient` is unit-testable against a fake.
 protocol ClerkHTTPTransport: Sendable {
     func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse
+    /// A GET with the same header/rotating-token semantics. Clerk's OAuth
+    /// completion *reloads* the sign-in (`GET /v1/client/sign_ins/{id}?rotating_token_nonce=…`)
+    /// rather than posting to it.
+    func get(_ url: URL, headers: [String: String]) async throws -> ClerkHTTPResponse
+}
+
+extension ClerkHTTPTransport {
+    /// Default so lightweight test fakes that only queue responses keep working;
+    /// the production transport overrides this with a real GET.
+    func get(_ url: URL, headers: [String: String]) async throws -> ClerkHTTPResponse {
+        try await postForm(url, headers: headers, form: [:])
+    }
 }
 
 /// Production `ClerkHTTPTransport` over `URLSession`.
@@ -42,7 +54,19 @@ struct ClerkURLSessionTransport: ClerkHTTPTransport {
             request.setValue(value, forHTTPHeaderField: field)
         }
         request.httpBody = Self.encodeForm(form).data(using: .utf8)
+        return try await perform(request)
+    }
 
+    func get(_ url: URL, headers: [String: String]) async throws -> ClerkHTTPResponse {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+        return try await perform(request)
+    }
+
+    private func perform(_ request: URLRequest) async throws -> ClerkHTTPResponse {
         let (data, response) = try await session.data(for: request)
         let http = response as? HTTPURLResponse
         let statusCode = http?.statusCode ?? -1
@@ -355,9 +379,8 @@ struct ClerkClient: Sendable {
         rotatingTokenNonce: String,
         clientToken: String
     ) async throws -> ClerkVerifiedSession {
-        let reloaded = try await post(
+        let reloaded = try await get(
             path: "v1/client/sign_ins/\(signInId)",
-            form: [:],
             clientToken: clientToken,
             extraQuery: [URLQueryItem(name: "rotating_token_nonce", value: rotatingTokenNonce)]
         )
@@ -408,6 +431,16 @@ struct ClerkClient: Sendable {
         let headers = ["authorization": "Bearer \(clientToken)"]
         do {
             return try await transport.postForm(url, headers: headers, form: form)
+        } catch {
+            throw ClerkError.transport(String(describing: error))
+        }
+    }
+
+    private func get(path: String, clientToken: String, extraQuery: [URLQueryItem]) async throws -> ClerkHTTPResponse {
+        let url = Self.buildURL(base: frontendAPIBaseURL, path: path, extraQuery: extraQuery)
+        let headers = ["authorization": "Bearer \(clientToken)"]
+        do {
+            return try await transport.get(url, headers: headers)
         } catch {
             throw ClerkError.transport(String(describing: error))
         }

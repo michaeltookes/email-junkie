@@ -144,6 +144,29 @@ No dashboard configuration is required for OpenRouter beyond the user having (or
 creating) an OpenRouter account during the browser step. Live verification of the
 round-trip is **pending** (needs the owner + a browser + an OpenRouter account).
 
+## URL scheme security
+
+Any app on the machine can register and claim the `sentwise://` scheme, so an
+incoming callback URL is treated as untrusted input. It cannot complete either
+flow on its own:
+
+- **Clerk OAuth:** the `rotating_token_nonce` is only meaningful against the
+  in-memory pending sign-in handle (`ManagedAccountService.pendingOAuthSignIn`),
+  which exists only between `startGoogleSignIn` and its completion and is bound to
+  a specific `sign_in` id and device (client) token. A callback that arrives with
+  no pending sign-in is rejected (`malformedResponse("no oauth sign-in in
+  progress")`); a forged nonce fails Clerk's server-side reload.
+- **OpenRouter:** the redirect `code` is useless without the PKCE **verifier**,
+  which never leaves the Keychain (`openRouter.pkceVerifier`) and is consumed on
+  first use. Without it the exchange isn't even attempted.
+
+`SentwiseURLCallback` additionally rejects any foreign scheme, unknown host, or
+missing/empty parameter, and `handleIncomingURL` ignores all deep links during a
+Prowl hunt. Universal Links (an `applinks:` associated-domain entitlement) are the
+future hardening if we ever want the OS to guarantee only Sentwise receives these
+redirects; the custom scheme is sufficient today because neither flow can be
+completed by a hijacked callback.
+
 ## Scope notes / live verification (56a)
 
 - **Google sign-in was deferred out of 56a and delivered in item 59** (above).

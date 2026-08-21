@@ -64,6 +64,24 @@ final class OpenRouterKeyProvisionerTests: XCTestCase {
         }
     }
 
+    func testExchangeCapsRawErrorBodyFallback() async {
+        // A non-JSON body (e.g. an HTML error page) must be collapsed and capped,
+        // never surfaced raw.
+        let html = "<html>\n<body>\n" + String(repeating: "error ", count: 100) + "\n</body>\n</html>"
+        let transport = FakeJSONTransport(.success(HTTPResponse(statusCode: 502, body: Data(html.utf8))))
+        do {
+            _ = try await OpenRouterKeyProvisioner(transport: transport)
+                .exchangeCodeForKey(code: "CODE", codeVerifier: "VERIFIER")
+            XCTFail("Expected http error")
+        } catch LLMError.http(let status, let message) {
+            XCTAssertEqual(status, 502)
+            XCTAssertLessThanOrEqual(message.count, 200)
+            XCTAssertFalse(message.contains("\n"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testExchangeThrowsWhenKeyMissing() async {
         let transport = FakeJSONTransport(.success(
             HTTPResponse(statusCode: 200, body: Data(#"{"user_id":"u_1"}"#.utf8))

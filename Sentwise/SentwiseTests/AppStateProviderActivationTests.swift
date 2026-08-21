@@ -97,6 +97,18 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertEqual(appState.llmProviderKind, .managed, "provider is left unchanged on failure")
     }
 
+    // MARK: - URL routing / hunt-mode guard
+
+    func testIncomingCallbackIgnoredDuringHunt() {
+        let appState = makeAppState()
+        let url = URL(string: "sentwise://openrouter-callback?code=CODE")!
+
+        XCTAssertNil(appState.routableCallback(for: url, isHuntMode: true),
+                     "a hunt must never reach the completion paths, even via a stray deep link")
+        XCTAssertEqual(appState.routableCallback(for: url, isHuntMode: false), .openRouter(code: "CODE"))
+        XCTAssertNil(appState.routableCallback(for: URL(string: "https://evil?code=x")!, isHuntMode: false))
+    }
+
     // MARK: - Google sign-in end to end
 
     func testGoogleSignInEndToEndSignsInAndActivatesManaged() async throws {

@@ -73,7 +73,7 @@ extension AppState {
         if llmProviderKind != .managed {
             selectLLMProvider(.managed)
         }
-        let email = (identifier?.isEmpty == false) ? identifier! : "your Google account"
+        let email = identifier.flatMap { $0.isEmpty ? nil : $0 } ?? "your Google account"
         finalizeManagedSignIn(email: email)
         logger.info("Managed Google sign-in completed")
     }

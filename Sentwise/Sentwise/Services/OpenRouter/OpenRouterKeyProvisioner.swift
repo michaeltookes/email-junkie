@@ -81,7 +81,14 @@ struct OpenRouterKeyProvisioner {
             if let message = decoded.error?.message, !message.isEmpty { return message }
             if let message = decoded.message, !message.isEmpty { return message }
         }
-        if let raw = String(data: data, encoding: .utf8), !raw.isEmpty { return raw }
+        // Fallback: the body may be an HTML error page, so never surface it raw.
+        // Collapse to a single line and cap the length.
+        if let raw = String(data: data, encoding: .utf8) {
+            let collapsed = raw.split(whereSeparator: \.isNewline)
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+            if !collapsed.isEmpty { return String(collapsed.prefix(200)) }
+        }
         return "OpenRouter returned an error."
     }
 

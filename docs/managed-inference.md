@@ -111,3 +111,8 @@ sign-in controls carry `accessibilityIdentifier`s documented in
 ## Live verification
 
 - **2026-08-20/21:** owner signed up via the native email-code flow against the real Clerk dev instance (Clerk's *Password* requirement had to be turned off in the dashboard first — `required_fields` included `password`, which the passwordless flow can never satisfy), switched the active provider to Sentwise AI, and generated a draft from Review Drafts. `wrangler tail` showed `POST /v1/draft → 200`, outcome `ok`, ~3.2 s wall time, no exceptions, no logs. Clerk dashboard prerequisite: **Email address (verification code) on, Password off, Organizations off.**
+
+## Service repo CI/CD (added 2026-08-21)
+
+`sentwise-service` `main` is the source of truth for the deployed Worker. On every push/PR, CI runs the privacy guard (no `console.*` in `src/`), ESLint + Prettier, typecheck, vitest, and `npm audit --audit-level=high`; Dependabot watches npm and GitHub Actions weekly; Claude code review runs on PRs. Merges to `main` trigger the **Deploy** workflow, which is gated by the `production` environment (required reviewer: the owner; `main` only) and ends with a `/healthz` smoke check. Secrets live as repository secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLAUDE_CODE_OAUTH_TOKEN`); the Worker's own `CLERK_SECRET_KEY` / `ANTHROPIC_API_KEY` remain Cloudflare secrets set via `wrangler secret put`. First gated deploy: PR #1 → `0f73d51`.
+

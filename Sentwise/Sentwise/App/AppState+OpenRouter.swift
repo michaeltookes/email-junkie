@@ -12,7 +12,10 @@ extension AppState {
 
     /// The custom-scheme URL OpenRouter redirects back to. Registered in
     /// `Info.plist`; passed to OpenRouter as `callback_url`.
-    static let openRouterCallbackURL = "sentwise://openrouter-callback"
+    /// OpenRouter redirects the browser here (Worker landing page → `sentwise://openrouter-callback`).
+    static var openRouterCallbackURL: String {
+        ManagedInference.baseURL.appendingPathComponent("openrouter/callback").absoluteString
+    }
     /// A sensible default model for a freshly provisioned OpenRouter key. The user
     /// can change it; OpenRouter namespaces model ids by publisher.
     static let openRouterDefaultModel = "openai/gpt-4o-mini"

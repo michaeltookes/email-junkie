@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os
 
@@ -12,6 +13,8 @@ extension AppState {
     /// URL is acted on during a Prowl hunt.
     func handleIncomingURL(_ url: URL) {
         guard let callback = routableCallback(for: url) else { return }
+        // The browser handed control back; put the app in front so the result is seen.
+        NSApp.activate(ignoringOtherApps: true)
         switch callback {
         case .managedOAuth(let nonce):
             Task { await handleManagedOAuthCallback(nonce: nonce) }

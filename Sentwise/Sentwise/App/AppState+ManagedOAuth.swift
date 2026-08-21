@@ -12,7 +12,12 @@ extension AppState {
     /// The custom-scheme URL Clerk redirects back to after the Google handshake.
     /// Registered in `Info.plist` (`CFBundleURLTypes`) and must be added as an
     /// allowed redirect URL in the Clerk dashboard.
-    static let managedOAuthRedirectURL = "sentwise://oauth-callback"
+    /// Clerk redirects the browser here (an HTTPS landing page on the Worker that
+    /// shows "You're signed in" and forwards the nonce to `sentwise://oauth-callback`).
+    /// Redirecting straight to the custom scheme leaves the browser tab spinning.
+    static var managedOAuthRedirectURL: String {
+        ManagedInference.baseURL.appendingPathComponent("auth/callback").absoluteString
+    }
 
     /// Shared success path once a session is stored (email code or OAuth): records
     /// the account, marks managed verified when it's the active provider, and

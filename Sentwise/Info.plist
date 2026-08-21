@@ -18,10 +18,12 @@
 
 	<!--
 	  Custom URL scheme (item 59). `sentwise://` receives two browser hand-backs:
-	  the Clerk Google sign-in redirect (sentwise://oauth-callback) and the
-	  OpenRouter key-provisioning redirect (sentwise://openrouter-callback).
+	  the Clerk Google sign-in and OpenRouter key-provisioning round-trips.
+	  The browser lands on an HTTPS page on the Worker (/auth/callback,
+	  /openrouter/callback) which forwards to sentwise://oauth-callback and
+	  sentwise://openrouter-callback respectively.
 	  AppDelegate.application(_:open:) routes them; the Clerk dashboard must list
-	  sentwise://oauth-callback as an allowed redirect URL.
+	  https://sentwise-inference.sentwise-service.workers.dev/auth/callback as an allowed redirect URL.
 	-->
 	<key>CFBundleURLTypes</key>
 	<array>

@@ -58,7 +58,8 @@ final class AppStateProviderActivationTests: XCTestCase {
 
         let url = try XCTUnwrap(appState.beginOpenRouterProvisioning())
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        XCTAssertEqual(items.first { $0.name == "callback_url" }?.value, "sentwise://openrouter-callback")
+        XCTAssertEqual(items.first { $0.name == "callback_url" }?.value, AppState.openRouterCallbackURL)
+        XCTAssertTrue(AppState.openRouterCallbackURL.hasSuffix("/openrouter/callback"))
         XCTAssertFalse((items.first { $0.name == "code_challenge" }?.value ?? "").isEmpty)
         XCTAssertEqual(items.first { $0.name == "code_challenge_method" }?.value, "S256")
 

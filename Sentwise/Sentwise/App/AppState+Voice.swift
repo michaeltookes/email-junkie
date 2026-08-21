@@ -53,11 +53,11 @@ extension AppState {
             persistence.saveVoiceProfile(profile)
             voiceProfile = profile
         } catch {
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
             guard isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
                 voiceError = Self.staleVoiceLLMConfigurationMessage
                 return
             }
-            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
             voiceError = Self.voiceMessage(for: error)
         }
     }

@@ -255,10 +255,8 @@ final class AppState: ObservableObject {
     /// Records a reconnect callback that arrived while the current queue drain
     /// was already running, so the drain can replay missed queued work once.
     var needsQueuedDraftDrainAfterCurrent = false
-    /// Set when managed-auth failure paused an active inbox watcher. Cleared when
-    /// watching is explicitly restarted/stopped or after successful reauth tries
-    /// to restore the prior watching state.
-    var shouldResumeInboxWatchingAfterManagedReauthentication = false
+    /// Set when a managed-auth failure paused the watcher; cleared on start/stop or after reauth resumes it.
+    var resumeWatchingAfterManagedReauth = false
 
     /// Observes reachability so the app can pause while offline and resume on
     /// reconnect. Injected for deterministic offline→online tests.

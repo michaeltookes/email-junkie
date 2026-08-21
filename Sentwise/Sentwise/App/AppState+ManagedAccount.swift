@@ -203,6 +203,22 @@ extension AppState {
         }
     }
 
+    // MARK: - Watcher reauth (item 56a)
+
+    /// After a successful re-sign-in, restart a watcher that a managed 401 paused.
+    func resumeInboxWatchingAfterManagedReauthenticationIfNeeded() {
+        guard resumeWatchingAfterManagedReauth else { return }
+        resumeWatchingAfterManagedReauth = false
+        guard watchStatus == .paused, canWatch else { return }
+        startWatching()
+    }
+
+    func shouldResumeAfterManagedReauthentication(error: Error, provider: LLMProviderKind?) -> Bool {
+        guard provider == .managed else { return false }
+        guard case LLMError.managedNotSignedIn = error else { return false }
+        return true
+    }
+
     // MARK: - Migration (item 56a)
 
     /// Runs all launch-time settings migrations in order: the saved-accounts move

@@ -212,6 +212,61 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_C")
     }
 
+    func testStartSignInPersistsRotatedTokenFromCreationFailure() async throws {
+        let secrets = InMemorySecretStore()
+        let startedResponse = #"{"response":{"id":"sia_1","supported_first_factors":["#
+            + #"{"strategy":"email_code","email_address_id":"ema_1"}]}}"#
+        let transport = QueueClerkTransport([
+            response(#"{"errors":[{"message":"temporarily unavailable"}]}"#, status: 503, clientToken: "client_A"),
+            response(startedResponse, clientToken: "client_B"),
+            response(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_C")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        do {
+            try await account.startSignIn(email: "marcus@example.com")
+            XCTFail("Expected creation failure")
+        } catch ClerkError.http(let status, _, let clientToken) {
+            XCTAssertEqual(status, 503)
+            XCTAssertEqual(clientToken, "client_A")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_A")
+
+        try await account.startSignIn(email: "marcus@example.com")
+
+        XCTAssertEqual(transport.requests[1].headers["authorization"], "Bearer client_A")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_C")
+    }
+
+    func testStartSignInPersistsRotatedTokenFromFallbackSignUpCreationFailure() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport([
+            response(
+                #"{"errors":[{"code":"form_identifier_not_found","message":"not found"}]}"#,
+                status: 422,
+                clientToken: "client_A"
+            ),
+            response(#"{"errors":[{"message":"temporarily unavailable"}]}"#, status: 503, clientToken: "client_B")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        do {
+            try await account.startSignIn(email: "marcus@example.com")
+            XCTFail("Expected sign-up creation failure")
+        } catch ClerkError.http(let status, _, let clientToken) {
+            XCTAssertEqual(status, 503)
+            XCTAssertEqual(clientToken, "client_B")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(transport.requests[1].headers["authorization"], "Bearer client_A")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_B")
+    }
+
     func testStartSignInPersistsRotatedTokenFromPrepareFailure() async throws {
         let secrets = InMemorySecretStore()
         let transport = QueueClerkTransport([
@@ -276,6 +331,46 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(transport.requests[3].headers["authorization"], "Bearer client_C")
         XCTAssertEqual(transport.requests[4].headers["authorization"], "Bearer client_D")
         XCTAssertEqual(transport.requests[5].headers["authorization"], "Bearer client_E")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_F")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
+    }
+
+    func testCompleteSignInRetriesWithMintedTokenAfterSuccessfulMintPersistenceFailure() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [:])
+        secrets.failOnSetKeys = [.managedClientToken]
+        let transport = QueueClerkTransport([
+            response(
+                #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                clientToken: "client_A"
+            ),
+            response(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B"),
+            response(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_C"),
+            response(#"{"jwt":"first.jwt"}"#, clientToken: "client_D"),
+            response(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_E"),
+            response(#"{"jwt":"retry.jwt"}"#, clientToken: "client_F")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        try await account.startSignIn(email: "marcus@example.com")
+        do {
+            try await account.completeSignIn(code: "123456")
+            XCTFail("Expected client-token persistence failure")
+        } catch ManagedAccountTestSecretError.setDenied {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
+
+        secrets.failOnSetKeys = []
+        try await account.completeSignIn(code: "123456")
+
+        XCTAssertEqual(transport.requests[2].headers["authorization"], "Bearer client_B")
+        XCTAssertEqual(transport.requests[3].headers["authorization"], "Bearer client_C")
+        XCTAssertEqual(transport.requests[4].headers["authorization"], "Bearer client_D")
+        XCTAssertEqual(transport.requests[5].headers["authorization"], "Bearer client_E")
+        XCTAssertTrue(await account.isSignedIn)
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_F")
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
     }

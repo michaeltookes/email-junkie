@@ -119,7 +119,7 @@ final class OnboardingTests: XCTestCase {
         )
         XCTAssertEqual(
             appState.onboardingContinueBlockedReason(for: .connectProvider),
-            "Run Test Connection to continue."
+            "Sign in to Sentwise AI to continue."
         )
     }
 
@@ -128,6 +128,27 @@ final class OnboardingTests: XCTestCase {
 
         // Account connected → no hint on that step, but the provider still gates.
         XCTAssertNil(appState.onboardingContinueBlockedReason(for: .connectAccount))
+        XCTAssertEqual(
+            appState.onboardingContinueBlockedReason(for: .connectProvider),
+            "Sign in to Sentwise AI to continue."
+        )
+    }
+
+    func testBYOProviderStepStillPointsAtTestConnection() {
+        let persistence = AppStateMemoryPersistence(
+            settings: Settings(
+                schemaVersion: Settings.currentSchemaVersion,
+                pollIntervalSeconds: 300,
+                llmProvider: "anthropic"
+            )
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: InMemorySecretStore(),
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+
         XCTAssertEqual(
             appState.onboardingContinueBlockedReason(for: .connectProvider),
             "Run Test Connection to continue."

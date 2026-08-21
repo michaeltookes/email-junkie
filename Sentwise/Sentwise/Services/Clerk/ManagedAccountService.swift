@@ -48,7 +48,13 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// before entering the code.
     func startSignIn(email: String) async throws {
         let existingClientToken = areStoredCredentialsInvalidated ? "" : storedClientToken ?? ""
-        let created = try await clerk.createEmailCodeSignIn(email: email, clientToken: existingClientToken)
+        let created: ClerkSignInHandle
+        do {
+            created = try await clerk.createEmailCodeSignIn(email: email, clientToken: existingClientToken)
+        } catch let error as ClerkError {
+            persistClientTokenBestEffort(error.clientToken, context: "after failed sign-in creation")
+            throw error
+        }
         persistClientTokenBestEffort(created.clientToken, context: "after creating sign-in")
 
         do {
@@ -91,6 +97,10 @@ actor ManagedAccountService: ManagedSessionProviding {
             clientToken: verified.clientToken,
             preserveFailureClientToken: .pending(pending)
         )
+        guard isPendingSignIn(pending) else {
+            throw ClerkError.malformedResponse("no sign-in in progress")
+        }
+        updatePendingSignIn(pending, clientToken: minted.clientToken)
         guard isPendingSignIn(pending) else {
             throw ClerkError.malformedResponse("no sign-in in progress")
         }

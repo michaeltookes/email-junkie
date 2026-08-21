@@ -85,10 +85,24 @@ struct ClerkSignInHandle: Sendable, Equatable {
     var flow: Flow = .signIn
 }
 
-/// A completed sign-in: the created session plus the latest client token.
+/// A started OAuth sign-in (e.g. Google) awaiting the browser round-trip. The
+/// app opens `externalRedirectURL` in the default browser; Clerk completes the
+/// external handshake and redirects back to the app's custom URL scheme with a
+/// `rotating_token_nonce`, which the caller passes to `completeOAuthSignIn`.
+struct ClerkOAuthHandle: Sendable, Equatable {
+    let signInId: String
+    /// The Clerk-hosted URL to open so the user authenticates with the provider.
+    let externalRedirectURL: URL
+    let clientToken: String
+}
+
+/// A completed sign-in: the created session plus the latest client token, and
+/// the account identifier (email) when Clerk includes it — used by the OAuth
+/// path, where the app doesn't otherwise know the email the user chose.
 struct ClerkVerifiedSession: Sendable, Equatable {
     let sessionId: String
     let clientToken: String
+    var identifier: String?
 }
 
 /// A freshly minted, short-lived session JWT plus the latest client token.
@@ -304,6 +318,61 @@ struct ClerkClient: Sendable {
         return ClerkVerifiedSession(sessionId: sessionId, clientToken: token)
     }
 
+    // MARK: - OAuth (Google) sign-in
+
+    /// Starts an OAuth sign-in (e.g. `oauth_google`). Creates the Clerk sign-in
+    /// with the external strategy and the app's `redirectURL`; Clerk responds with
+    /// a hosted URL to open in the browser. The user completes the provider
+    /// handshake there and Clerk redirects back to `redirectURL` with a
+    /// `rotating_token_nonce`, which `completeOAuthSignIn` exchanges for a session.
+    func startOAuthSignIn(
+        strategy: String,
+        redirectURL: String,
+        clientToken: String
+    ) async throws -> ClerkOAuthHandle {
+        let created = try await post(
+            path: "v1/client/sign_ins",
+            form: ["strategy": strategy, "redirect_url": redirectURL],
+            clientToken: clientToken
+        )
+        let token = created.clientToken ?? clientToken
+        let resource = try Self.decodeSignIn(created.body, status: created.statusCode, clientToken: token)
+        guard let signInId = resource.id else {
+            throw ClerkError.malformedResponse("sign_in id missing", clientToken: token)
+        }
+        guard let redirect = resource.firstFactorVerification?.externalVerificationRedirectURL,
+              let url = URL(string: redirect) else {
+            throw ClerkError.malformedResponse("external verification redirect url missing", clientToken: token)
+        }
+        return ClerkOAuthHandle(signInId: signInId, externalRedirectURL: url, clientToken: token)
+    }
+
+    /// Completes an OAuth sign-in after the browser redirect. Reloads the sign-in
+    /// resource with the `rotating_token_nonce` Clerk handed back; a successful
+    /// external handshake leaves it `complete` with a `created_session_id`.
+    func completeOAuthSignIn(
+        signInId: String,
+        rotatingTokenNonce: String,
+        clientToken: String
+    ) async throws -> ClerkVerifiedSession {
+        let reloaded = try await post(
+            path: "v1/client/sign_ins/\(signInId)",
+            form: [:],
+            clientToken: clientToken,
+            extraQuery: [URLQueryItem(name: "rotating_token_nonce", value: rotatingTokenNonce)]
+        )
+        let token = reloaded.clientToken ?? clientToken
+        let resource = try Self.decodeSignIn(reloaded.body, status: reloaded.statusCode, clientToken: token)
+        guard resource.status == "complete", let sessionId = resource.createdSessionId else {
+            throw ClerkError.notComplete(
+                status: resource.status,
+                missingFields: resource.missingFields ?? [],
+                clientToken: token
+            )
+        }
+        return ClerkVerifiedSession(sessionId: sessionId, clientToken: token, identifier: resource.identifier)
+    }
+
     /// Mints a fresh, short-lived session JWT for the given session. This is the
     /// token the `sentwise-service` Worker verifies. Refresh by calling again.
     func mintSessionToken(sessionId: String, clientToken: String) async throws -> ClerkMintedToken {
@@ -328,8 +397,13 @@ struct ClerkClient: Sendable {
 
     // MARK: - Internals
 
-    private func post(path: String, form: [String: String], clientToken: String) async throws -> ClerkHTTPResponse {
-        let url = Self.buildURL(base: frontendAPIBaseURL, path: path)
+    private func post(
+        path: String,
+        form: [String: String],
+        clientToken: String,
+        extraQuery: [URLQueryItem] = []
+    ) async throws -> ClerkHTTPResponse {
+        let url = Self.buildURL(base: frontendAPIBaseURL, path: path, extraQuery: extraQuery)
         // Native mode: send the Authorization header (never an Origin header).
         let headers = ["authorization": "Bearer \(clientToken)"]
         do {
@@ -339,10 +413,10 @@ struct ClerkClient: Sendable {
         }
     }
 
-    static func buildURL(base: URL, path: String) -> URL {
+    static func buildURL(base: URL, path: String, extraQuery: [URLQueryItem] = []) -> URL {
         var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         // Mark the request as native so Clerk uses header-token auth, not cookies.
-        components?.queryItems = [URLQueryItem(name: "_is_native", value: "1")]
+        components?.queryItems = [URLQueryItem(name: "_is_native", value: "1")] + extraQuery
         return components?.url ?? base.appendingPathComponent(path)
     }
 
@@ -369,59 +443,5 @@ struct ClerkClient: Sendable {
     private static func firstErrorMessage(_ data: Data) -> String? {
         let envelope = try? JSONDecoder().decode(ErrorsEnvelope.self, from: data)
         return envelope?.errors?.first?.longMessage ?? envelope?.errors?.first?.message
-    }
-}
-
-// MARK: - Wire-format DTOs (file-private)
-
-private struct SignInEnvelope: Decodable {
-    let response: SignInResource?
-    let errors: [ClerkAPIError]?
-}
-
-private struct SignInResource: Decodable {
-    let id: String?
-    let status: String?
-    let createdSessionId: String?
-    let supportedFirstFactors: [FirstFactor]?
-    /// Sign-up only: fields Clerk still requires (e.g. `password` when the
-    /// instance is misconfigured for a passwordless product).
-    let missingFields: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case id, status
-        case createdSessionId = "created_session_id"
-        case supportedFirstFactors = "supported_first_factors"
-        case missingFields = "missing_fields"
-    }
-}
-
-private struct FirstFactor: Decodable {
-    let strategy: String?
-    let emailAddressId: String?
-
-    enum CodingKeys: String, CodingKey {
-        case strategy
-        case emailAddressId = "email_address_id"
-    }
-}
-
-private struct TokenEnvelope: Decodable {
-    let jwt: String?
-}
-
-private struct ErrorsEnvelope: Decodable {
-    let errors: [ClerkAPIError]?
-}
-
-private struct ClerkAPIError: Decodable {
-    let message: String?
-    let longMessage: String?
-    let code: String?
-
-    enum CodingKeys: String, CodingKey {
-        case message
-        case longMessage = "long_message"
-        case code
     }
 }

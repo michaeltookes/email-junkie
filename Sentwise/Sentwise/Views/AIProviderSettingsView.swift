@@ -82,7 +82,7 @@ struct AIProviderSettingsView: View {
                             Text("Connected").foregroundStyle(.green)
                         }
                         Button("Disconnect", role: .destructive) {
-                            appState.disconnectLLM()
+                            appState.disconnectLLM(provider: displayedBYOProvider)
                         }
                         .accessibilityLabel("Disconnect AI provider")
                     } else {
@@ -173,6 +173,11 @@ struct AIProviderSettingsView: View {
     /// The bring-your-own providers (everything except managed inference).
     private var byoProviders: [LLMProviderKind] {
         LLMProviderKind.allCases.filter { $0 != .managed }
+    }
+
+    /// The BYO provider this section shows (see `BYOProviderControls`).
+    private var displayedBYOProvider: LLMProviderKind {
+        appState.llmProviderKind == .managed ? (byoProviders.first ?? .anthropic) : appState.llmProviderKind
     }
 
     /// Endpoint help text tailored to the selected provider.

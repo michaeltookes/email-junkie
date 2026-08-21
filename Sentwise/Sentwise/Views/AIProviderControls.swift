@@ -115,10 +115,16 @@ struct BYOProviderControls: View {
         LLMProviderKind.allCases.filter { $0 != .managed }
     }
 
+    /// The BYO provider this card shows: the active one, or the first BYO option
+    /// while managed inference is active.
+    private var displayedBYOProvider: LLMProviderKind {
+        appState.llmProviderKind == .managed ? (byoProviders.first ?? .anthropic) : appState.llmProviderKind
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Provider", selection: Binding(
-                get: { appState.llmProviderKind == .managed ? (byoProviders.first ?? .anthropic) : appState.llmProviderKind },
+                get: { displayedBYOProvider },
                 set: { appState.selectLLMProvider($0) }
             )) {
                 ForEach(byoProviders) { kind in
@@ -142,7 +148,7 @@ struct BYOProviderControls: View {
 
                 if appState.isLLMConnected {
                     ConnectedBadge(text: "Connected")
-                    Button("Disconnect", role: .destructive) { appState.disconnectLLM() }
+                    Button("Disconnect", role: .destructive) { appState.disconnectLLM(provider: displayedBYOProvider) }
                 } else {
                     SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
                         .textFieldStyle(.roundedBorder)

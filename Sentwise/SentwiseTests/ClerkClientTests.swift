@@ -144,7 +144,7 @@ final class ClerkClientTests: XCTestCase {
         do {
             _ = try await client(transport).sendEmailCode(email: "bad", clientToken: "")
             XCTFail("Expected http error")
-        } catch ClerkError.http(let status, let message) {
+        } catch ClerkError.http(let status, let message, _) {
             XCTAssertEqual(status, 422)
             XCTAssertEqual(message, "Email address is invalid.")
         } catch {
@@ -179,8 +179,29 @@ final class ClerkClientTests: XCTestCase {
         do {
             _ = try await client(transport).verifyEmailCode(signInId: "sia_1", code: "000000", clientToken: "client_B")
             XCTFail("Expected notComplete")
-        } catch ClerkError.notComplete(let status, _) {
+        } catch ClerkError.notComplete(let status, _, let clientToken) {
             XCTAssertEqual(status, "needs_second_factor")
+            XCTAssertEqual(clientToken, "client_C")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testVerifyEmailCodeHTTPErrorCarriesRotatedClientToken() async {
+        let transport = FakeClerkTransport([
+            clerkResponse(
+                #"{"errors":[{"message":"Code is invalid."}]}"#,
+                status: 422,
+                clientToken: "client_C"
+            )
+        ])
+        do {
+            _ = try await client(transport).verifyEmailCode(signInId: "sia_1", code: "000000", clientToken: "client_B")
+            XCTFail("Expected http error")
+        } catch ClerkError.http(let status, let message, let clientToken) {
+            XCTAssertEqual(status, 422)
+            XCTAssertEqual(message, "Code is invalid.")
+            XCTAssertEqual(clientToken, "client_C")
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

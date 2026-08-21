@@ -18,6 +18,8 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// In-progress sign-in handle (transient — only valid between `startSignIn`
     /// and `completeSignIn`).
     private var pendingSignIn: ClerkSignInHandle?
+    /// Changes whenever the stored account identity is cleared or replaced.
+    private var authenticationGeneration = 0
 
     init(secrets: SecretStore, clerk: ClerkClient = ClerkClient()) {
         self.secrets = secrets
@@ -54,23 +56,37 @@ actor ManagedAccountService: ManagedSessionProviding {
         guard let pending = pendingSignIn else {
             throw ClerkError.malformedResponse("no sign-in in progress")
         }
-        let verified = try await clerk.verifyEmailCode(
-            signInId: pending.signInId,
-            code: code,
-            clientToken: pending.clientToken,
-            flow: pending.flow
-        )
+        let verified: ClerkVerifiedSession
+        do {
+            verified = try await clerk.verifyEmailCode(
+                signInId: pending.signInId,
+                code: code,
+                clientToken: pending.clientToken,
+                flow: pending.flow
+            )
+        } catch let error as ClerkError {
+            updatePendingSignIn(pending, clientToken: error.clientToken)
+            throw error
+        }
 
         // Prove the credentials can mint a token before storing the session.
+        guard isPendingSignIn(pending) else {
+            throw ClerkError.malformedResponse("no sign-in in progress")
+        }
         let minted = try await mintSessionToken(sessionID: verified.sessionId, clientToken: verified.clientToken)
+        guard isPendingSignIn(pending) else {
+            throw ClerkError.malformedResponse("no sign-in in progress")
+        }
         try persistClientToken(minted.clientToken)
         try persistSessionID(verified.sessionId)
+        authenticationGeneration &+= 1
         pendingSignIn = nil
     }
 
     /// Signs out: clears the stored device token and session id. Local mail data
     /// is untouched.
     func signOut() throws {
+        let wasSignedIn = isSignedIn
         pendingSignIn = nil
         var firstError: Error?
         do {
@@ -82,6 +98,9 @@ actor ManagedAccountService: ManagedSessionProviding {
             try secrets.remove(.managedSessionID)
         } catch {
             firstError = firstError ?? error
+        }
+        if wasSignedIn && !isSignedIn {
+            authenticationGeneration &+= 1
         }
         if let firstError {
             throw firstError
@@ -98,8 +117,12 @@ actor ManagedAccountService: ManagedSessionProviding {
         guard let clientToken = storedClientToken, let sessionID = storedSessionID else {
             throw LLMError.managedNotSignedIn
         }
+        let generation = authenticationGeneration
         do {
             let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
+            guard generation == authenticationGeneration, storedSessionID == sessionID else {
+                throw LLMError.managedNotSignedIn
+            }
             try persistClientToken(minted.clientToken)
             return minted.jwt
         } catch LLMError.managedNotSignedIn {
@@ -130,10 +153,29 @@ actor ManagedAccountService: ManagedSessionProviding {
         try secrets.set(sessionID, for: .managedSessionID)
     }
 
+    private func isPendingSignIn(_ handle: ClerkSignInHandle) -> Bool {
+        pendingSignIn?.signInId == handle.signInId && pendingSignIn?.flow == handle.flow
+    }
+
+    private func updatePendingSignIn(_ handle: ClerkSignInHandle, clientToken: String?) {
+        guard let clientToken, !clientToken.isEmpty, isPendingSignIn(handle) else { return }
+        pendingSignIn = ClerkSignInHandle(
+            signInId: handle.signInId,
+            emailAddressId: handle.emailAddressId,
+            clientToken: clientToken,
+            flow: handle.flow
+        )
+        do {
+            try persistClientToken(clientToken)
+        } catch {
+            logger.error("Failed to persist Clerk client token after sign-in attempt: \(error.localizedDescription)")
+        }
+    }
+
     private func mintSessionToken(sessionID: String, clientToken: String) async throws -> ClerkMintedToken {
         do {
             return try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
-        } catch ClerkError.http(let status, _) where status == 401 || status == 404 {
+        } catch ClerkError.http(let status, _, _) where status == 401 || status == 404 {
             throw LLMError.managedNotSignedIn
         } catch let error as ClerkError {
             // Network/transport (or other non-auth) Clerk failure minting a token —

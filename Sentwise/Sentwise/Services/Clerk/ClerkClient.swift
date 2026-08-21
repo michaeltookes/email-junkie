@@ -101,17 +101,26 @@ enum ClerkError: Error, Equatable, Sendable {
     /// Transport failure (offline, DNS, TLS).
     case transport(String)
     /// The API returned a non-2xx with an optional user-facing message.
-    case http(status: Int, message: String?)
+    case http(status: Int, message: String?, clientToken: String? = nil)
     /// A required field was missing from an otherwise-2xx response.
     case malformedResponse(String)
     /// The sign-in didn't reach `complete` (e.g. needs a second factor we don't
     /// support in 56a).
-    case notComplete(status: String?, missingFields: [String] = [])
+    case notComplete(status: String?, missingFields: [String] = [], clientToken: String? = nil)
     /// No `email_code` first factor is available for this identifier.
     case emailCodeUnsupported
     /// Clerk has no user for this email (`form_identifier_not_found`); the caller
     /// falls back to the sign-up flow.
     case accountNotFound
+
+    var clientToken: String? {
+        switch self {
+        case .http(_, _, let clientToken), .notComplete(_, _, let clientToken):
+            return clientToken
+        default:
+            return nil
+        }
+    }
 }
 
 /// A minimal native client for Clerk's Frontend API email-code sign-in.
@@ -151,7 +160,11 @@ struct ClerkClient: Sendable {
         )
         let createdResource: SignInResource
         do {
-            createdResource = try Self.decodeSignIn(created.body, status: created.statusCode)
+            createdResource = try Self.decodeSignIn(
+                created.body,
+                status: created.statusCode,
+                clientToken: created.clientToken
+            )
         } catch ClerkError.accountNotFound {
             return try await startSignUp(email: email, clientToken: created.clientToken ?? clientToken)
         }
@@ -172,7 +185,11 @@ struct ClerkClient: Sendable {
             form: ["strategy": "email_code", "email_address_id": emailAddressId],
             clientToken: token
         )
-        _ = try Self.decodeSignIn(prepared.body, status: prepared.statusCode)
+        _ = try Self.decodeSignIn(
+            prepared.body,
+            status: prepared.statusCode,
+            clientToken: prepared.clientToken
+        )
         token = prepared.clientToken ?? token
 
         return ClerkSignInHandle(signInId: signInId, emailAddressId: emailAddressId, clientToken: token)
@@ -187,7 +204,11 @@ struct ClerkClient: Sendable {
             form: ["email_address": email],
             clientToken: clientToken
         )
-        let createdResource = try Self.decodeSignIn(created.body, status: created.statusCode)
+        let createdResource = try Self.decodeSignIn(
+            created.body,
+            status: created.statusCode,
+            clientToken: created.clientToken
+        )
         var token = created.clientToken ?? clientToken
         guard let signUpId = createdResource.id else {
             throw ClerkError.malformedResponse("sign_up id missing")
@@ -198,7 +219,11 @@ struct ClerkClient: Sendable {
             form: ["strategy": "email_code"],
             clientToken: token
         )
-        _ = try Self.decodeSignIn(prepared.body, status: prepared.statusCode)
+        _ = try Self.decodeSignIn(
+            prepared.body,
+            status: prepared.statusCode,
+            clientToken: prepared.clientToken
+        )
         token = prepared.clientToken ?? token
 
         return ClerkSignInHandle(signInId: signUpId, emailAddressId: "", clientToken: token, flow: .signUp)
@@ -222,11 +247,19 @@ struct ClerkClient: Sendable {
             form: ["strategy": "email_code", "code": code],
             clientToken: clientToken
         )
-        let resource = try Self.decodeSignIn(attempted.body, status: attempted.statusCode)
         let token = attempted.clientToken ?? clientToken
+        let resource = try Self.decodeSignIn(
+            attempted.body,
+            status: attempted.statusCode,
+            clientToken: token
+        )
 
         guard resource.status == "complete", let sessionId = resource.createdSessionId else {
-            throw ClerkError.notComplete(status: resource.status, missingFields: resource.missingFields ?? [])
+            throw ClerkError.notComplete(
+                status: resource.status,
+                missingFields: resource.missingFields ?? [],
+                clientToken: token
+            )
         }
         return ClerkVerifiedSession(sessionId: sessionId, clientToken: token)
     }
@@ -240,7 +273,11 @@ struct ClerkClient: Sendable {
             clientToken: clientToken
         )
         guard response.isSuccess else {
-            throw ClerkError.http(status: response.statusCode, message: Self.firstErrorMessage(response.body))
+            throw ClerkError.http(
+                status: response.statusCode,
+                message: Self.firstErrorMessage(response.body),
+                clientToken: response.clientToken
+            )
         }
         let decoded = try? JSONDecoder().decode(TokenEnvelope.self, from: response.body)
         guard let jwt = decoded?.jwt, !jwt.isEmpty else {
@@ -269,15 +306,19 @@ struct ClerkClient: Sendable {
         return components?.url ?? base.appendingPathComponent(path)
     }
 
-    private static func decodeSignIn(_ data: Data, status: Int) throws -> SignInResource {
+    private static func decodeSignIn(_ data: Data, status: Int, clientToken: String? = nil) throws -> SignInResource {
         let envelope = try? JSONDecoder().decode(SignInEnvelope.self, from: data)
         guard (200..<300).contains(status) else {
             if envelope?.errors?.contains(where: { $0.code == "form_identifier_not_found" }) == true {
                 throw ClerkError.accountNotFound
             }
-            throw ClerkError.http(status: status, message: envelope?.errors?.first?.longMessage
-                ?? envelope?.errors?.first?.message
-                ?? firstErrorMessage(data))
+            throw ClerkError.http(
+                status: status,
+                message: envelope?.errors?.first?.longMessage
+                    ?? envelope?.errors?.first?.message
+                    ?? firstErrorMessage(data),
+                clientToken: clientToken
+            )
         }
         guard let resource = envelope?.response else {
             throw ClerkError.malformedResponse("missing response object")

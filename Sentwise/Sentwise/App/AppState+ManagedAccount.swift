@@ -88,12 +88,25 @@ extension AppState {
         do {
             try await managedAccount.signOut()
         } catch {
+            if await managedAccount.isSignedIn {
+                managedError = Self.managedMessage(for: error)
+                return
+            }
+            applyManagedSignedOutState(clearEmailInput: true)
             managedError = Self.managedMessage(for: error)
+            saveSettings()
             return
         }
+        applyManagedSignedOutState(clearEmailInput: true)
+        saveSettings()
+    }
+
+    private func applyManagedSignedOutState(clearEmailInput: Bool) {
         isManagedSignedIn = false
         managedAccountEmail = ""
-        managedEmailInput = ""
+        if clearEmailInput {
+            managedEmailInput = ""
+        }
         managedCodeInput = ""
         managedSignInStage = .idle
         if llmProviderKind == .managed {
@@ -101,7 +114,6 @@ extension AppState {
             refreshLLMConnectionStatus()
             resetDraftPreviewForLLMChange()
         }
-        saveSettings()
     }
 
     // MARK: - Error mapping
@@ -110,9 +122,9 @@ extension AppState {
         switch error {
         case ClerkError.transport, LLMError.transport:
             return "Couldn't reach Sentwise sign-in. Check your connection and try again."
-        case ClerkError.http(_, let message):
+        case ClerkError.http(_, let message, _):
             return message ?? "Sign-in failed. Please try again."
-        case ClerkError.notComplete(_, let missingFields) where !missingFields.isEmpty:
+        case ClerkError.notComplete(_, let missingFields, _) where !missingFields.isEmpty:
             return "Sign-up couldn't finish: the account service still requires "
                 + missingFields.joined(separator: ", ")
                 + ". This is a Sentwise configuration issue, not your code — please contact support."
@@ -196,15 +208,7 @@ extension AppState {
         guard case LLMError.managedNotSignedIn = error else { return }
         guard !(await managedAccount.isSignedIn) else { return }
 
-        isManagedSignedIn = false
-        managedAccountEmail = ""
-        managedCodeInput = ""
-        managedSignInStage = .idle
-        if llmProviderKind == .managed {
-            verifiedLLMModel = ""
-            refreshLLMConnectionStatus()
-            resetDraftPreviewForLLMChange()
-        }
+        applyManagedSignedOutState(clearEmailInput: false)
         saveSettings()
     }
 }

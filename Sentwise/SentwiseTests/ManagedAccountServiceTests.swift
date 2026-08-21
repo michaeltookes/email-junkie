@@ -5,13 +5,39 @@ import XCTest
 private final class QueueClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
     private var responses: [ClerkHTTPResponse]
     private(set) var callCount = 0
+    private(set) var requests: [(url: URL, headers: [String: String], form: [String: String])] = []
 
     init(_ responses: [ClerkHTTPResponse]) { self.responses = responses }
 
     func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
         callCount += 1
+        requests.append((url, headers, form))
         guard !responses.isEmpty else { return ClerkHTTPResponse(statusCode: 500, headers: [:], body: Data()) }
         return responses.removeFirst()
+    }
+}
+
+private final class SuspendedClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ClerkHTTPResponse, Never>?
+    var onRequest: (() -> Void)?
+
+    func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            let onRequest = self.onRequest
+            lock.unlock()
+            onRequest?()
+        }
+    }
+
+    func resume(with response: ClerkHTTPResponse) {
+        lock.lock()
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: response)
     }
 }
 
@@ -62,7 +88,7 @@ private final class ManagedAccountFailingSecretStore: SecretStore {
 
 final class ManagedAccountServiceTests: XCTestCase {
 
-    private func service(_ transport: QueueClerkTransport, secrets: SecretStore) -> ManagedAccountService {
+    private func service(_ transport: ClerkHTTPTransport, secrets: SecretStore) -> ManagedAccountService {
         let clerk = ClerkClient(
             frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
             transport: transport
@@ -150,6 +176,41 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
     }
 
+    func testCompleteSignInRetriesWithRotatedTokenAfterFailedOTPAttempt() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport([
+            response(
+                #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                clientToken: "client_A"
+            ),
+            response(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B"),
+            response(#"{"errors":[{"message":"Code is invalid."}]}"#, status: 422, clientToken: "client_C"),
+            response(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_D"),
+            response(#"{"jwt":"retry.jwt"}"#, clientToken: "client_E")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        try await account.startSignIn(email: "marcus@example.com")
+        do {
+            try await account.completeSignIn(code: "000000")
+            XCTFail("Expected failed OTP attempt")
+        } catch ClerkError.http(let status, _, let clientToken) {
+            XCTAssertEqual(status, 422)
+            XCTAssertEqual(clientToken, "client_C")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_C")
+        try await account.completeSignIn(code: "123456")
+
+        XCTAssertTrue(await account.isSignedIn)
+        XCTAssertEqual(transport.requests[2].headers["authorization"], "Bearer client_B")
+        XCTAssertEqual(transport.requests[3].headers["authorization"], "Bearer client_C")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_E")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
+    }
+
     func testCurrentSessionTokenInvalidatesStoredCredentialsOnAuthFailure() async throws {
         let secrets = InMemorySecretStore(seed: [
             .managedClientToken: "client_X",
@@ -196,6 +257,35 @@ final class ManagedAccountServiceTests: XCTestCase {
 
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_X")
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+    }
+
+    func testCurrentSessionTokenDoesNotRestoreClientTokenAfterSignOutDuringMint() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let transport = SuspendedClerkTransport()
+        let requestStarted = expectation(description: "mint request started")
+        transport.onRequest = { requestStarted.fulfill() }
+        let account = service(transport, secrets: secrets)
+
+        let tokenTask = Task { try await account.currentSessionToken() }
+        await fulfillment(of: [requestStarted], timeout: 1.0)
+        try await account.signOut()
+        XCTAssertFalse(await account.isSignedIn)
+
+        transport.resume(with: response(#"{"jwt":"fresh.jwt"}"#, clientToken: "client_Y"))
+        do {
+            _ = try await tokenTask.value
+            XCTFail("Expected managedNotSignedIn")
+        } catch LLMError.managedNotSignedIn {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertNil(try secrets.value(for: .managedClientToken))
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 
     func testSignOutClearsStoredCredentials() async throws {

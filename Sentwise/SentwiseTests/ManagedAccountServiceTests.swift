@@ -169,6 +169,31 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_B")
     }
 
+    func testStartSignInPersistsTokenBeforeFallbackSignUpTransportFailure() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport(results: [
+            .success(clerkReply(
+                #"{"errors":[{"code":"form_identifier_not_found","message":"not found"}]}"#,
+                status: 422,
+                clientToken: "client_A"
+            )),
+            .failure(URLError(.timedOut))
+        ])
+        let account = service(transport, secrets: secrets)
+
+        do {
+            try await account.startSignIn(email: "marcus@example.com")
+            XCTFail("Expected sign-up transport failure")
+        } catch ClerkError.transport(_, let clientToken) {
+            XCTAssertEqual(clientToken, "client_A")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(transport.requests[1].headers["authorization"], "Bearer client_A")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_A")
+    }
+
     func testStartSignInPersistsRotatedTokenFromPrepareFailure() async throws {
         let secrets = InMemorySecretStore()
         let transport = QueueClerkTransport([

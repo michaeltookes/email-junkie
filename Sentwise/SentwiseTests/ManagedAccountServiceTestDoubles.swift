@@ -5,17 +5,23 @@ import XCTest
 
 /// A fake `ClerkHTTPTransport` for driving `ManagedAccountService` end to end.
 final class QueueClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
-    private var responses: [ClerkHTTPResponse]
+    private var results: [Result<ClerkHTTPResponse, Error>]
     private(set) var callCount = 0
     private(set) var requests: [(url: URL, headers: [String: String], form: [String: String])] = []
 
-    init(_ responses: [ClerkHTTPResponse]) { self.responses = responses }
+    init(_ responses: [ClerkHTTPResponse]) {
+        self.results = responses.map(Result.success)
+    }
+
+    init(results: [Result<ClerkHTTPResponse, Error>]) {
+        self.results = results
+    }
 
     func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
         callCount += 1
         requests.append((url, headers, form))
-        guard !responses.isEmpty else { return ClerkHTTPResponse(statusCode: 500, headers: [:], body: Data()) }
-        return responses.removeFirst()
+        guard !results.isEmpty else { return ClerkHTTPResponse(statusCode: 500, headers: [:], body: Data()) }
+        return try results.removeFirst().get()
     }
 }
 

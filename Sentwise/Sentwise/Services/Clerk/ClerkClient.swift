@@ -99,7 +99,7 @@ struct ClerkMintedToken: Sendable, Equatable {
 
 enum ClerkError: Error, Equatable, Sendable {
     /// Transport failure (offline, DNS, TLS).
-    case transport(String)
+    case transport(String, clientToken: String? = nil)
     /// The API returned a non-2xx with an optional user-facing message.
     case http(status: Int, message: String?, clientToken: String? = nil)
     /// A required field was missing from an otherwise-2xx response.
@@ -115,12 +115,29 @@ enum ClerkError: Error, Equatable, Sendable {
 
     var clientToken: String? {
         switch self {
-        case .http(_, _, let clientToken),
+        case .transport(_, let clientToken),
+             .http(_, _, let clientToken),
              .malformedResponse(_, let clientToken),
              .notComplete(_, _, let clientToken):
             return clientToken
         default:
             return nil
+        }
+    }
+
+    func preservingClientToken(_ token: String?) -> ClerkError {
+        guard let token, !token.isEmpty, clientToken == nil else { return self }
+        switch self {
+        case .transport(let detail, _):
+            return .transport(detail, clientToken: token)
+        case .http(let status, let message, _):
+            return .http(status: status, message: message, clientToken: token)
+        case .malformedResponse(let detail, _):
+            return .malformedResponse(detail, clientToken: token)
+        case .notComplete(let status, let missingFields, _):
+            return .notComplete(status: status, missingFields: missingFields, clientToken: token)
+        case .emailCodeUnsupported, .accountNotFound:
+            return self
         }
     }
 }
@@ -177,7 +194,12 @@ struct ClerkClient: Sendable {
                 clientToken: created.clientToken
             )
         } catch ClerkError.accountNotFound {
-            return try await createSignUp(email: email, clientToken: created.clientToken ?? clientToken)
+            let token = created.clientToken ?? clientToken
+            do {
+                return try await createSignUp(email: email, clientToken: token)
+            } catch let error as ClerkError {
+                throw error.preservingClientToken(token)
+            }
         }
         let token = created.clientToken ?? clientToken
 

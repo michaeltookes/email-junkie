@@ -348,7 +348,7 @@ actor ManagedAccountService: ManagedSessionProviding {
             )
             // Network/transport (or other non-auth) Clerk failure minting a token —
             // surface as a transport error so the user sees the "couldn't reach" message.
-            throw LLMError.transport(String(describing: error))
+            throw LLMError.transport("managed session token request failed")
         }
     }
 

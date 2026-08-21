@@ -264,6 +264,48 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
     }
 
+    func testCompleteSignInRetriesWithRotatedTokenAfterAuthMintFailure() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport([
+            clerkReply(
+                #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                clientToken: "client_A"
+            ),
+            clerkReply(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B"),
+            clerkReply(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_C"),
+            clerkReply(#"{"errors":[{"message":"expired"}]}"#, status: 401, clientToken: "client_D"),
+            clerkReply(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_E"),
+            clerkReply(#"{"jwt":"retry.jwt"}"#, clientToken: "client_F")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        try await account.startSignIn(email: "marcus@example.com")
+        do {
+            try await account.completeSignIn(code: "123456")
+            XCTFail("Expected auth mint failure")
+        } catch LLMError.managedNotSignedIn {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let signedInAfterFailure = await account.isSignedIn
+        XCTAssertFalse(signedInAfterFailure)
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_D")
+
+        try await account.completeSignIn(code: "123456")
+
+        XCTAssertEqual(transport.requests[2].headers["authorization"], "Bearer client_B")
+        XCTAssertEqual(transport.requests[3].headers["authorization"], "Bearer client_C")
+        XCTAssertEqual(transport.requests[4].headers["authorization"], "Bearer client_D")
+        XCTAssertEqual(transport.requests[5].headers["authorization"], "Bearer client_E")
+        let signedInAfterRetry = await account.isSignedIn
+        XCTAssertTrue(signedInAfterRetry)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_F")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
+    }
+
     func testCompleteSignInRetriesWithMintedTokenAfterSuccessfulMintPersistenceFailure() async throws {
         let secrets = ManagedAccountFailingSecretStore(seed: [:])
         secrets.failOnSetKeys = [.managedClientToken]

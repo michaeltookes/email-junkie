@@ -395,7 +395,15 @@ actor ManagedAccountService: ManagedSessionProviding {
     ) async throws -> ClerkMintedToken {
         do {
             return try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
-        } catch ClerkError.http(let status, _, _) where status == 401 || status == 404 {
+        } catch ClerkError.http(let status, _, let rotatedClientToken) where status == 401 || status == 404 {
+            if case .pending = preserveFailureClientToken {
+                try preserveRotatedClientTokenFromMintFailure(
+                    rotatedClientToken,
+                    sessionID: sessionID,
+                    clientToken: clientToken,
+                    handling: preserveFailureClientToken
+                )
+            }
             throw LLMError.managedNotSignedIn
         } catch let error as ClerkError {
             try preserveRotatedClientTokenFromMintFailure(

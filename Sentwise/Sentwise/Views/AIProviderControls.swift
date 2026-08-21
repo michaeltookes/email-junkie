@@ -152,6 +152,9 @@ struct BYOProviderControls: View {
         VStack(alignment: .leading, spacing: 10) {
             OpenRouterProvisionCard()
 
+            Divider()
+                .padding(.vertical, 8)
+
             HStack {
                 Picker("Provider", selection: $stagedProvider) {
                     ForEach(byoProviders) { kind in

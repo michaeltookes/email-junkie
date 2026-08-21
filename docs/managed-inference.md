@@ -107,3 +107,7 @@ response, zero network) whenever `ProwlHuntRuntime.current.isEnabled`, and the
 sign-in controls are disabled in hunt mode, so hunts stay offline-safe. The new
 sign-in controls carry `accessibilityIdentifier`s documented in
 `.prowl/README.md` and are added to `forbiddenSelectors` in `.prowl/config.yml`.
+
+## Live verification
+
+- **2026-08-20/21:** owner signed up via the native email-code flow against the real Clerk dev instance (Clerk's *Password* requirement had to be turned off in the dashboard first — `required_fields` included `password`, which the passwordless flow can never satisfy), switched the active provider to Sentwise AI, and generated a draft from Review Drafts. `wrangler tail` showed `POST /v1/draft → 200`, outcome `ok`, ~3.2 s wall time, no exceptions, no logs. Clerk dashboard prerequisite: **Email address (verification code) on, Password off, Organizations off.**

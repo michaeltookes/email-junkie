@@ -51,6 +51,11 @@ struct SecretKey: RawRepresentable, Hashable {
     /// Kept apart from the rejected stored session so reauthentication retries can
     /// echo Clerk's latest rotation without reviving the stale credential pair.
     static let managedReauthenticationClientToken = SecretKey(rawValue: "managed.reauthenticationClientToken")
+
+    /// The transient PKCE code verifier for an in-progress OpenRouter one-click
+    /// key provisioning (item 59). Written when the browser hand-off starts and
+    /// read+removed when the `sentwise://openrouter-callback` code comes back.
+    static let openRouterPKCEVerifier = SecretKey(rawValue: "openRouter.pkceVerifier")
 }
 
 /// Secure storage for sensitive strings — OAuth tokens, API keys, client secrets.

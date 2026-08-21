@@ -399,7 +399,7 @@ final class AppState: ObservableObject {
         self.llmBaseURL = settings.llmBaseURL
         self.verifiedLLMModel = managedLaunch.verifiedLLMModel
         self.llmAPIKey = ((try? secrets.value(for: managedLaunch.provider.apiKeySecret)) ?? nil) ?? ""
-        self.managedAccountEmail = settings.managedAccountEmail
+        self.managedAccountEmail = managedLaunch.hasCredentials ? settings.managedAccountEmail : ""
         self.isManagedSignedIn = managedLaunch.hasCredentials
 
         self.voiceProfile = persistence.loadVoiceProfile()

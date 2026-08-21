@@ -175,7 +175,9 @@ extension AppState {
 
     static func managedLaunchState(settings: Settings, secrets: SecretStore) -> ManagedLaunchState {
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
-        let hasCredentials = secrets.hasValue(for: .managedClientToken)
+        let hasInvalidatedCredentials = secrets.hasValue(for: .managedCredentialsInvalidated)
+        let hasCredentials = !hasInvalidatedCredentials
+            && secrets.hasValue(for: .managedClientToken)
             && secrets.hasValue(for: .managedSessionID)
         let restore = provider == .managed && hasCredentials
         return ManagedLaunchState(

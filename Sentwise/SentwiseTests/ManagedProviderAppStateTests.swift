@@ -235,6 +235,38 @@ final class ManagedProviderAppStateTests: XCTestCase {
         XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 
+    func testLaunchDoesNotRestoreInvalidatedManagedCredentialsAfterCleanupFailure() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        secrets.failOnRemoveKeys = [.managedClientToken, .managedSessionID]
+        let invalidatingAccount = ManagedAccountService(secrets: secrets)
+
+        await invalidatingAccount.invalidateSession()
+
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+
+        XCTAssertEqual(try secrets.value(for: .managedCredentialsInvalidated), "1")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_X")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.managedAccountEmail, "")
+    }
+
     func testManagedProxyAuthFailureFromStaleDraftStillClearsPublishedAccountState() async throws {
         let secrets = InMemorySecretStore(seed: [
             .mailAppPassword(email: "me@gmail.com"): "app-pw",

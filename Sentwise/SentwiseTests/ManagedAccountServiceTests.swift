@@ -56,6 +56,34 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_E")
     }
 
+    func testFullSignInClearsPersistentInvalidationMarker() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .managedCredentialsInvalidated: "1",
+            .managedClientToken: "stale_client",
+            .managedSessionID: "stale_session"
+        ])
+        let transport = QueueClerkTransport([
+            clerkReply(
+                #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                clientToken: "client_A"
+            ),
+            clerkReply(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B"),
+            clerkReply(#"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_C"),
+            clerkReply(#"{"jwt":"first.jwt"}"#, clientToken: "client_D")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        try await account.startSignIn(email: "marcus@example.com")
+        try await account.completeSignIn(code: "123456")
+
+        let signedIn = await account.isSignedIn
+        XCTAssertTrue(signedIn)
+        XCTAssertEqual(transport.requests.first?.headers["authorization"], "Bearer ")
+        XCTAssertNil(try secrets.value(for: .managedCredentialsInvalidated))
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_D")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
+    }
+
     func testStartSignInPersistsCreatedTokenWhenPrepareFails() async throws {
         let secrets = InMemorySecretStore()
         let startedResponse = #"{"response":{"id":"sia_1","supported_first_factors":["#

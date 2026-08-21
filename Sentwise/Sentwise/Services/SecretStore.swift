@@ -43,6 +43,10 @@ struct SecretKey: RawRepresentable, Hashable {
     /// The Clerk session id for the managed-inference account (56a). Combined with
     /// the client token, it mints the short-lived session JWTs the proxy verifies.
     static let managedSessionID = SecretKey(rawValue: "managed.sessionID")
+    /// Marker that the managed credentials were rejected by Clerk or the proxy.
+    /// Kept separate from the credentials so a failed Keychain cleanup cannot make
+    /// an invalid pair look signed in again on the next launch.
+    static let managedCredentialsInvalidated = SecretKey(rawValue: "managed.credentialsInvalidated")
 }
 
 /// Secure storage for sensitive strings — OAuth tokens, API keys, client secrets.

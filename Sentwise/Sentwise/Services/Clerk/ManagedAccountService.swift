@@ -14,6 +14,7 @@ private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "Managed
 actor ManagedAccountService: ManagedSessionProviding {
     private let secrets: SecretStore
     private let clerk: ClerkClient
+    private static let invalidatedCredentialsMarkerValue = "1"
 
     /// In-progress sign-in handle (transient — only valid between `startSignIn`
     /// and `completeSignIn`).
@@ -33,6 +34,7 @@ actor ManagedAccountService: ManagedSessionProviding {
     init(secrets: SecretStore, clerk: ClerkClient = ClerkClient()) {
         self.secrets = secrets
         self.clerk = clerk
+        self.areStoredCredentialsInvalidated = secrets.hasValue(for: .managedCredentialsInvalidated)
     }
 
     // MARK: - Sign-in
@@ -106,6 +108,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
         try persistClientToken(minted.clientToken)
         try persistSessionID(verified.sessionId)
+        try clearCredentialInvalidationMarker()
         areStoredCredentialsInvalidated = false
         authenticationGeneration &+= 1
         pendingSignIn = nil
@@ -132,6 +135,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
         if !hasStoredManagedCredential {
             areStoredCredentialsInvalidated = false
+            clearCredentialInvalidationMarkerBestEffort(context: "after sign-out")
         }
         if let firstError {
             throw firstError
@@ -154,6 +158,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         let wasSignedIn = isSignedIn
         pendingSignIn = nil
         areStoredCredentialsInvalidated = true
+        persistCredentialInvalidationMarker()
         if wasSignedIn {
             authenticationGeneration &+= 1
         }
@@ -166,6 +171,9 @@ actor ManagedAccountService: ManagedSessionProviding {
             try secrets.remove(.managedSessionID)
         } catch {
             logger.error("Failed to remove invalid managed session id: \(error.localizedDescription)")
+        }
+        if !hasStoredManagedCredential {
+            clearCredentialInvalidationMarkerBestEffort(context: "after invalidation cleanup")
         }
     }
 
@@ -240,6 +248,26 @@ actor ManagedAccountService: ManagedSessionProviding {
 
     private func persistSessionID(_ sessionID: String) throws {
         try secrets.set(sessionID, for: .managedSessionID)
+    }
+
+    private func persistCredentialInvalidationMarker() {
+        do {
+            try secrets.set(Self.invalidatedCredentialsMarkerValue, for: .managedCredentialsInvalidated)
+        } catch {
+            logger.error("Failed to persist managed credential invalidation marker: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearCredentialInvalidationMarker() throws {
+        try secrets.remove(.managedCredentialsInvalidated)
+    }
+
+    private func clearCredentialInvalidationMarkerBestEffort(context: String) {
+        do {
+            try clearCredentialInvalidationMarker()
+        } catch {
+            logger.error("Failed to clear managed credential invalidation marker \(context): \(error.localizedDescription)")
+        }
     }
 
     private func isPendingSignIn(_ handle: ClerkSignInHandle) -> Bool {

@@ -51,8 +51,8 @@ extension AppState {
             managedError = "Sign-in is disabled during Prowl hunts."
             return
         }
-        isManagedBusy = true
-        defer { isManagedBusy = false }
+        managedBusyAction = .google
+        defer { managedBusyAction = nil }
         do {
             let url = try await managedAccount.startGoogleSignIn(redirectURL: Self.managedOAuthRedirectURL)
             openURL(url)
@@ -64,8 +64,8 @@ extension AppState {
     /// Completes Google sign-in from the `sentwise://oauth-callback` redirect.
     func handleManagedOAuthCallback(nonce: String) async {
         managedError = nil
-        isManagedBusy = true
-        defer { isManagedBusy = false }
+        managedBusyAction = .oauthCallback
+        defer { managedBusyAction = nil }
         let identifier: String?
         do {
             identifier = try await managedAccount.completeGoogleSignIn(rotatingTokenNonce: nonce)

@@ -96,7 +96,7 @@ final class AppState: ObservableObject {
     /// Stage of the email-code sign-in flow.
     @Published var managedSignInStage: ManagedSignInStage = .idle
     /// Whether a managed sign-in / sign-out request is in flight.
-    @Published var isManagedBusy: Bool = false
+    @Published var managedBusyAction: ManagedBusyAction?
     /// Last managed-account error, if any.
     @Published var managedError: String?
     /// Email and OTP code typed into the managed sign-in form.

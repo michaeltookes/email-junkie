@@ -17,6 +17,17 @@ enum ManagedSignInStage: Equatable {
 /// limits, mirroring `AppState+LLM`.
 extension AppState {
 
+    // MARK: - Busy state
+
+    /// Which managed-account action is currently in flight, so only the pressed
+    /// button shows a spinner while all of them disable. `nil` = idle.
+    enum ManagedBusyAction: Equatable {
+        case emailCode, verifyCode, google, oauthCallback, signOut
+    }
+
+    /// True while any managed action is running (drives button disabling).
+    var isManagedBusy: Bool { managedBusyAction != nil }
+
     // MARK: - Sign-in flow
 
     /// Sends a one-time code to the email in `managedEmailInput` and advances the
@@ -33,8 +44,8 @@ extension AppState {
             return
         }
 
-        isManagedBusy = true
-        defer { isManagedBusy = false }
+        managedBusyAction = .emailCode
+        defer { managedBusyAction = nil }
         pendingManagedSignInEmail = nil
         do {
             try await managedAccount.startSignIn(email: email)
@@ -56,8 +67,8 @@ extension AppState {
             return
         }
 
-        isManagedBusy = true
-        defer { isManagedBusy = false }
+        managedBusyAction = .verifyCode
+        defer { managedBusyAction = nil }
         do {
             try await managedAccount.completeSignIn(code: code)
         } catch {
@@ -82,8 +93,8 @@ extension AppState {
     /// Local mail data and voice profile are untouched.
     func signOutManaged() async {
         managedError = nil
-        isManagedBusy = true
-        defer { isManagedBusy = false }
+        managedBusyAction = .signOut
+        defer { managedBusyAction = nil }
         do {
             try await managedAccount.signOut()
         } catch {

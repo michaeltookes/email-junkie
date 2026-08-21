@@ -69,7 +69,7 @@ struct ManagedSignInControls: View {
                         await appState.startManagedGoogleSignIn { openURL($0) }
                     }
                 } label: {
-                    signInLabel(busy: appState.isManagedBusy, title: "Continue with Google")
+                    signInLabel(busy: appState.managedBusyAction == .google, title: "Continue with Google")
                 }
                 .disabled(appState.isManagedBusy || isHuntMode)
                 .accessibilityIdentifier("managedGoogleSignInButton")
@@ -84,7 +84,7 @@ struct ManagedSignInControls: View {
                 Button {
                     Task { await appState.startManagedSignIn() }
                 } label: {
-                    signInLabel(busy: appState.isManagedBusy, title: "Send sign-in code")
+                    signInLabel(busy: appState.managedBusyAction == .emailCode, title: "Send sign-in code")
                 }
                 .disabled(appState.isManagedBusy || isHuntMode)
                 .accessibilityIdentifier("managedSendCodeButton")
@@ -98,7 +98,7 @@ struct ManagedSignInControls: View {
                     Button {
                         Task { await appState.verifyManagedCode() }
                     } label: {
-                        signInLabel(busy: appState.isManagedBusy, title: "Verify & connect")
+                        signInLabel(busy: appState.managedBusyAction == .verifyCode, title: "Verify & connect")
                     }
                     .disabled(appState.isManagedBusy || isHuntMode)
                     .accessibilityIdentifier("managedVerifyButton")

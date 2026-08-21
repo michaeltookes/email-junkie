@@ -68,10 +68,11 @@ extension AppState {
             recordDraftActivity(.draftCreated, for: draft)
             return draft
         } catch {
-            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
-                return nil
-            }
+            let wasCurrent = isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration)
+            let signedOut = await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            guard wasCurrent,
+                  signedOut || isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration)
+            else { return nil }
             draftError = Self.draftMessage(for: error)
             return nil
         }

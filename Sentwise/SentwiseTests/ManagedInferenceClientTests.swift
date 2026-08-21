@@ -99,7 +99,8 @@ final class ManagedInferenceClientTests: XCTestCase {
             _ = try await client.complete(sampleRequest())
             XCTFail("Expected not-signed-in error")
         } catch LLMError.managedNotSignedIn {
-            XCTAssertTrue(await sessionProvider.didInvalidate)
+            let awaited1 = await sessionProvider.didInvalidate
+            XCTAssertTrue(awaited1)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

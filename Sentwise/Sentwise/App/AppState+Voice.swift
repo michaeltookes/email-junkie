@@ -53,8 +53,9 @@ extension AppState {
             persistence.saveVoiceProfile(profile)
             voiceProfile = profile
         } catch {
-            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
-            guard isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
+            let wasCurrent = isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration)
+            let signedOut = await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            guard wasCurrent, signedOut || isCurrentVoiceContext(credentials: credentials, llmConfiguration: llmConfiguration) else {
                 voiceError = Self.staleVoiceLLMConfigurationMessage
                 return
             }

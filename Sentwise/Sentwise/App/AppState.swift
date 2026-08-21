@@ -393,21 +393,14 @@ final class AppState: ObservableObject {
         self.mailAppPassword = activePassword
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
-        let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
-        let hasManagedCredentials = secrets.hasValue(for: .managedClientToken)
-            && secrets.hasValue(for: .managedSessionID)
-        let shouldRestoreManagedVerification = provider == .managed && hasManagedCredentials
-        let initialLLMModel = shouldRestoreManagedVerification ? "" : settings.llmModel
-        let initialVerifiedLLMModel = shouldRestoreManagedVerification
-            ? provider.defaultModel
-            : settings.llmVerifiedModel
-        self.llmProviderKind = provider
-        self.llmModel = initialLLMModel
+        let managedLaunch = Self.managedLaunchState(settings: settings, secrets: secrets)
+        self.llmProviderKind = managedLaunch.provider
+        self.llmModel = managedLaunch.llmModel
         self.llmBaseURL = settings.llmBaseURL
-        self.verifiedLLMModel = initialVerifiedLLMModel
-        self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+        self.verifiedLLMModel = managedLaunch.verifiedLLMModel
+        self.llmAPIKey = ((try? secrets.value(for: managedLaunch.provider.apiKeySecret)) ?? nil) ?? ""
         self.managedAccountEmail = settings.managedAccountEmail
-        self.isManagedSignedIn = hasManagedCredentials
+        self.isManagedSignedIn = managedLaunch.hasCredentials
 
         self.voiceProfile = persistence.loadVoiceProfile()
 
@@ -418,14 +411,7 @@ final class AppState: ObservableObject {
 
         setupAutoSave()
 
-        if shouldRestoreManagedVerification
-            && (settings.llmModel != initialLLMModel || settings.llmVerifiedModel != initialVerifiedLLMModel) {
-            do {
-                try persistSettingsSync(buildSettings())
-            } catch {
-                logger.error("Failed to persist restored managed verification: \(error.localizedDescription)")
-            }
-        }
+        persistRestoredManagedVerificationIfNeeded(managedLaunch, loadedFrom: settings)
 
         self.inboxWatcher = InboxWatcher(
             interval: { [weak self] in TimeInterval(self?.pollIntervalSeconds ?? 300) },

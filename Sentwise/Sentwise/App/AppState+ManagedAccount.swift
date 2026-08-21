@@ -160,6 +160,46 @@ extension AppState {
         }
     }
 
+    // MARK: - Launch state (item 56a)
+
+    /// What the LLM fields should look like at launch for the managed provider.
+    /// When the account credentials are present, managed is treated as verified
+    /// with its default model regardless of any stale custom model in settings.
+    struct ManagedLaunchState: Equatable {
+        let provider: LLMProviderKind
+        let hasCredentials: Bool
+        let restoreVerification: Bool
+        let llmModel: String
+        let verifiedLLMModel: String
+    }
+
+    static func managedLaunchState(settings: Settings, secrets: SecretStore) -> ManagedLaunchState {
+        let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
+        let hasCredentials = secrets.hasValue(for: .managedClientToken)
+            && secrets.hasValue(for: .managedSessionID)
+        let restore = provider == .managed && hasCredentials
+        return ManagedLaunchState(
+            provider: provider,
+            hasCredentials: hasCredentials,
+            restoreVerification: restore,
+            llmModel: restore ? "" : settings.llmModel,
+            verifiedLLMModel: restore ? provider.defaultModel : settings.llmVerifiedModel
+        )
+    }
+
+    /// Writes the restored managed verification back to disk when launch changed
+    /// what was loaded, so the next launch doesn't redo the restoration.
+    func persistRestoredManagedVerificationIfNeeded(_ launch: ManagedLaunchState, loadedFrom settings: Settings) {
+        guard launch.restoreVerification,
+              settings.llmModel != launch.llmModel || settings.llmVerifiedModel != launch.verifiedLLMModel
+        else { return }
+        do {
+            try persistSettingsSync(buildSettings())
+        } catch {
+            logger.error("Failed to persist restored managed verification: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Migration (item 56a)
 
     /// Runs all launch-time settings migrations in order: the saved-accounts move
@@ -218,12 +258,17 @@ extension AppState {
 
     /// If the managed account actor invalidated stored credentials while minting a
     /// session token, mirror that state back into the published AppState flags.
-    func reconcileManagedAccountState(after error: Error, provider: LLMProviderKind) async {
-        guard provider == .managed else { return }
-        guard case LLMError.managedNotSignedIn = error else { return }
-        guard !(await managedAccount.isSignedIn) else { return }
+    /// Returns `true` when this call signed the account out, so callers whose
+    /// staleness guards would otherwise swallow the error can still surface it —
+    /// the configuration changed *because of* this failure, not under the user.
+    @discardableResult
+    func reconcileManagedAccountState(after error: Error, provider: LLMProviderKind) async -> Bool {
+        guard provider == .managed else { return false }
+        guard case LLMError.managedNotSignedIn = error else { return false }
+        guard !(await managedAccount.isSignedIn) else { return false }
 
         applyManagedSignedOutState(clearEmailInput: false)
         saveSettings()
+        return true
     }
 }

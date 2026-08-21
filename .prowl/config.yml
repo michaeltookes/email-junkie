@@ -142,3 +142,17 @@ guardrails:
     - "Continue"
     - "Skip for now"
     - "Finish"
+    # Managed-inference sign-in controls (item 56a). Sign-in is disabled in hunt
+    # mode, but forbid activating these so a hunt can never drive account auth.
+    - "Sign in"
+    - "Sign out"
+    - "Sentwise AI"
+    - "Verify"
+    - "Send sign-in code"
+    - "Use Sentwise AI"
+    - "managedEmailField"
+    - "managedCodeField"
+    - "managedSendCodeButton"
+    - "managedVerifyButton"
+    - "managedSignOutButton"
+    - "useManagedInference"

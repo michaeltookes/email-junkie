@@ -18,14 +18,6 @@ final class AppStateLLMTests: XCTestCase {
         )
     }
 
-    func testDefaultLLMStateIsAnthropicDisconnected() {
-        let appState = makeAppState()
-
-        XCTAssertEqual(appState.llmProviderKind, .anthropic)
-        XCTAssertFalse(appState.isLLMConnected)
-        XCTAssertEqual(appState.resolvedLLMModel, "claude-sonnet-4-6")
-    }
-
     func testResolvedModelUsesCustomModelWhenSet() {
         let appState = makeAppState()
         appState.llmModel = "  claude-haiku-4-5-20251001  "
@@ -37,6 +29,7 @@ final class AppStateLLMTests: XCTestCase {
         let secrets = InMemorySecretStore()
         let tester = FakeLLMProvider(result: .success(()))
         let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "  sk-live  "
 
         await appState.testLLMConnection()
@@ -54,6 +47,7 @@ final class AppStateLLMTests: XCTestCase {
         let secrets = InMemorySecretStore()
         let tester = FakeLLMProvider(result: .failure(.http(status: 401, message: "bad key")))
         let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "sk-wrong"
 
         await appState.testLLMConnection()
@@ -67,6 +61,7 @@ final class AppStateLLMTests: XCTestCase {
         let secrets = InMemorySecretStore()
         let tester = SuspendedLLMConnectionTester()
         let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "sk-live"
         appState.llmModel = "claude-sonnet-4-6"
 
@@ -89,6 +84,7 @@ final class AppStateLLMTests: XCTestCase {
         let secrets = InMemorySecretStore()
         let tester = SuspendedLLMConnectionTester()
         let appState = makeAppState(secrets: secrets, llm: tester)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "sk-live"
 
         let connectionTask = Task { await appState.testLLMConnection() }
@@ -109,6 +105,7 @@ final class AppStateLLMTests: XCTestCase {
     func testTestLLMConnectionRequiresKey() async {
         let tester = FakeLLMProvider(result: .success(()))
         let appState = makeAppState(llm: tester)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "   "
 
         await appState.testLLMConnection()
@@ -121,6 +118,7 @@ final class AppStateLLMTests: XCTestCase {
     func testDisconnectLLMClearsStoredKey() async {
         let secrets = InMemorySecretStore()
         let appState = makeAppState(secrets: secrets)
+        appState.selectLLMProvider(.anthropic)
         appState.llmAPIKey = "sk-live"
         await appState.testLLMConnection()
 
@@ -238,6 +236,7 @@ final class AppStateLLMTests: XCTestCase {
     func testCurrentBaseURLIsNilForProvidersWithoutEndpointOverride() async {
         let tester = FakeLLMProvider(result: .success(()))
         let appState = makeAppState(llm: tester)
+        appState.selectLLMProvider(.anthropic)
         // Anthropic does not support a custom endpoint; a stray field value is ignored.
         appState.llmBaseURL = "https://example.com/v1"
         appState.llmAPIKey = "sk-live"

@@ -48,6 +48,13 @@ extension AppState {
     /// selected provider/model pair. Key-optional providers (local runtimes) need
     /// no stored key — a matching verified model alone counts as connected.
     func refreshLLMConnectionStatus(llmModel model: String? = nil) {
+        // Managed inference is "connected" when the account is signed in and the
+        // (default) model is verified — there is no API key to check.
+        if llmProviderKind == .managed {
+            isLLMConnected = isManagedSignedIn
+                && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
+            return
+        }
         let hasCredential = !llmProviderKind.requiresAPIKey
             || secrets.hasValue(for: llmProviderKind.apiKeySecret)
         isLLMConnected = hasCredential
@@ -65,7 +72,9 @@ extension AppState {
         llmModel = ""
         llmBaseURL = ""
         llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
-        verifiedLLMModel = ""
+        // Managed carries no API key; if already signed in, mark it verified so
+        // the connected state is reflected immediately on switch.
+        verifiedLLMModel = (provider == .managed && isManagedSignedIn) ? provider.defaultModel : ""
         refreshLLMConnectionStatus()
         resetDraftPreviewForLLMChange()
         llmError = nil
@@ -99,6 +108,7 @@ extension AppState {
                 baseURL: testedBaseURL
             )
         } catch {
+            await reconcileManagedAccountState(after: error, provider: testedProvider)
             llmError = Self.llmMessage(for: error)
             return
         }
@@ -137,15 +147,24 @@ extension AppState {
         startTranscriptFolderWatchingIfEnabled()
     }
 
-    /// Disconnects the provider by clearing its stored API key.
-    func disconnectLLM() {
+    /// Disconnects a BYO provider by clearing its stored API key. Defaults to the
+    /// active provider; the Settings/onboarding BYO card passes the provider it is
+    /// displaying so Disconnect works even while managed inference is active.
+    func disconnectLLM(provider: LLMProviderKind? = nil) {
         llmError = nil
+        let target = provider ?? llmProviderKind
+        // Managed inference has no stored API key; disconnecting it means signing
+        // out of the account, which is a distinct, explicit action in the UI.
+        guard target != .managed else { return }
         do {
-            try secrets.remove(llmProviderKind.apiKeySecret)
+            try secrets.remove(target.apiKeySecret)
         } catch {
             llmError = Self.keychainLLMMessage(action: "remove", error: error)
             return
         }
+        // Clearing a key for a provider that isn't active leaves the active
+        // (managed) connection untouched.
+        guard target == llmProviderKind else { return }
         llmAPIKey = ""
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
@@ -167,6 +186,10 @@ extension AppState {
             return "Unexpected response from the provider. (\(detail))"
         case LLMError.invalidBaseURL(let value):
             return "Invalid base URL: \(value). Enter a full http(s) URL, e.g. https://api.openai.com/v1."
+        case LLMError.managedNotSignedIn:
+            return "Sign in to Sentwise AI first (Settings → AI)."
+        case LLMError.managedTrialExpired(let message):
+            return message
         case KeychainError.unexpectedStatus(let status):
             return "Keychain returned status \(status)."
         case KeychainError.dataEncodingFailed:

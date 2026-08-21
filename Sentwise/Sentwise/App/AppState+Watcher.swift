@@ -25,6 +25,7 @@ extension AppState {
             watchError = "Connect an email account and an AI provider before watching."
             return
         }
+        resumeWatchingAfterManagedReauth = false
         watchError = nil
         recordWatcherBaselineStartIfNeeded(account: mailCredentials.email, mailbox: .inbox)
         watchStatus = .watching
@@ -47,8 +48,9 @@ extension AppState {
     }
 
     /// Pauses watching; the queue and processed history are kept.
-    func pauseWatching() {
+    func pauseWatching(resumeAfterManagedReauthentication: Bool = false) {
         guard watchStatus == .watching else { return }
+        resumeWatchingAfterManagedReauth = resumeAfterManagedReauthentication
         watchStatus = .paused
         inboxWatcher.stop()
         logger.info("Inbox watching paused")
@@ -57,6 +59,7 @@ extension AppState {
     /// Stops watching entirely (e.g. on disconnect); returns to idle.
     func stopWatching() {
         guard watchStatus != .idle else { return }
+        resumeWatchingAfterManagedReauth = false
         watchStatus = .idle
         inboxWatcher.stop()
         // Outstanding auto-send countdowns (item 23) simply never fire; their
@@ -238,6 +241,7 @@ extension AppState {
             return
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }
+        let draftProvider = currentDraftLLMConfiguration?.provider
 
         do {
             // Retry transient fetch/LLM hiccups within the poll (item 27). On
@@ -263,7 +267,12 @@ extension AppState {
                     account: normalizedConnectedAccountEmail,
                     detail: Self.draftMessage(for: error)
                 ))
-                pauseWatching()
+                pauseWatching(
+                    resumeAfterManagedReauthentication: shouldResumeAfterManagedReauthentication(
+                        error: error,
+                        provider: draftProvider
+                    )
+                )
             }
             logger.error("Watcher draft failed: \(error.localizedDescription)")
         }

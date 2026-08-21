@@ -61,7 +61,10 @@ extension AppState {
         case .connectAccount:
             return isAccountConnected ? nil : "Run Test Connection to continue."
         case .connectProvider:
-            return isLLMConnected ? nil : "Run Test Connection to continue."
+            guard !isLLMConnected else { return nil }
+            return llmProviderKind == .managed
+                ? "Sign in to Sentwise AI to continue."
+                : "Run Test Connection to continue."
         case .sendBehavior, .voice:
             return nil
         }

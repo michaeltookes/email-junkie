@@ -29,6 +29,7 @@ extension AppState {
             llmModel: (llmModelOverride ?? self.llmModel).trimmingCharacters(in: .whitespacesAndNewlines),
             llmBaseURL: llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines),
             llmVerifiedModel: verifiedLLMModel,
+            managedAccountEmail: managedAccountEmail,
             sendBehavior: sendBehavior.rawValue,
             sendDelaySeconds: sendDelaySeconds,
             onboardingCompleted: onboardingCompleted,

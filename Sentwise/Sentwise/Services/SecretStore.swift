@@ -35,6 +35,22 @@ struct SecretKey: RawRepresentable, Hashable {
     static func llmAPIKey(provider: String) -> SecretKey {
         SecretKey(rawValue: "llm.\(provider).apiKey")
     }
+
+    /// The Clerk device/client token for the managed-inference account (56a). This
+    /// long-lived, rotating token authenticates Frontend-API calls and lets the
+    /// app mint fresh session tokens without re-signing-in.
+    static let managedClientToken = SecretKey(rawValue: "managed.clientToken")
+    /// The Clerk session id for the managed-inference account (56a). Combined with
+    /// the client token, it mints the short-lived session JWTs the proxy verifies.
+    static let managedSessionID = SecretKey(rawValue: "managed.sessionID")
+    /// Marker that the managed credentials were rejected by Clerk or the proxy.
+    /// Kept separate from the credentials so a failed Keychain cleanup cannot make
+    /// an invalid pair look signed in again on the next launch.
+    static let managedCredentialsInvalidated = SecretKey(rawValue: "managed.credentialsInvalidated")
+    /// A fresh Clerk client token recovered while credentials are invalidated.
+    /// Kept apart from the rejected stored session so reauthentication retries can
+    /// echo Clerk's latest rotation without reviving the stale credential pair.
+    static let managedReauthenticationClientToken = SecretKey(rawValue: "managed.reauthenticationClientToken")
 }
 
 /// Secure storage for sensitive strings — OAuth tokens, API keys, client secrets.

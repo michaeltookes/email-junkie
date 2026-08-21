@@ -27,6 +27,8 @@ enum ResilienceClassifier {
             return classifyMail(mailError)
         case let llmError as LLMError:
             return classifyLLM(llmError)
+        case is KeychainError:
+            return .authentication
         case let urlError as URLError:
             return isTransientURLError(urlError) ? .transient : .permanent
         case let posixError as POSIXError:
@@ -73,7 +75,7 @@ enum ResilienceClassifier {
             return .transient
         case .http(let status, _):
             return classifyHTTPStatus(status)
-        case .missingAPIKey:
+        case .missingAPIKey, .managedNotSignedIn, .managedTrialExpired:
             return .authentication
         case .invalidResponse, .invalidBaseURL:
             return .permanent

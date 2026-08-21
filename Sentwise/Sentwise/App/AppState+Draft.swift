@@ -68,9 +68,11 @@ extension AppState {
             recordDraftActivity(.draftCreated, for: draft)
             return draft
         } catch {
-            guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
-                return nil
-            }
+            let wasCurrent = isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration)
+            let signedOut = await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            guard wasCurrent,
+                  signedOut || isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration)
+            else { return nil }
             draftError = Self.draftMessage(for: error)
             return nil
         }
@@ -127,7 +129,13 @@ extension AppState {
             subject: message.subject,
             body: incomingText
         )
-        let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
+        let outcome: DraftOutcome
+        do {
+            outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
+        } catch {
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            throw error
+        }
         guard isCurrentDraftContext(
             credentials: credentials,
             llmConfiguration: llmConfiguration,

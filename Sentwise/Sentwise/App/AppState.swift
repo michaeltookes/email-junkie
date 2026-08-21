@@ -87,6 +87,25 @@ final class AppState: ObservableObject {
     /// The resolved model id that last passed a connection test.
     var verifiedLLMModel: String
 
+    // MARK: - Managed inference account (item 56a)
+
+    /// Signed-in managed account email, for "Connected as …".
+    @Published var managedAccountEmail: String
+    /// Whether a managed account is signed in (device + session tokens stored).
+    @Published var isManagedSignedIn: Bool = false
+    /// Stage of the email-code sign-in flow.
+    @Published var managedSignInStage: ManagedSignInStage = .idle
+    /// Whether a managed sign-in / sign-out request is in flight.
+    @Published var isManagedBusy: Bool = false
+    /// Last managed-account error, if any.
+    @Published var managedError: String?
+    /// Email and OTP code typed into the managed sign-in form.
+    @Published var managedEmailInput: String = ""
+    @Published var managedCodeInput: String = ""
+    /// Email address tied to the current Clerk pending sign-in handle. This is
+    /// transient like the handle itself, so it is intentionally not persisted.
+    var pendingManagedSignInEmail: String?
+
     // MARK: - Voice Profile
 
     /// The learned voice profile, or `nil` if none has been learned yet.
@@ -236,6 +255,8 @@ final class AppState: ObservableObject {
     /// Records a reconnect callback that arrived while the current queue drain
     /// was already running, so the drain can replay missed queued work once.
     var needsQueuedDraftDrainAfterCurrent = false
+    /// Set when a managed-auth failure paused the watcher; cleared on start/stop or after reauth resumes it.
+    var resumeWatchingAfterManagedReauth = false
 
     /// Observes reachability so the app can pause while offline and resume on
     /// reconnect. Injected for deterministic offline→online tests.
@@ -276,6 +297,10 @@ final class AppState: ObservableObject {
     /// Internal (not private) so the `AppState+Voice` extension can reach it.
     let mailProvider: MailProvider
     let llm: LLMProviding
+    /// The managed-inference account (item 56a): Clerk sign-in + session-token
+    /// minting. Also the `ManagedSessionProviding` behind the production LLM
+    /// service, so managed drafting authenticates with the account session.
+    let managedAccount: ManagedAccountService
     /// Posts draft-ready notifications and routes their actions back.
     let notifier: DraftNotifying
     /// Set by the menu-bar controller so a notification "open" action (or a
@@ -318,14 +343,18 @@ final class AppState: ObservableObject {
         persistence: PersistenceProvider = PersistenceService.shared,
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
-        llm: LLMProviding = LLMService(),
+        llm: LLMProviding? = nil,
+        managedAccount: ManagedAccountService? = nil,
         notifier: DraftNotifying = NullDraftNotifier(),
         reachability: NetworkReachabilityMonitoring = NetworkReachabilityMonitor()
     ) {
         self.persistence = persistence
         self.secrets = secrets
         self.mailProvider = mailProvider
-        self.llm = llm
+        // Managed account (item 56a) + wire it as the LLM session provider.
+        let managedAccount = managedAccount ?? ManagedAccountService(secrets: secrets)
+        self.managedAccount = managedAccount
+        self.llm = llm ?? LLMService(managedSessionProvider: managedAccount)
         self.notifier = notifier
         self.reachability = reachability
         self.isOnline = reachability.isOnline
@@ -336,11 +365,7 @@ final class AppState: ObservableObject {
         // original (pre-migration) settings drive the schema-version-sensitive
         // guidance/onboarding checks below so those one-shot migrations still fire.
         let loadedSettings = persistence.loadSettings()
-        let settings = Self.migratedSavedAccountsSettings(
-            loadedSettings,
-            secrets: secrets,
-            persistence: persistence
-        )
+        let settings = Self.fullyMigratedSettings(loaded: loadedSettings, secrets: secrets, persistence: persistence)
         self.pollIntervalSeconds = settings.pollIntervalSeconds
         self.sendBehavior = SendBehavior(rawValue: settings.sendBehavior) ?? .default
         self.sendDelaySeconds = settings.sendDelaySeconds
@@ -370,12 +395,14 @@ final class AppState: ObservableObject {
         self.mailAppPassword = activePassword
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
-        let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
-        self.llmProviderKind = provider
-        self.llmModel = settings.llmModel
+        let managedLaunch = Self.managedLaunchState(settings: settings, secrets: secrets)
+        self.llmProviderKind = managedLaunch.provider
+        self.llmModel = managedLaunch.llmModel
         self.llmBaseURL = settings.llmBaseURL
-        self.verifiedLLMModel = settings.llmVerifiedModel
-        self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+        self.verifiedLLMModel = managedLaunch.verifiedLLMModel
+        self.llmAPIKey = ((try? secrets.value(for: managedLaunch.provider.apiKeySecret)) ?? nil) ?? ""
+        self.managedAccountEmail = managedLaunch.hasCredentials ? settings.managedAccountEmail : ""
+        self.isManagedSignedIn = managedLaunch.hasCredentials
 
         self.voiceProfile = persistence.loadVoiceProfile()
 
@@ -385,6 +412,8 @@ final class AppState: ObservableObject {
         refreshLLMConnectionStatus()
 
         setupAutoSave()
+
+        persistRestoredManagedVerificationIfNeeded(managedLaunch, loadedFrom: settings)
 
         self.inboxWatcher = InboxWatcher(
             interval: { [weak self] in TimeInterval(self?.pollIntervalSeconds ?? 300) },

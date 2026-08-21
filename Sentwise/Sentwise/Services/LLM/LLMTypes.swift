@@ -4,6 +4,11 @@ import Foundation
 /// adding a case here plus an `LLMClient` adapter — nothing else in the app
 /// changes, which is what makes the layer pluggable.
 enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
+    /// Sentwise's bundled managed-inference service (backlog item 56a). Drafting
+    /// runs through the stateless `sentwise-service` proxy authenticated by the
+    /// user's account session — no API key, no endpoint to configure. This is the
+    /// default for new installs; BYO providers below remain the power/privacy path.
+    case managed
     case anthropic
     /// Any provider speaking the OpenAI `/v1/chat/completions` wire format. A
     /// single adapter covers OpenAI itself plus every compatible gateway
@@ -22,6 +27,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// Human-readable name for the Settings picker.
     var displayName: String {
         switch self {
+        case .managed: return "Sentwise AI — included"
         case .anthropic: return "Anthropic (Claude)"
         case .openAICompatible: return "OpenAI-compatible"
         case .ollama: return "Local (Ollama)"
@@ -31,6 +37,8 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// The model used when the user hasn't chosen one explicitly.
     var defaultModel: String {
         switch self {
+        // Matches the sentwise-service worker's server-side default model.
+        case .managed: return "claude-sonnet-4-6"
         case .anthropic: return "claude-sonnet-4-6"
         case .openAICompatible: return "gpt-4o-mini"
         case .ollama: return "llama3.1"
@@ -43,7 +51,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// non-default local runtime (LM Studio, a LAN box).
     var supportsCustomBaseURL: Bool {
         switch self {
-        case .anthropic: return false
+        case .managed, .anthropic: return false
         case .openAICompatible, .ollama: return true
         }
     }
@@ -53,8 +61,9 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// non-empty key is still sent for authenticated local servers or proxies.
     var requiresAPIKey: Bool {
         switch self {
+        // Managed inference authenticates with the account session, not a key.
+        case .managed, .ollama: return false
         case .anthropic, .openAICompatible: return true
-        case .ollama: return false
         }
     }
 
@@ -62,7 +71,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// providers whose endpoint isn't user-configurable.
     var baseURLPlaceholder: String? {
         switch self {
-        case .anthropic: return nil
+        case .managed, .anthropic: return nil
         case .openAICompatible: return "https://api.openai.com/v1"
         case .ollama: return "http://localhost:11434/v1"
         }
@@ -73,7 +82,7 @@ enum LLMProviderKind: String, CaseIterable, Codable, Identifiable, Sendable {
     /// endpoint isn't configurable (Anthropic).
     var defaultOpenAICompatibleEndpoint: URL? {
         switch self {
-        case .anthropic: return nil
+        case .managed, .anthropic: return nil
         case .openAICompatible: return OpenAICompatibleClient.defaultEndpoint
         case .ollama: return OpenAICompatibleClient.ollamaDefaultEndpoint
         }
@@ -146,6 +155,12 @@ enum LLMError: Error, Equatable, Sendable {
     /// The configured custom base URL isn't a valid http(s) endpoint, so the
     /// request was not sent (the trimmed value is carried for the message).
     case invalidBaseURL(String)
+    /// Managed inference was requested but the user isn't signed in to a Sentwise
+    /// account (no valid session token). The UI should prompt sign-in.
+    case managedNotSignedIn
+    /// The managed-inference trial (or subscription) has lapsed. Carries the
+    /// server's plain, user-facing message.
+    case managedTrialExpired(String)
 }
 
 /// A single-provider adapter: turns an `LLMRequest` into a completion by calling

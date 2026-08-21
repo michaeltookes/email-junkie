@@ -150,6 +150,64 @@ final class AppStateVoiceTests: XCTestCase {
         XCTAssertEqual(appState.voiceError, "Connection settings changed. Learn your voice again.")
     }
 
+    func testManagedProxyAuthFailureFromStaleVoiceLearningClearsPublishedAccountState() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: "me@gmail.com"): "app-pw",
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: VoiceManagedQueueClerkTransport([
+                voiceManagedClerkResponse(#"{"jwt":"live.jwt"}"#, clientToken: "client_Y")
+            ])
+        )
+        let managedAccount = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let transport = VoiceManagedSuspendedLLMTransport()
+        let llm = LLMService(transport: transport, managedSessionProvider: managedAccount)
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(
+                result: .success(()),
+                fetchResult: .success([sentMessage()]),
+                bodyResult: .success(Data("Real content.".utf8))
+            ),
+            llm: llm,
+            managedAccount: managedAccount
+        )
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        let task = Task { await appState.learnVoiceProfile() }
+        await fulfillment(of: [transport.didStartRequest], timeout: 1.0)
+
+        appState.selectLLMProvider(.anthropic)
+        transport.complete(with: .success(HTTPResponse(
+            statusCode: 401,
+            body: Data(#"{"error":{"type":"unauthenticated","message":"Sign in."}}"#.utf8)
+        )))
+        await task.value
+
+        XCTAssertEqual(appState.llmProviderKind, .anthropic)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertEqual(appState.managedAccountEmail, "")
+        XCTAssertEqual(appState.voiceError, "Connection settings changed. Learn your voice again.")
+        XCTAssertNil(appState.voiceProfile)
+        XCTAssertNil(try secrets.value(for: .managedClientToken))
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
+
     func testLearnVoiceProfileRequiresConnectedLLM() async {
         // No API key seeded → not connected.
         let persistence = AppStateMemoryPersistence(settings: Settings(
@@ -199,6 +257,52 @@ final class AppStateVoiceTests: XCTestCase {
 
         XCTAssertEqual(appState.voiceProfile?.summary, "Loaded.")
     }
+}
+
+private final class VoiceManagedQueueClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
+    private var responses: [ClerkHTTPResponse]
+
+    init(_ responses: [ClerkHTTPResponse]) {
+        self.responses = responses
+    }
+
+    func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
+        guard !responses.isEmpty else { return ClerkHTTPResponse(statusCode: 500, headers: [:], body: Data()) }
+        return responses.removeFirst()
+    }
+}
+
+private final class VoiceManagedSuspendedLLMTransport: LLMHTTPTransport, @unchecked Sendable {
+    let didStartRequest = XCTestExpectation(description: "managed voice LLM request started")
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<HTTPResponse, Error>?
+
+    func postJSON(_ url: URL, headers: [String: String], body: Data) async throws -> HTTPResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+            didStartRequest.fulfill()
+        }
+    }
+
+    func complete(with result: Result<HTTPResponse, Error>) {
+        lock.lock()
+        let storedContinuation = continuation
+        continuation = nil
+        lock.unlock()
+        storedContinuation?.resume(with: result)
+    }
+}
+
+private func voiceManagedClerkResponse(
+    _ json: String,
+    status: Int = 200,
+    clientToken: String? = nil
+) -> ClerkHTTPResponse {
+    var headers: [String: String] = [:]
+    if let clientToken { headers["authorization"] = "Bearer \(clientToken)" }
+    return ClerkHTTPResponse(statusCode: status, headers: headers, body: Data(json.utf8))
 }
 
 private final class SuspendedVoiceSampleMailProvider: MailProvider, @unchecked Sendable {

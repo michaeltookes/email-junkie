@@ -172,6 +172,22 @@ extension AppState {
         secrets: SecretStore,
         persistence: PersistenceProvider
     ) -> Settings {
+        migratedSavedAccountsSettings(
+            settings,
+            secrets: secrets,
+            persistence: persistence,
+            targetSchemaVersion: Settings.currentSchemaVersion,
+            shouldPersist: true
+        )
+    }
+
+    static func migratedSavedAccountsSettings(
+        _ settings: Settings,
+        secrets: SecretStore,
+        persistence: PersistenceProvider,
+        targetSchemaVersion: Int,
+        shouldPersist: Bool
+    ) -> Settings {
         guard settings.schemaVersion < Settings.savedAccountsSchemaVersion else { return settings }
 
         var migrated = settings
@@ -187,11 +203,13 @@ extension AppState {
             }
         }
 
-        migrated.schemaVersion = Settings.currentSchemaVersion
-        do {
-            try persistence.saveSettingsSync(migrated)
-        } catch {
-            logger.error("Failed to persist saved-accounts migration: \(error.localizedDescription)")
+        migrated.schemaVersion = targetSchemaVersion
+        if shouldPersist {
+            do {
+                try persistence.saveSettingsSync(migrated)
+            } catch {
+                logger.error("Failed to persist saved-accounts migration: \(error.localizedDescription)")
+            }
         }
         return migrated
     }

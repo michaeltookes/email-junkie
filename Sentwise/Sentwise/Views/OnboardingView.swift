@@ -145,7 +145,7 @@ private struct StepHeading: View {
 }
 
 /// A green "connected" confirmation row.
-private struct ConnectedBadge: View {
+struct ConnectedBadge: View {
     let text: String
 
     var body: some View {
@@ -156,7 +156,7 @@ private struct ConnectedBadge: View {
 }
 
 /// A red inline error line.
-private struct OnboardingError: View {
+struct OnboardingError: View {
     let message: String
 
     var body: some View {
@@ -256,86 +256,23 @@ private struct OnboardingProviderStep: View {
         VStack(alignment: .leading, spacing: 12) {
             StepHeading(
                 title: "Choose your AI",
-                subtitle: "Drafts are written by the provider you pick, using the model and "
-                    + "credentials you choose."
+                subtitle: "Sentwise includes the AI — just sign in. Power users can bring their own."
             )
 
-            if LLMProviderKind.allCases.count > 1 {
-                Picker("Provider", selection: Binding(
-                    get: { appState.llmProviderKind },
-                    set: { appState.selectLLMProvider($0) }
-                )) {
-                    ForEach(LLMProviderKind.allCases) { kind in
-                        Text(kind.displayName).tag(kind)
-                    }
-                }
-            } else {
-                LabeledContent("Provider") {
-                    Text(appState.llmProviderKind.displayName).foregroundStyle(.secondary)
-                }
+            ManagedInferenceCard()
+
+            // Subdued escape hatch: the full BYO provider controls, tucked away so
+            // Marcus never has to read it but Sam can find it (item 59).
+            DisclosureGroup("Use your own AI provider instead") {
+                BYOProviderControls()
+                    .padding(.top, 6)
             }
-
-            TextField("Model", text: modelBinding, prompt: Text(appState.llmProviderKind.defaultModel))
-                .textFieldStyle(.roundedBorder)
-
-            if appState.llmProviderKind.supportsCustomBaseURL {
-                TextField(
-                    "Base URL (optional)",
-                    text: baseURLBinding,
-                    prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
-                )
-                .textFieldStyle(.roundedBorder)
-            }
-
-            if appState.isLLMConnected {
-                ConnectedBadge(text: "Connected")
-                Button("Disconnect", role: .destructive) { appState.disconnectLLM() }
-            } else {
-                SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
-                    .textFieldStyle(.roundedBorder)
-
-                if !appState.llmProviderKind.requiresAPIKey {
-                    Text("Optional — leave blank for Ollama or unauthenticated local runtimes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Button {
-                    Task { await appState.testLLMConnection() }
-                } label: {
-                    if appState.isTestingLLM {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Test Connection")
-                    }
-                }
-                .disabled(appState.isTestingLLM)
-            }
+            .accessibilityIdentifier("useOwnProviderDisclosure")
 
             if let error = appState.llmError {
                 OnboardingError(message: error)
             }
         }
-    }
-
-    private var modelBinding: Binding<String> {
-        Binding(
-            get: { appState.llmModel },
-            set: {
-                appState.llmModel = $0
-                appState.refreshLLMConnectionStatus()
-            }
-        )
-    }
-
-    private var baseURLBinding: Binding<String> {
-        Binding(
-            get: { appState.llmBaseURL },
-            set: { appState.updateLLMBaseURLFromUser($0) }
-        )
-    }
-
-    private var apiKeyFieldTitle: String {
-        appState.llmProviderKind.requiresAPIKey ? "API key" : "API key (optional)"
     }
 }
 

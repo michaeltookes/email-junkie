@@ -19,7 +19,7 @@ enum SendBehavior: String, CaseIterable, Equatable {
 struct Settings: Codable, Equatable {
 
     /// The current settings schema version.
-    static let currentSchemaVersion = 14
+    static let currentSchemaVersion = 15
 
     /// Schema version that introduced the persisted onboarding completion flag.
     static let onboardingCompletionSchemaVersion = 6
@@ -53,6 +53,11 @@ struct Settings: Codable, Equatable {
     /// Schema version that introduced the watched-folder seen-version baseline.
     /// Purely additive: older files decode it as unestablished and seed once.
     static let transcriptWatchedFolderSeenSnapshotsSchemaVersion = 14
+
+    /// Schema version that introduced managed inference (item 56a). On first
+    /// launch at this version, an install with no configured BYO provider moves to
+    /// the managed provider; a configured BYO user keeps their provider.
+    static let managedInferenceSchemaVersion = 15
 
     /// The default auto-send undo window, in seconds (item 23). Zero disables it.
     static let defaultSendDelaySeconds = 10
@@ -102,6 +107,11 @@ struct Settings: Codable, Equatable {
     /// The resolved model id that last passed a connection test.
     var llmVerifiedModel: String
 
+    /// The email of the signed-in managed-inference account (item 56a), for the
+    /// "Connected as …" display. Non-secret; the device/session tokens live in the
+    /// Keychain. Empty when not signed in.
+    var managedAccountEmail: String
+
     /// What approving a draft does (raw value of `SendBehavior`). Stored as a
     /// string so an unknown/future value decodes gracefully to the default.
     var sendBehavior: String
@@ -146,10 +156,11 @@ struct Settings: Codable, Equatable {
         mailHostGuidancePendingEmail: Bool = false,
         mailPort: Int = 993,
         savedAccounts: [SavedMailAccount] = [],
-        llmProvider: String = "anthropic",
+        llmProvider: String = "managed",
         llmModel: String = "",
         llmBaseURL: String = "",
         llmVerifiedModel: String = "",
+        managedAccountEmail: String = "",
         sendBehavior: String = SendBehavior.default.rawValue,
         sendDelaySeconds: Int = Settings.defaultSendDelaySeconds,
         onboardingCompleted: Bool = false,
@@ -171,6 +182,7 @@ struct Settings: Codable, Equatable {
         self.llmModel = llmModel
         self.llmBaseURL = llmBaseURL
         self.llmVerifiedModel = llmVerifiedModel
+        self.managedAccountEmail = managedAccountEmail
         self.sendBehavior = sendBehavior
         self.sendDelaySeconds = sendDelaySeconds
         self.onboardingCompleted = onboardingCompleted
@@ -190,7 +202,8 @@ struct Settings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pollIntervalSeconds, mailEmail, mailHost, mailHostGuidanceEmail
         case mailHostGuidancePendingEmail, mailPort, savedAccounts
-        case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, sendBehavior, sendDelaySeconds, onboardingCompleted
+        case llmProvider, llmModel, llmBaseURL, llmVerifiedModel, managedAccountEmail
+        case sendBehavior, sendDelaySeconds, onboardingCompleted
         case senderAllowlist, senderBlocklist
         case transcriptWatchedFolderEnabled, transcriptWatchedFolderPath, transcriptWatchedFolderSeenSnapshots
     }
@@ -210,6 +223,7 @@ struct Settings: Codable, Equatable {
         llmModel = try container.decodeIfPresent(String.self, forKey: .llmModel) ?? ""
         llmBaseURL = try container.decodeIfPresent(String.self, forKey: .llmBaseURL) ?? ""
         llmVerifiedModel = try container.decodeIfPresent(String.self, forKey: .llmVerifiedModel) ?? ""
+        managedAccountEmail = try container.decodeIfPresent(String.self, forKey: .managedAccountEmail) ?? ""
         sendBehavior = try container.decodeIfPresent(String.self, forKey: .sendBehavior) ?? SendBehavior.default.rawValue
         sendDelaySeconds =
             try container.decodeIfPresent(Int.self, forKey: .sendDelaySeconds) ?? Settings.defaultSendDelaySeconds

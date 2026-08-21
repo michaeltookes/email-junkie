@@ -5,9 +5,22 @@ import Foundation
 /// layer; `AppState` talks to it through `LLMProviding`.
 struct LLMService: LLMProviding {
     let transport: LLMHTTPTransport
+    /// Supplies fresh account session tokens for the managed provider. Defaults
+    /// to an "unavailable" provider so a service built without an account wired
+    /// in reports "not signed in" rather than crashing.
+    let managedSessionProvider: ManagedSessionProviding
+    /// When true, the managed provider returns a canned, zero-network response so
+    /// Prowl accessibility hunts stay offline-safe (backlog 56a).
+    let isProwlHuntMode: Bool
 
-    init(transport: LLMHTTPTransport = URLSessionTransport()) {
+    init(
+        transport: LLMHTTPTransport = URLSessionTransport(),
+        managedSessionProvider: ManagedSessionProviding = UnavailableManagedSessionProvider(),
+        isProwlHuntMode: Bool = ProwlHuntRuntime.current.isEnabled
+    ) {
         self.transport = transport
+        self.managedSessionProvider = managedSessionProvider
+        self.isProwlHuntMode = isProwlHuntMode
     }
 
     /// Builds the adapter for a provider. `baseURL` is honored only by adapters
@@ -15,6 +28,15 @@ struct LLMService: LLMProviding {
     /// ones); other adapters ignore it.
     private func client(for provider: LLMProviderKind, apiKey: String, baseURL: String?) -> LLMClient {
         switch provider {
+        case .managed:
+            // Hunt mode: never touch the network or the session provider.
+            if isProwlHuntMode {
+                return StubManagedInferenceClient()
+            }
+            return ManagedInferenceClient(
+                sessionProvider: managedSessionProvider,
+                transport: transport
+            )
         case .anthropic:
             return AnthropicClient(apiKey: apiKey, transport: transport)
         case .openAICompatible, .ollama:

@@ -93,6 +93,13 @@ final class ResilienceClassifierTests: XCTestCase {
         XCTAssertEqual(ResilienceClassifier.retryDecision(for: error), .stop)
     }
 
+    func testKeychainFailuresAreAuthentication() {
+        let error = KeychainError.unexpectedStatus(-1)
+        XCTAssertEqual(ResilienceClassifier.classify(error), .authentication)
+        XCTAssertFalse(ResilienceClassifier.isRetryable(error))
+        XCTAssertEqual(ResilienceClassifier.retryDecision(for: error), .stop)
+    }
+
     func testLLMInvalidResponseAndBaseURLArePermanent() {
         XCTAssertEqual(ResilienceClassifier.classify(LLMError.invalidResponse("garbage")), .permanent)
         XCTAssertEqual(ResilienceClassifier.classify(LLMError.invalidBaseURL("ftp://x")), .permanent)

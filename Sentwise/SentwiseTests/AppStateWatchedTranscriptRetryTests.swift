@@ -52,6 +52,19 @@ private actor GateableTranscriptLLMProvider: LLMProviding {
     }
 }
 
+private actor KeychainFailingTranscriptLLMProvider: LLMProviding {
+    func testConnection(provider: LLMProviderKind, apiKey: String, model: String, baseURL: String?) async throws {}
+
+    func complete(
+        _ request: LLMRequest,
+        provider: LLMProviderKind,
+        apiKey: String,
+        baseURL: String?
+    ) async throws -> LLMResponse {
+        throw KeychainError.unexpectedStatus(-1)
+    }
+}
+
 @MainActor
 final class AppStateWatchedTranscriptRetryTests: XCTestCase {
 
@@ -240,6 +253,28 @@ final class AppStateWatchedTranscriptRetryTests: XCTestCase {
         XCTAssertEqual(validationCount, 2)
         XCTAssertTrue(appState.pendingDrafts.isEmpty)
         XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+    }
+
+    func testWatchedTranscriptDefersAfterKeychainCredentialFailure() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("managed-keychain-transcript-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let persistence = AppStateMemoryPersistence(settings: watchedFolderSettings(dir: dir))
+        let appState = makeAppState(
+            persistence: persistence,
+            secrets: connectedSecrets(),
+            llm: KeychainFailingTranscriptLLMProvider()
+        )
+        let ingested = try TranscriptIngest.fromPaste("Marcus: recap.")
+
+        let result = await appState.handleWatchedTranscriptDelivery(ingested)
+
+        XCTAssertEqual(result, .deferred)
+        XCTAssertTrue(appState.pendingDrafts.isEmpty)
+        XCTAssertTrue(persistence.loadPendingDrafts().isEmpty)
+        XCTAssertNotNil(appState.transcriptFolderError)
     }
 
     private func watchedFolderSettings(dir: URL) -> Settings {

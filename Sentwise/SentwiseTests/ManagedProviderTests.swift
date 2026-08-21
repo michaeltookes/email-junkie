@@ -98,6 +98,31 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertEqual(migrated.llmProvider, "anthropic")
     }
 
+    func testFullLaunchMigrationPersistsOnlyFinalManagedSchemaAfterSavedAccountsMigration() {
+        let settings = Settings(
+            schemaVersion: 10,
+            pollIntervalSeconds: 300,
+            mailEmail: "marcus@example.com",
+            llmProvider: "anthropic",
+            llmModel: "claude-opus-custom"
+        )
+        let persistence = AppStateMemoryPersistence(settings: settings)
+
+        let migrated = AppState.fullyMigratedSettings(
+            loaded: settings,
+            secrets: InMemorySecretStore(),
+            persistence: persistence
+        )
+
+        XCTAssertEqual(migrated.schemaVersion, Settings.currentSchemaVersion)
+        XCTAssertEqual(migrated.llmProvider, "managed")
+        XCTAssertEqual(migrated.llmModel, "")
+        XCTAssertEqual(migrated.savedAccounts.map(\.email), ["marcus@example.com"])
+        XCTAssertEqual(persistence.settingsSaveCount, 1)
+        XCTAssertEqual(persistence.savedSettingsHistory.map(\.schemaVersion), [Settings.currentSchemaVersion])
+        XCTAssertEqual(persistence.loadSettings(), migrated)
+    }
+
     // MARK: - LLMService routing + hunt-mode stub
 
     func testHuntModeReturnsCannedResponseWithoutNetwork() async throws {

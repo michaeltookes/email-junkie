@@ -211,7 +211,11 @@ extension AppState {
         persistence: PersistenceProvider
     ) -> Settings {
         let accountsMigrated = migratedSavedAccountsSettings(
-            loaded, secrets: secrets, persistence: persistence
+            loaded,
+            secrets: secrets,
+            persistence: persistence,
+            targetSchemaVersion: Settings.managedInferenceSchemaVersion - 1,
+            shouldPersist: false
         )
         return migratedManagedInferenceSettings(
             accountsMigrated,

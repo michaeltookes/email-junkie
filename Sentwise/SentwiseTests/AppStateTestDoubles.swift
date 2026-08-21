@@ -10,6 +10,8 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     private(set) var pendingDrafts: [Draft]
     private(set) var approvedDraftIdentities: Set<String>
     private(set) var activityEvents: [ActivityEvent]
+    private(set) var settingsSaveCount = 0
+    private(set) var savedSettingsHistory: [Settings] = []
     private(set) var processedSaveCount = 0
     private(set) var pendingDraftSaveCount = 0
     private(set) var approvedDraftSaveCount = 0
@@ -36,12 +38,18 @@ final class AppStateMemoryPersistence: PersistenceProvider {
     }
 
     func loadSettings() -> Settings { settings }
-    func saveSettings(_ settings: Settings) { self.settings = settings }
+    func saveSettings(_ settings: Settings) {
+        self.settings = settings
+        settingsSaveCount += 1
+        savedSettingsHistory.append(settings)
+    }
     func saveSettingsSync(_ settings: Settings) throws {
         if let syncSaveError {
             throw syncSaveError
         }
         self.settings = settings
+        settingsSaveCount += 1
+        savedSettingsHistory.append(settings)
     }
 
     func loadVoiceProfile() -> VoiceProfile? { voiceProfile }

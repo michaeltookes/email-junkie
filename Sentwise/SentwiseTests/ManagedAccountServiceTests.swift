@@ -182,6 +182,64 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_E")
     }
 
+    func testStartSignInPersistsCreatedTokenWhenPrepareFails() async throws {
+        let secrets = InMemorySecretStore()
+        let startedResponse = #"{"response":{"id":"sia_1","supported_first_factors":["#
+            + #"{"strategy":"email_code","email_address_id":"ema_1"}]}}"#
+        let transport = QueueClerkTransport([
+            response(startedResponse, clientToken: "client_A"),
+            response(#"{"errors":[{"message":"temporarily unavailable"}]}"#, status: 503),
+            response(startedResponse, clientToken: "client_B"),
+            response(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_C")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        do {
+            try await account.startSignIn(email: "marcus@example.com")
+            XCTFail("Expected prepare failure")
+        } catch ClerkError.http(let status, _, let clientToken) {
+            XCTAssertEqual(status, 503)
+            XCTAssertEqual(clientToken, "client_A")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_A")
+
+        try await account.startSignIn(email: "marcus@example.com")
+
+        XCTAssertEqual(transport.requests[2].headers["authorization"], "Bearer client_A")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_C")
+    }
+
+    func testStartSignInPersistsRotatedTokenFromPrepareFailure() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport([
+            response(
+                #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                clientToken: "client_A"
+            ),
+            response(
+                #"{"errors":[{"message":"temporarily unavailable"}]}"#,
+                status: 503,
+                clientToken: "client_B"
+            )
+        ])
+        let account = service(transport, secrets: secrets)
+
+        do {
+            try await account.startSignIn(email: "marcus@example.com")
+            XCTFail("Expected prepare failure")
+        } catch ClerkError.http(let status, _, let clientToken) {
+            XCTAssertEqual(status, 503)
+            XCTAssertEqual(clientToken, "client_B")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_B")
+    }
+
     func testCompleteSignInKeepsPendingAndDoesNotStoreSessionWhenMintFails() async throws {
         let secrets = InMemorySecretStore()
         let transport = QueueClerkTransport([

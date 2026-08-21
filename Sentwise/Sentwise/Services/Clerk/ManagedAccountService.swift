@@ -48,14 +48,16 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// before entering the code.
     func startSignIn(email: String) async throws {
         let existingClientToken = areStoredCredentialsInvalidated ? "" : storedClientToken ?? ""
-        let handle = try await clerk.sendEmailCode(email: email, clientToken: existingClientToken)
-        pendingSignIn = handle
-        // Persisting the rotated device token early is best-effort; a Keychain
-        // failure here must not abort sign-in — the token is re-persisted on verify.
+        let created = try await clerk.createEmailCodeSignIn(email: email, clientToken: existingClientToken)
+        persistClientTokenBestEffort(created.clientToken, context: "after creating sign-in")
+
         do {
-            try persistClientToken(handle.clientToken)
-        } catch {
-            logger.error("Failed to persist Clerk client token during sign-in: \(error.localizedDescription)")
+            let prepared = try await clerk.prepareEmailCode(for: created)
+            pendingSignIn = prepared
+            persistClientTokenBestEffort(prepared.clientToken, context: "after preparing sign-in")
+        } catch let error as ClerkError {
+            persistClientTokenBestEffort(error.clientToken, context: "after failed sign-in prepare")
+            throw error
         }
     }
 
@@ -215,6 +217,15 @@ actor ManagedAccountService: ManagedSessionProviding {
     private func persistClientToken(_ token: String) throws {
         guard !token.isEmpty else { return }
         try secrets.set(token, for: .managedClientToken)
+    }
+
+    private func persistClientTokenBestEffort(_ token: String?, context: String) {
+        guard let token, !token.isEmpty else { return }
+        do {
+            try persistClientToken(token)
+        } catch {
+            logger.error("Failed to persist Clerk client token \(context): \(error.localizedDescription)")
+        }
     }
 
     private func persistSessionID(_ sessionID: String) throws {

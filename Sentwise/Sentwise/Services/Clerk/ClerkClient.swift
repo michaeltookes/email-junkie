@@ -150,6 +150,15 @@ struct ClerkClient: Sendable {
     /// Starts an email-code sign-in and triggers the OTP email. Returns a handle
     /// the caller passes to `verifyEmailCode`.
     func sendEmailCode(email: String, clientToken: String) async throws -> ClerkSignInHandle {
+        let created = try await createEmailCodeSignIn(email: email, clientToken: clientToken)
+        return try await prepareEmailCode(for: created)
+    }
+
+    /// Creates the Clerk sign-in/sign-up resource but does not send the OTP yet.
+    /// Callers that persist rotating client tokens should store the returned
+    /// token before preparing the code, so a prepare failure does not strand the
+    /// flow on an older token.
+    func createEmailCodeSignIn(email: String, clientToken: String) async throws -> ClerkSignInHandle {
         // 1. Create the sign-in with the email identifier. A first-time user has
         //    no Clerk account yet, which Clerk reports as `form_identifier_not_found`;
         //    in that case create the account via the sign-up flow instead.
@@ -166,9 +175,9 @@ struct ClerkClient: Sendable {
                 clientToken: created.clientToken
             )
         } catch ClerkError.accountNotFound {
-            return try await startSignUp(email: email, clientToken: created.clientToken ?? clientToken)
+            return try await createSignUp(email: email, clientToken: created.clientToken ?? clientToken)
         }
-        var token = created.clientToken ?? clientToken
+        let token = created.clientToken ?? clientToken
 
         guard let signInId = createdResource.id else {
             throw ClerkError.malformedResponse("sign_in id missing")
@@ -179,26 +188,45 @@ struct ClerkClient: Sendable {
             throw ClerkError.emailCodeUnsupported
         }
 
-        // 2. Prepare the first factor → sends the code email.
-        let prepared = try await post(
-            path: "v1/client/sign_ins/\(signInId)/prepare_first_factor",
-            form: ["strategy": "email_code", "email_address_id": emailAddressId],
-            clientToken: token
-        )
-        _ = try Self.decodeSignIn(
-            prepared.body,
-            status: prepared.statusCode,
-            clientToken: prepared.clientToken
-        )
-        token = prepared.clientToken ?? token
-
         return ClerkSignInHandle(signInId: signInId, emailAddressId: emailAddressId, clientToken: token)
     }
 
-    /// First-time users: create a Clerk account for the email and send the
-    /// verification code. Mirrors `sendEmailCode` but over Clerk's `sign_ups`
-    /// resource (`create` → `prepare_verification`).
-    private func startSignUp(email: String, clientToken: String) async throws -> ClerkSignInHandle {
+    /// Sends the email code for an already-created sign-in/sign-up resource.
+    func prepareEmailCode(for handle: ClerkSignInHandle) async throws -> ClerkSignInHandle {
+        let path: String
+        let form: [String: String]
+        switch handle.flow {
+        case .signIn:
+            path = "v1/client/sign_ins/\(handle.signInId)/prepare_first_factor"
+            form = ["strategy": "email_code", "email_address_id": handle.emailAddressId]
+        case .signUp:
+            path = "v1/client/sign_ups/\(handle.signInId)/prepare_verification"
+            form = ["strategy": "email_code"]
+        }
+
+        let prepared = try await post(
+            path: path,
+            form: form,
+            clientToken: handle.clientToken
+        )
+        let token = prepared.clientToken ?? handle.clientToken
+        _ = try Self.decodeSignIn(
+            prepared.body,
+            status: prepared.statusCode,
+            clientToken: token
+        )
+
+        return ClerkSignInHandle(
+            signInId: handle.signInId,
+            emailAddressId: handle.emailAddressId,
+            clientToken: token,
+            flow: handle.flow
+        )
+    }
+
+    /// First-time users: create a Clerk account for the email. The caller then
+    /// prepares verification to send the OTP.
+    private func createSignUp(email: String, clientToken: String) async throws -> ClerkSignInHandle {
         let created = try await post(
             path: "v1/client/sign_ups",
             form: ["email_address": email],
@@ -209,22 +237,10 @@ struct ClerkClient: Sendable {
             status: created.statusCode,
             clientToken: created.clientToken
         )
-        var token = created.clientToken ?? clientToken
+        let token = created.clientToken ?? clientToken
         guard let signUpId = createdResource.id else {
             throw ClerkError.malformedResponse("sign_up id missing")
         }
-
-        let prepared = try await post(
-            path: "v1/client/sign_ups/\(signUpId)/prepare_verification",
-            form: ["strategy": "email_code"],
-            clientToken: token
-        )
-        _ = try Self.decodeSignIn(
-            prepared.body,
-            status: prepared.statusCode,
-            clientToken: prepared.clientToken
-        )
-        token = prepared.clientToken ?? token
 
         return ClerkSignInHandle(signInId: signUpId, emailAddressId: "", clientToken: token, flow: .signUp)
     }

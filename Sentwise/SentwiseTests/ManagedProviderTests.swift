@@ -55,6 +55,29 @@ private final class ManagedProviderQueueClerkTransport: ClerkHTTPTransport, @unc
     }
 }
 
+private final class ManagedProviderSuspendedLLMTransport: LLMHTTPTransport, @unchecked Sendable {
+    let didStartRequest = XCTestExpectation(description: "managed LLM request started")
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<HTTPResponse, Error>?
+
+    func postJSON(_ url: URL, headers: [String: String], body: Data) async throws -> HTTPResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+            didStartRequest.fulfill()
+        }
+    }
+
+    func complete(with result: Result<HTTPResponse, Error>) {
+        lock.lock()
+        let storedContinuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        storedContinuation?.resume(with: result)
+    }
+}
+
 private func managedProviderClerkResponse(
     _ json: String,
     status: Int = 200,
@@ -385,6 +408,73 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertEqual(appState.managedAccountEmail, "")
         XCTAssertEqual(appState.verifiedLLMModel, "")
         XCTAssertEqual(appState.draftError, "Sign in to Sentwise AI first (Settings → AI).")
+        XCTAssertNil(try secrets.value(for: .managedClientToken))
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
+
+    func testManagedProxyAuthFailureFromStaleDraftStillClearsPublishedAccountState() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: "me@gmail.com"): "app-pw",
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X",
+            .llmAPIKey(provider: "anthropic"): "sk-live"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: ManagedProviderQueueClerkTransport([
+                managedProviderClerkResponse(#"{"jwt":"live.jwt"}"#, clientToken: "client_Y")
+            ])
+        )
+        let managedAccount = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let transport = ManagedProviderSuspendedLLMTransport()
+        let llm = LLMService(
+            transport: transport,
+            managedSessionProvider: managedAccount
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(
+                result: .success(()),
+                bodyResult: .success(Data("Are you free Thursday?".utf8))
+            ),
+            llm: llm,
+            managedAccount: managedAccount
+        )
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        let draftTask = Task {
+            await appState.generateDraft(for: MailMessage(
+                id: 5,
+                from: MailAddress(name: "Alice", email: "alice@example.com"),
+                subject: "Lunch?",
+                date: ""
+            ))
+        }
+        await fulfillment(of: [transport.didStartRequest], timeout: 1.0)
+
+        appState.selectLLMProvider(.anthropic)
+        transport.complete(with: .success(HTTPResponse(
+            statusCode: 401,
+            body: Data(#"{"error":{"type":"unauthenticated","message":"Sign in."}}"#.utf8)
+        )))
+        let draft = await draftTask.value
+
+        XCTAssertNil(draft)
+        XCTAssertEqual(appState.llmProviderKind, .anthropic)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertEqual(appState.managedAccountEmail, "")
+        XCTAssertNil(appState.draftError)
         XCTAssertNil(try secrets.value(for: .managedClientToken))
         XCTAssertNil(try secrets.value(for: .managedSessionID))
     }

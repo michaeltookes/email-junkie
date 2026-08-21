@@ -25,6 +25,10 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// Keychain. This keeps the current process logically signed out even if
     /// cleanup cannot remove every stale value.
     private var areStoredCredentialsInvalidated = false
+    /// Latest client-token rotation from an in-progress reauthentication after
+    /// stored credentials were invalidated. This is deliberately separate from
+    /// the rejected session credential identity.
+    private var reauthenticationClientToken: String?
     /// Clerk rotates the client token on every mint, so only one mint may be in
     /// flight at a time. Actor reentrancy alone is not enough because the actor is
     /// released while the network request is suspended.
@@ -35,6 +39,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         self.secrets = secrets
         self.clerk = clerk
         self.areStoredCredentialsInvalidated = secrets.hasValue(for: .managedCredentialsInvalidated)
+        self.reauthenticationClientToken = ((try? secrets.value(for: .managedReauthenticationClientToken)) ?? nil)
     }
 
     // MARK: - Sign-in
@@ -49,7 +54,7 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// persisted immediately so a rotated token survives even if the user quits
     /// before entering the code.
     func startSignIn(email: String) async throws {
-        let existingClientToken = areStoredCredentialsInvalidated ? "" : storedClientToken ?? ""
+        let existingClientToken = signInClientTokenForCurrentCredentialState()
         let created: ClerkSignInHandle
         do {
             created = try await clerk.createEmailCodeSignIn(email: email, clientToken: existingClientToken)
@@ -109,7 +114,9 @@ actor ManagedAccountService: ManagedSessionProviding {
         try persistClientToken(minted.clientToken)
         try persistSessionID(verified.sessionId)
         try clearCredentialInvalidationMarker()
+        clearReauthenticationClientTokenBestEffort(context: "after sign-in")
         areStoredCredentialsInvalidated = false
+        reauthenticationClientToken = nil
         authenticationGeneration &+= 1
         pendingSignIn = nil
     }
@@ -119,6 +126,7 @@ actor ManagedAccountService: ManagedSessionProviding {
     func signOut() throws {
         let wasSignedIn = isSignedIn
         pendingSignIn = nil
+        reauthenticationClientToken = nil
         var firstError: Error?
         do {
             try secrets.remove(.managedClientToken)
@@ -137,6 +145,7 @@ actor ManagedAccountService: ManagedSessionProviding {
             areStoredCredentialsInvalidated = false
             clearCredentialInvalidationMarkerBestEffort(context: "after sign-out")
         }
+        clearReauthenticationClientTokenBestEffort(context: "after sign-out")
         if let firstError {
             throw firstError
         }
@@ -149,16 +158,22 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// rotated token is never silently lost. Throws `LLMError.managedNotSignedIn`
     /// when there is no stored account.
     func currentSessionToken() async throws -> String {
+        (try await currentManagedSession()).jwt
+    }
+
+    func currentManagedSession() async throws -> ManagedSessionToken {
         await beginMintTurn()
         defer { endMintTurn() }
-        return try await mintCurrentSessionToken()
+        return try await mintCurrentManagedSession()
     }
 
     func invalidateSession() async {
         let wasSignedIn = isSignedIn
         pendingSignIn = nil
+        reauthenticationClientToken = nil
         areStoredCredentialsInvalidated = true
         persistCredentialInvalidationMarker()
+        clearReauthenticationClientTokenBestEffort(context: "after invalidation")
         if wasSignedIn {
             authenticationGeneration &+= 1
         }
@@ -177,7 +192,16 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
     }
 
-    private func mintCurrentSessionToken() async throws -> String {
+    func invalidateSession(matching credentialIdentity: String?) async {
+        guard let credentialIdentity else {
+            await invalidateSession()
+            return
+        }
+        guard currentCredentialIdentity == credentialIdentity else { return }
+        await invalidateSession()
+    }
+
+    private func mintCurrentManagedSession() async throws -> ManagedSessionToken {
         while true {
             guard !areStoredCredentialsInvalidated,
                   let clientToken = storedClientToken,
@@ -195,7 +219,10 @@ actor ManagedAccountService: ManagedSessionProviding {
                 switch credentialState(generation: generation, sessionID: sessionID, clientToken: clientToken) {
                 case .current:
                     try persistClientToken(minted.clientToken)
-                    return minted.jwt
+                    return ManagedSessionToken(
+                        jwt: minted.jwt,
+                        credentialIdentity: credentialIdentity(generation: generation, sessionID: sessionID)
+                    )
                 case .rotated:
                     continue
                 case .signedOutOrReplaced:
@@ -232,6 +259,13 @@ actor ManagedAccountService: ManagedSessionProviding {
         storedClientToken != nil || storedSessionID != nil
     }
 
+    private func signInClientTokenForCurrentCredentialState() -> String {
+        if areStoredCredentialsInvalidated {
+            return reauthenticationClientToken ?? ""
+        }
+        return storedClientToken ?? ""
+    }
+
     private func persistClientToken(_ token: String) throws {
         guard !token.isEmpty else { return }
         try secrets.set(token, for: .managedClientToken)
@@ -239,6 +273,7 @@ actor ManagedAccountService: ManagedSessionProviding {
 
     private func persistClientTokenBestEffort(_ token: String?, context: String) {
         guard let token, !token.isEmpty else { return }
+        persistReauthenticationClientTokenIfNeeded(token)
         do {
             try persistClientToken(token)
         } catch {
@@ -270,6 +305,28 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
     }
 
+    private func persistReauthenticationClientTokenIfNeeded(_ token: String) {
+        guard areStoredCredentialsInvalidated, !token.isEmpty else { return }
+        reauthenticationClientToken = token
+        do {
+            try secrets.set(token, for: .managedReauthenticationClientToken)
+        } catch {
+            logger.error("Failed to persist managed reauthentication client token: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearReauthenticationClientToken() throws {
+        try secrets.remove(.managedReauthenticationClientToken)
+    }
+
+    private func clearReauthenticationClientTokenBestEffort(context: String) {
+        do {
+            try clearReauthenticationClientToken()
+        } catch {
+            logger.error("Failed to clear managed reauthentication client token \(context): \(error.localizedDescription)")
+        }
+    }
+
     private func isPendingSignIn(_ handle: ClerkSignInHandle) -> Bool {
         pendingSignIn?.signInId == handle.signInId && pendingSignIn?.flow == handle.flow
     }
@@ -282,6 +339,7 @@ actor ManagedAccountService: ManagedSessionProviding {
             clientToken: clientToken,
             flow: handle.flow
         )
+        persistReauthenticationClientTokenIfNeeded(clientToken)
         do {
             try persistClientToken(clientToken)
         } catch {
@@ -374,5 +432,16 @@ actor ManagedAccountService: ManagedSessionProviding {
             }
             try persistClientToken(rotatedClientToken)
         }
+    }
+
+    private var currentCredentialIdentity: String? {
+        guard !areStoredCredentialsInvalidated,
+              let sessionID = storedSessionID
+        else { return nil }
+        return credentialIdentity(generation: authenticationGeneration, sessionID: sessionID)
+    }
+
+    private func credentialIdentity(generation: Int, sessionID: String) -> String {
+        "\(generation):\(sessionID)"
     }
 }

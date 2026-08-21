@@ -204,7 +204,7 @@ struct ClerkClient: Sendable {
         let token = created.clientToken ?? clientToken
 
         guard let signInId = createdResource.id else {
-            throw ClerkError.malformedResponse("sign_in id missing")
+            throw ClerkError.malformedResponse("sign_in id missing", clientToken: token)
         }
         guard let emailAddressId = createdResource.supportedFirstFactors?
             .first(where: { $0.strategy == "email_code" })?.emailAddressId
@@ -263,7 +263,7 @@ struct ClerkClient: Sendable {
         )
         let token = created.clientToken ?? clientToken
         guard let signUpId = createdResource.id else {
-            throw ClerkError.malformedResponse("sign_up id missing")
+            throw ClerkError.malformedResponse("sign_up id missing", clientToken: token)
         }
 
         return ClerkSignInHandle(signInId: signUpId, emailAddressId: "", clientToken: token, flow: .signUp)

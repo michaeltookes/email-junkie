@@ -47,6 +47,10 @@ struct SecretKey: RawRepresentable, Hashable {
     /// Kept separate from the credentials so a failed Keychain cleanup cannot make
     /// an invalid pair look signed in again on the next launch.
     static let managedCredentialsInvalidated = SecretKey(rawValue: "managed.credentialsInvalidated")
+    /// A fresh Clerk client token recovered while credentials are invalidated.
+    /// Kept apart from the rejected stored session so reauthentication retries can
+    /// echo Clerk's latest rotation without reviving the stale credential pair.
+    static let managedReauthenticationClientToken = SecretKey(rawValue: "managed.reauthenticationClientToken")
 }
 
 /// Secure storage for sensitive strings — OAuth tokens, API keys, client secrets.

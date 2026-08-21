@@ -152,6 +152,46 @@ final class ClerkClientTests: XCTestCase {
         }
     }
 
+    func testCreateEmailCodeSignInMalformedResponseCarriesRotatedClientToken() async {
+        let transport = FakeClerkTransport([
+            clerkResponse(
+                #"{"response":{"supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_9"}]}}"#,
+                clientToken: "client_A"
+            )
+        ])
+
+        do {
+            _ = try await client(transport).createEmailCodeSignIn(email: "marcus@example.com", clientToken: "")
+            XCTFail("Expected malformed response")
+        } catch ClerkError.malformedResponse(let message, let clientToken) {
+            XCTAssertEqual(message, "sign_in id missing")
+            XCTAssertEqual(clientToken, "client_A")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testFallbackSignUpMalformedResponseCarriesRotatedClientToken() async {
+        let transport = FakeClerkTransport([
+            clerkResponse(
+                #"{"errors":[{"message":"Couldn't find your account.","code":"form_identifier_not_found"}]}"#,
+                status: 422,
+                clientToken: "client_A"
+            ),
+            clerkResponse(#"{"response":{"status":"missing_requirements"}}"#, clientToken: "client_B")
+        ])
+
+        do {
+            _ = try await client(transport).createEmailCodeSignIn(email: "new@example.com", clientToken: "")
+            XCTFail("Expected malformed response")
+        } catch ClerkError.malformedResponse(let message, let clientToken) {
+            XCTAssertEqual(message, "sign_up id missing")
+            XCTAssertEqual(clientToken, "client_B")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testVerifyEmailCodeReturnsSessionOnComplete() async throws {
         let transport = FakeClerkTransport([
             clerkResponse(

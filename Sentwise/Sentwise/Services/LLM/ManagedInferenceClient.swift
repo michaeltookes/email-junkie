@@ -27,6 +27,14 @@ enum ManagedInference {
 /// managed-inference requests. Implemented by `ManagedAccountService`, which
 /// mints tokens from Clerk on demand. Kept as a protocol so `ManagedInferenceClient`
 /// stays testable against a fake without any account plumbing.
+struct ManagedSessionToken: Sendable, Equatable {
+    let jwt: String
+    /// Identifies the credential generation that minted this JWT. Providers that
+    /// cannot track identities leave this nil and fall back to unconditional
+    /// invalidation.
+    let credentialIdentity: String?
+}
+
 protocol ManagedSessionProviding: Sendable {
     /// Returns a session token valid *now*. Throws `LLMError.managedNotSignedIn`
     /// when there is no signed-in account. Implementations are expected to mint a
@@ -34,13 +42,29 @@ protocol ManagedSessionProviding: Sendable {
     /// cache the result.
     func currentSessionToken() async throws -> String
 
+    /// Returns a session token plus the account credential identity that minted
+    /// it, allowing later proxy 401s to invalidate only the matching account.
+    func currentManagedSession() async throws -> ManagedSessionToken
+
     /// Invalidates stored managed-account credentials after an authentication
     /// failure from the proxy. Providers without persistent credentials can no-op.
     func invalidateSession() async
+
+    /// Invalidates the credentials that minted a failed request, when the provider
+    /// can prove the same credentials are still current.
+    func invalidateSession(matching credentialIdentity: String?) async
 }
 
 extension ManagedSessionProviding {
+    func currentManagedSession() async throws -> ManagedSessionToken {
+        ManagedSessionToken(jwt: try await currentSessionToken(), credentialIdentity: nil)
+    }
+
     func invalidateSession() async {}
+
+    func invalidateSession(matching credentialIdentity: String?) async {
+        await invalidateSession()
+    }
 }
 
 /// A `ManagedSessionProviding` that always reports "not signed in". Used as the
@@ -74,11 +98,11 @@ struct ManagedInferenceClient: LLMClient {
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         // Mint a fresh session token for this request (tokens are short-lived).
-        let token = try await sessionProvider.currentSessionToken()
+        let session = try await sessionProvider.currentManagedSession()
 
         let body = try Self.encodeBody(request)
         let headers = [
-            "authorization": "Bearer \(token)",
+            "authorization": "Bearer \(session.jwt)",
             "content-type": "application/json"
         ]
 
@@ -90,7 +114,7 @@ struct ManagedInferenceClient: LLMClient {
         }
 
         if response.statusCode == 401 {
-            await sessionProvider.invalidateSession()
+            await sessionProvider.invalidateSession(matching: session.credentialIdentity)
         }
         guard response.isSuccess else {
             throw Self.mapError(status: response.statusCode, body: response.body)

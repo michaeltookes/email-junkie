@@ -1,3 +1,4 @@
+import SentwiseMail
 import XCTest
 @testable import Sentwise
 
@@ -5,6 +6,63 @@ import XCTest
 private struct FixedSessionProvider: ManagedSessionProviding {
     let token: String
     func currentSessionToken() async throws -> String { token }
+}
+
+private enum ManagedProviderSecretError: Error {
+    case removeDenied
+}
+
+private final class ManagedProviderFailingRemoveSecretStore: SecretStore {
+    var failOnRemoveKeys: Set<SecretKey> = []
+    private var storage: [String: String]
+
+    init(seed: [SecretKey: String]) {
+        storage = seed.reduce(into: [:]) { result, item in
+            result[item.key.rawValue] = item.value
+        }
+    }
+
+    func set(_ value: String, for key: SecretKey) throws {
+        storage[key.rawValue] = value
+    }
+
+    func value(for key: SecretKey) throws -> String? {
+        storage[key.rawValue]
+    }
+
+    func remove(_ key: SecretKey) throws {
+        if failOnRemoveKeys.contains(key) {
+            throw ManagedProviderSecretError.removeDenied
+        }
+        storage[key.rawValue] = nil
+    }
+
+    func removeAll() throws {
+        storage.removeAll()
+    }
+}
+
+private final class ManagedProviderQueueClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
+    private var responses: [ClerkHTTPResponse]
+
+    init(_ responses: [ClerkHTTPResponse]) {
+        self.responses = responses
+    }
+
+    func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
+        guard !responses.isEmpty else { return ClerkHTTPResponse(statusCode: 500, headers: [:], body: Data()) }
+        return responses.removeFirst()
+    }
+}
+
+private func managedProviderClerkResponse(
+    _ json: String,
+    status: Int = 200,
+    clientToken: String? = nil
+) -> ClerkHTTPResponse {
+    var headers: [String: String] = [:]
+    if let clientToken { headers["authorization"] = "Bearer \(clientToken)" }
+    return ClerkHTTPResponse(statusCode: status, headers: headers, body: Data(json.utf8))
 }
 
 @MainActor
@@ -64,6 +122,19 @@ final class ManagedProviderTests: XCTestCase {
         let migrated = migrate(settings, secrets: InMemorySecretStore())
         XCTAssertEqual(migrated.llmProvider, "managed")
         XCTAssertEqual(migrated.schemaVersion, 15)
+    }
+
+    func testMigrationClearsStaleCustomModelWhenMovingToManaged() {
+        let settings = Settings(
+            schemaVersion: 14,
+            pollIntervalSeconds: 300,
+            llmProvider: "anthropic",
+            llmModel: "claude-opus-custom"
+        )
+        let migrated = migrate(settings, secrets: InMemorySecretStore())
+
+        XCTAssertEqual(migrated.llmProvider, "managed")
+        XCTAssertEqual(migrated.llmModel, "")
     }
 
     func testMigrationKeepsAConfiguredKeyProvider() {
@@ -133,5 +204,96 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertEqual(response.text, "ok")
         XCTAssertEqual(transport.lastURL, ManagedInference.draftEndpoint)
         XCTAssertEqual(transport.lastHeaders?["authorization"], "Bearer live-session-jwt")
+    }
+
+    func testSignOutManagedKeepsPublishedStateWhenKeychainRemovalFails() async throws {
+        let secrets = ManagedProviderFailingRemoveSecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        secrets.failOnRemoveKeys = [.managedClientToken, .managedSessionID]
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        await appState.signOutManaged()
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(appState.managedAccountEmail, "marcus@example.com")
+        XCTAssertNotNil(appState.managedError)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_X")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+    }
+
+    func testManagedAuthInvalidationDuringDraftClearsPublishedAccountState() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: "me@gmail.com"): "app-pw",
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: ManagedProviderQueueClerkTransport([
+                managedProviderClerkResponse(#"{"errors":[{"message":"expired"}]}"#, status: 401)
+            ])
+        )
+        let managedAccount = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let llm = LLMService(
+            transport: FakeLLMTransport(response: HTTPResponse(
+                statusCode: 200,
+                body: Data(#"{"text":"ok"}"#.utf8)
+            )),
+            managedSessionProvider: managedAccount
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(
+                result: .success(()),
+                bodyResult: .success(Data("Are you free Thursday?".utf8))
+            ),
+            llm: llm,
+            managedAccount: managedAccount
+        )
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        let draft = await appState.generateDraft(for: MailMessage(
+            id: 5,
+            from: MailAddress(name: "Alice", email: "alice@example.com"),
+            subject: "Lunch?",
+            date: ""
+        ))
+
+        XCTAssertNil(draft)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.managedAccountEmail, "")
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.draftError, "Sign in to Sentwise AI first (Settings → AI).")
+        XCTAssertNil(try secrets.value(for: .managedClientToken))
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 }

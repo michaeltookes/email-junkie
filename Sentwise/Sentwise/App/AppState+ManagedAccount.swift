@@ -85,7 +85,12 @@ extension AppState {
         managedError = nil
         isManagedBusy = true
         defer { isManagedBusy = false }
-        await managedAccount.signOut()
+        do {
+            try await managedAccount.signOut()
+        } catch {
+            managedError = Self.managedMessage(for: error)
+            return
+        }
         isManagedSignedIn = false
         managedAccountEmail = ""
         managedEmailInput = ""
@@ -119,6 +124,10 @@ extension AppState {
             return "Unexpected response from sign-in. Please try again."
         case LLMError.managedNotSignedIn:
             return "Sign-in didn't stick. Please try again."
+        case KeychainError.unexpectedStatus(let status):
+            return "Couldn't update Sentwise AI credentials in Keychain. Keychain returned status \(status)."
+        case KeychainError.dataEncodingFailed:
+            return "Couldn't update Sentwise AI credentials in Keychain."
         default:
             return error.localizedDescription
         }
@@ -165,6 +174,7 @@ extension AppState {
             let isConfigured = hasKey || hasVerifiedModel
             if !isConfigured {
                 migrated.llmProvider = "managed"
+                migrated.llmModel = ""
             }
         }
 
@@ -177,5 +187,24 @@ extension AppState {
             }
         }
         return migrated
+    }
+
+    /// If the managed account actor invalidated stored credentials while minting a
+    /// session token, mirror that state back into the published AppState flags.
+    func reconcileManagedAccountState(after error: Error, provider: LLMProviderKind) async {
+        guard provider == .managed else { return }
+        guard case LLMError.managedNotSignedIn = error else { return }
+        guard !(await managedAccount.isSignedIn) else { return }
+
+        isManagedSignedIn = false
+        managedAccountEmail = ""
+        managedCodeInput = ""
+        managedSignInStage = .idle
+        if llmProviderKind == .managed {
+            verifiedLLMModel = ""
+            refreshLLMConnectionStatus()
+            resetDraftPreviewForLLMChange()
+        }
+        saveSettings()
     }
 }

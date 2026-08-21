@@ -71,6 +71,7 @@ extension AppState {
             guard isCurrentDraftRequest(requestGeneration, credentials: credentials, llmConfiguration: llmConfiguration) else {
                 return nil
             }
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
             draftError = Self.draftMessage(for: error)
             return nil
         }
@@ -127,7 +128,13 @@ extension AppState {
             subject: message.subject,
             body: incomingText
         )
-        let outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
+        let outcome: DraftOutcome
+        do {
+            outcome = try await makeReplyOutcome(context: context, llmConfiguration: llmConfiguration)
+        } catch {
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            throw error
+        }
         guard isCurrentDraftContext(
             credentials: credentials,
             llmConfiguration: llmConfiguration,

@@ -60,20 +60,32 @@ actor ManagedAccountService: ManagedSessionProviding {
             clientToken: pending.clientToken,
             flow: pending.flow
         )
-        try persistClientToken(verified.clientToken)
+
+        // Prove the credentials can mint a token before storing the session.
+        let minted = try await mintSessionToken(sessionID: verified.sessionId, clientToken: verified.clientToken)
+        try persistClientToken(minted.clientToken)
         try persistSessionID(verified.sessionId)
         pendingSignIn = nil
-
-        // Prove the stored credentials can mint a token before we call it done.
-        _ = try await currentSessionToken()
     }
 
     /// Signs out: clears the stored device token and session id. Local mail data
     /// is untouched.
-    func signOut() {
+    func signOut() throws {
         pendingSignIn = nil
-        try? secrets.remove(.managedClientToken)
-        try? secrets.remove(.managedSessionID)
+        var firstError: Error?
+        do {
+            try secrets.remove(.managedClientToken)
+        } catch {
+            firstError = error
+        }
+        do {
+            try secrets.remove(.managedSessionID)
+        } catch {
+            firstError = firstError ?? error
+        }
+        if let firstError {
+            throw firstError
+        }
     }
 
     // MARK: - ManagedSessionProviding
@@ -86,17 +98,13 @@ actor ManagedAccountService: ManagedSessionProviding {
             throw LLMError.managedNotSignedIn
         }
         do {
-            let minted = try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
+            let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
             try? persistClientToken(minted.clientToken)
             return minted.jwt
-        } catch ClerkError.http(let status, _) where status == 401 || status == 404 {
+        } catch LLMError.managedNotSignedIn {
             // Device token or session no longer valid — force a fresh sign-in.
-            signOut()
+            try signOut()
             throw LLMError.managedNotSignedIn
-        } catch let error as ClerkError {
-            // Network/transport (or other non-auth) Clerk failure minting a token —
-            // surface as a transport error so the user sees the "couldn't reach" message.
-            throw LLMError.transport(String(describing: error))
         }
     }
 
@@ -119,5 +127,17 @@ actor ManagedAccountService: ManagedSessionProviding {
 
     private func persistSessionID(_ sessionID: String) throws {
         try secrets.set(sessionID, for: .managedSessionID)
+    }
+
+    private func mintSessionToken(sessionID: String, clientToken: String) async throws -> ClerkMintedToken {
+        do {
+            return try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
+        } catch ClerkError.http(let status, _) where status == 401 || status == 404 {
+            throw LLMError.managedNotSignedIn
+        } catch let error as ClerkError {
+            // Network/transport (or other non-auth) Clerk failure minting a token —
+            // surface as a transport error so the user sees the "couldn't reach" message.
+            throw LLMError.transport(String(describing: error))
+        }
     }
 }

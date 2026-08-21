@@ -47,7 +47,13 @@ extension AppState {
         let parsed = ingested.parsed()
         guard !parsed.isEmpty else { throw DraftError.emptyDraft }
 
-        let body = try await makeFollowUpBody(parsed: parsed, llmConfiguration: llmConfiguration)
+        let body: String
+        do {
+            body = try await makeFollowUpBody(parsed: parsed, llmConfiguration: llmConfiguration)
+        } catch {
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
+            throw error
+        }
         guard mailCredentials == credentials,
               currentDraftLLMConfiguration == llmConfiguration else {
             throw DraftDispatchError.accountChanged

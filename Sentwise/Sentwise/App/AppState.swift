@@ -339,6 +339,7 @@ final class AppState: ObservableObject {
         secrets: SecretStore = KeychainStore.shared,
         mailProvider: MailProvider = IMAPMailProvider(),
         llm: LLMProviding? = nil,
+        managedAccount: ManagedAccountService? = nil,
         notifier: DraftNotifying = NullDraftNotifier(),
         reachability: NetworkReachabilityMonitoring = NetworkReachabilityMonitor()
     ) {
@@ -346,7 +347,7 @@ final class AppState: ObservableObject {
         self.secrets = secrets
         self.mailProvider = mailProvider
         // Managed account (item 56a) + wire it as the LLM session provider.
-        let managedAccount = ManagedAccountService(secrets: secrets)
+        let managedAccount = managedAccount ?? ManagedAccountService(secrets: secrets)
         self.managedAccount = managedAccount
         self.llm = llm ?? LLMService(managedSessionProvider: managedAccount)
         self.notifier = notifier

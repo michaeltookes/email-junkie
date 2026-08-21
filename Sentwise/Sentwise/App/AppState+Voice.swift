@@ -57,6 +57,7 @@ extension AppState {
                 voiceError = Self.staleVoiceLLMConfigurationMessage
                 return
             }
+            await reconcileManagedAccountState(after: error, provider: llmConfiguration.provider)
             voiceError = Self.voiceMessage(for: error)
         }
     }

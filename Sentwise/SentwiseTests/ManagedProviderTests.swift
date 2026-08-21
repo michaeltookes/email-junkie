@@ -329,4 +329,63 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertNil(try secrets.value(for: .managedClientToken))
         XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
+
+    func testManagedProxyAuthFailureDuringDraftClearsPublishedAccountState() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .mailAppPassword(email: "me@gmail.com"): "app-pw",
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            mailEmail: "me@gmail.com",
+            llmProvider: "managed",
+            llmVerifiedModel: LLMProviderKind.managed.defaultModel,
+            managedAccountEmail: "marcus@example.com"
+        ))
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: ManagedProviderQueueClerkTransport([
+                managedProviderClerkResponse(#"{"jwt":"live.jwt"}"#, clientToken: "client_Y")
+            ])
+        )
+        let managedAccount = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let llm = LLMService(
+            transport: FakeLLMTransport(response: HTTPResponse(
+                statusCode: 401,
+                body: Data(#"{"error":{"type":"unauthenticated","message":"Sign in."}}"#.utf8)
+            )),
+            managedSessionProvider: managedAccount
+        )
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(
+                result: .success(()),
+                bodyResult: .success(Data("Are you free Thursday?".utf8))
+            ),
+            llm: llm,
+            managedAccount: managedAccount
+        )
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+
+        let draft = await appState.generateDraft(for: MailMessage(
+            id: 5,
+            from: MailAddress(name: "Alice", email: "alice@example.com"),
+            subject: "Lunch?",
+            date: ""
+        ))
+
+        XCTAssertNil(draft)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertEqual(appState.managedAccountEmail, "")
+        XCTAssertEqual(appState.verifiedLLMModel, "")
+        XCTAssertEqual(appState.draftError, "Sign in to Sentwise AI first (Settings → AI).")
+        XCTAssertNil(try secrets.value(for: .managedClientToken))
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
 }

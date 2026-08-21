@@ -12,6 +12,18 @@ private struct StubSessionProvider: ManagedSessionProviding {
     }
 }
 
+private actor RecordingSessionProvider: ManagedSessionProviding {
+    private(set) var didInvalidate = false
+
+    func currentSessionToken() async throws -> String {
+        "session-jwt"
+    }
+
+    func invalidateSession() async {
+        didInvalidate = true
+    }
+}
+
 final class ManagedInferenceClientTests: XCTestCase {
 
     private func sampleRequest() -> LLMRequest {
@@ -76,17 +88,18 @@ final class ManagedInferenceClientTests: XCTestCase {
     }
 
     func testMaps401ToManagedNotSignedIn() async {
+        let sessionProvider = RecordingSessionProvider()
         let transport = FakeLLMTransport(response: json(
             #"{"error":{"type":"unauthenticated","message":"Sign in."}}"#,
             status: 401
         ))
-        let client = ManagedInferenceClient(sessionProvider: StubSessionProvider(), transport: transport)
+        let client = ManagedInferenceClient(sessionProvider: sessionProvider, transport: transport)
 
         do {
             _ = try await client.complete(sampleRequest())
             XCTFail("Expected not-signed-in error")
         } catch LLMError.managedNotSignedIn {
-            // expected
+            XCTAssertTrue(await sessionProvider.didInvalidate)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

@@ -33,6 +33,14 @@ protocol ManagedSessionProviding: Sendable {
     /// fresh token per call (session tokens are short-lived), so callers never
     /// cache the result.
     func currentSessionToken() async throws -> String
+
+    /// Invalidates stored managed-account credentials after an authentication
+    /// failure from the proxy. Providers without persistent credentials can no-op.
+    func invalidateSession() async
+}
+
+extension ManagedSessionProviding {
+    func invalidateSession() async {}
 }
 
 /// A `ManagedSessionProviding` that always reports "not signed in". Used as the
@@ -81,6 +89,9 @@ struct ManagedInferenceClient: LLMClient {
             throw LLMError.transport(String(describing: error))
         }
 
+        if response.statusCode == 401 {
+            await sessionProvider.invalidateSession()
+        }
         guard response.isSuccess else {
             throw Self.mapError(status: response.statusCode, body: response.body)
         }

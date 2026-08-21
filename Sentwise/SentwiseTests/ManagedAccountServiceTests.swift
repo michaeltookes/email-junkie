@@ -41,6 +41,47 @@ private final class SuspendedClerkTransport: ClerkHTTPTransport, @unchecked Send
     }
 }
 
+private final class MultiSuspendedClerkTransport: ClerkHTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuations: [CheckedContinuation<ClerkHTTPResponse, Never>] = []
+    private var recordedRequests: [(url: URL, headers: [String: String], form: [String: String])] = []
+    var onRequest: ((Int) -> Void)?
+
+    func postForm(_ url: URL, headers: [String: String], form: [String: String]) async throws -> ClerkHTTPResponse {
+        await withCheckedContinuation { continuation in
+            let requestNumber: Int
+            let onRequest: ((Int) -> Void)?
+            lock.lock()
+            recordedRequests.append((url, headers, form))
+            continuations.append(continuation)
+            requestNumber = recordedRequests.count
+            onRequest = self.onRequest
+            lock.unlock()
+            onRequest?(requestNumber)
+        }
+    }
+
+    func resumeNext(with response: ClerkHTTPResponse) {
+        lock.lock()
+        let continuation = continuations.isEmpty ? nil : continuations.removeFirst()
+        lock.unlock()
+        continuation?.resume(returning: response)
+    }
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedRequests.count
+    }
+
+    func authorizationHeader(at index: Int) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recordedRequests.indices.contains(index) else { return nil }
+        return recordedRequests[index].headers["authorization"]
+    }
+}
+
 private func response(_ json: String, status: Int = 200, clientToken: String? = nil) -> ClerkHTTPResponse {
     var headers: [String: String] = [:]
     if let clientToken { headers["authorization"] = "Bearer \(clientToken)" }
@@ -235,6 +276,44 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 
+    func testInvalidateSessionMarksAccountSignedOutWhenKeychainRemovalFails() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        secrets.failOnRemoveKeys = [.managedClientToken, .managedSessionID]
+        let account = service(QueueClerkTransport([]), secrets: secrets)
+
+        XCTAssertTrue(await account.isSignedIn)
+        await account.invalidateSession()
+
+        XCTAssertFalse(await account.isSignedIn)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_X")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+    }
+
+    func testStartSignInAfterInvalidationDoesNotEchoStaleStoredClientToken() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        secrets.failOnRemoveKeys = [.managedClientToken, .managedSessionID]
+        let startedResponse = #"{"response":{"id":"sia_1","supported_first_factors":["#
+            + #"{"strategy":"email_code","email_address_id":"ema_1"}]}}"#
+        let transport = QueueClerkTransport([
+            response(startedResponse, clientToken: "client_A"),
+            response(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B")
+        ])
+        let account = service(transport, secrets: secrets)
+
+        await account.invalidateSession()
+        try await account.startSignIn(email: "marcus@example.com")
+
+        XCTAssertEqual(transport.requests.first?.headers["authorization"], "Bearer ")
+        XCTAssertFalse(await account.isSignedIn)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_B")
+    }
+
     func testCurrentSessionTokenSurfacesRotatedClientTokenPersistenceFailure() async throws {
         let secrets = ManagedAccountFailingSecretStore(seed: [
             .managedClientToken: "client_X",
@@ -286,6 +365,42 @@ final class ManagedAccountServiceTests: XCTestCase {
 
         XCTAssertNil(try secrets.value(for: .managedClientToken))
         XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
+
+    func testCurrentSessionTokenSerializesRotatingTokenMints() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let transport = MultiSuspendedClerkTransport()
+        let firstStarted = expectation(description: "first mint request started")
+        let secondStarted = expectation(description: "second mint request started")
+        transport.onRequest = { requestNumber in
+            if requestNumber == 1 {
+                firstStarted.fulfill()
+            } else if requestNumber == 2 {
+                secondStarted.fulfill()
+            }
+        }
+        let account = service(transport, secrets: secrets)
+
+        let firstTask = Task { try await account.currentSessionToken() }
+        await fulfillment(of: [firstStarted], timeout: 1.0)
+
+        let secondTask = Task { try await account.currentSessionToken() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(transport.requestCount, 1)
+
+        transport.resumeNext(with: response(#"{"jwt":"first.jwt"}"#, clientToken: "client_Y"))
+        XCTAssertEqual(try await firstTask.value, "first.jwt")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_Y")
+
+        await fulfillment(of: [secondStarted], timeout: 1.0)
+        XCTAssertEqual(transport.authorizationHeader(at: 1), "Bearer client_Y")
+
+        transport.resumeNext(with: response(#"{"jwt":"second.jwt"}"#, clientToken: "client_Z"))
+        XCTAssertEqual(try await secondTask.value, "second.jwt")
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_Z")
     }
 
     func testSignOutClearsStoredCredentials() async throws {

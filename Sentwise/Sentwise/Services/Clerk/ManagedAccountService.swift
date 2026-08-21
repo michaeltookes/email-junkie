@@ -20,6 +20,15 @@ actor ManagedAccountService: ManagedSessionProviding {
     private var pendingSignIn: ClerkSignInHandle?
     /// Changes whenever the stored account identity is cleared or replaced.
     private var authenticationGeneration = 0
+    /// Set after the server rejects credentials that may still be present in
+    /// Keychain. This keeps the current process logically signed out even if
+    /// cleanup cannot remove every stale value.
+    private var areStoredCredentialsInvalidated = false
+    /// Clerk rotates the client token on every mint, so only one mint may be in
+    /// flight at a time. Actor reentrancy alone is not enough because the actor is
+    /// released while the network request is suspended.
+    private var isMintingSessionToken = false
+    private var mintWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(secrets: SecretStore, clerk: ClerkClient = ClerkClient()) {
         self.secrets = secrets
@@ -31,14 +40,15 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// True when a device token and session id are both stored — i.e. the user
     /// has a usable managed account.
     var isSignedIn: Bool {
-        storedClientToken != nil && storedSessionID != nil
+        !areStoredCredentialsInvalidated && storedClientToken != nil && storedSessionID != nil
     }
 
     /// Begins email-code sign-in and sends the OTP. The device (client) token is
     /// persisted immediately so a rotated token survives even if the user quits
     /// before entering the code.
     func startSignIn(email: String) async throws {
-        let handle = try await clerk.sendEmailCode(email: email, clientToken: storedClientToken ?? "")
+        let existingClientToken = areStoredCredentialsInvalidated ? "" : storedClientToken ?? ""
+        let handle = try await clerk.sendEmailCode(email: email, clientToken: existingClientToken)
         pendingSignIn = handle
         // Persisting the rotated device token early is best-effort; a Keychain
         // failure here must not abort sign-in — the token is re-persisted on verify.
@@ -79,6 +89,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
         try persistClientToken(minted.clientToken)
         try persistSessionID(verified.sessionId)
+        areStoredCredentialsInvalidated = false
         authenticationGeneration &+= 1
         pendingSignIn = nil
     }
@@ -102,6 +113,9 @@ actor ManagedAccountService: ManagedSessionProviding {
         if wasSignedIn && !isSignedIn {
             authenticationGeneration &+= 1
         }
+        if !hasStoredManagedCredential {
+            areStoredCredentialsInvalidated = false
+        }
         if let firstError {
             throw firstError
         }
@@ -114,21 +128,62 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// rotated token is never silently lost. Throws `LLMError.managedNotSignedIn`
     /// when there is no stored account.
     func currentSessionToken() async throws -> String {
-        guard let clientToken = storedClientToken, let sessionID = storedSessionID else {
-            throw LLMError.managedNotSignedIn
+        await beginMintTurn()
+        defer { endMintTurn() }
+        return try await mintCurrentSessionToken()
+    }
+
+    func invalidateSession() async {
+        let wasSignedIn = isSignedIn
+        pendingSignIn = nil
+        areStoredCredentialsInvalidated = true
+        if wasSignedIn {
+            authenticationGeneration &+= 1
         }
-        let generation = authenticationGeneration
         do {
-            let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
-            guard generation == authenticationGeneration, storedSessionID == sessionID else {
+            try secrets.remove(.managedClientToken)
+        } catch {
+            logger.error("Failed to remove invalid managed client token: \(error.localizedDescription)")
+        }
+        do {
+            try secrets.remove(.managedSessionID)
+        } catch {
+            logger.error("Failed to remove invalid managed session id: \(error.localizedDescription)")
+        }
+    }
+
+    private func mintCurrentSessionToken() async throws -> String {
+        while true {
+            guard !areStoredCredentialsInvalidated,
+                  let clientToken = storedClientToken,
+                  let sessionID = storedSessionID
+            else {
                 throw LLMError.managedNotSignedIn
             }
-            try persistClientToken(minted.clientToken)
-            return minted.jwt
-        } catch LLMError.managedNotSignedIn {
-            // Device token or session no longer valid — force a fresh sign-in.
-            try signOut()
-            throw LLMError.managedNotSignedIn
+            let generation = authenticationGeneration
+            do {
+                let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
+                switch credentialState(generation: generation, sessionID: sessionID, clientToken: clientToken) {
+                case .current:
+                    try persistClientToken(minted.clientToken)
+                    return minted.jwt
+                case .rotated:
+                    continue
+                case .signedOutOrReplaced:
+                    throw LLMError.managedNotSignedIn
+                }
+            } catch LLMError.managedNotSignedIn {
+                switch credentialState(generation: generation, sessionID: sessionID, clientToken: clientToken) {
+                case .current:
+                    // Device token or session no longer valid — force a fresh sign-in.
+                    await invalidateSession()
+                    throw LLMError.managedNotSignedIn
+                case .rotated:
+                    continue
+                case .signedOutOrReplaced:
+                    throw LLMError.managedNotSignedIn
+                }
+            }
         }
     }
 
@@ -142,6 +197,10 @@ actor ManagedAccountService: ManagedSessionProviding {
     private var storedSessionID: String? {
         let value = (try? secrets.value(for: .managedSessionID)) ?? nil
         return (value?.isEmpty == false) ? value : nil
+    }
+
+    private var hasStoredManagedCredential: Bool {
+        storedClientToken != nil || storedSessionID != nil
     }
 
     private func persistClientToken(_ token: String) throws {
@@ -170,6 +229,41 @@ actor ManagedAccountService: ManagedSessionProviding {
         } catch {
             logger.error("Failed to persist Clerk client token after sign-in attempt: \(error.localizedDescription)")
         }
+    }
+
+    private func beginMintTurn() async {
+        guard isMintingSessionToken else {
+            isMintingSessionToken = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            mintWaiters.append(continuation)
+        }
+    }
+
+    private func endMintTurn() {
+        guard !mintWaiters.isEmpty else {
+            isMintingSessionToken = false
+            return
+        }
+        let next = mintWaiters.removeFirst()
+        next.resume()
+    }
+
+    private enum MintCredentialState {
+        case current
+        case rotated
+        case signedOutOrReplaced
+    }
+
+    private func credentialState(generation: Int, sessionID: String, clientToken: String) -> MintCredentialState {
+        guard !areStoredCredentialsInvalidated,
+              generation == authenticationGeneration,
+              storedSessionID == sessionID
+        else {
+            return .signedOutOrReplaced
+        }
+        return storedClientToken == clientToken ? .current : .rotated
     }
 
     private func mintSessionToken(sessionID: String, clientToken: String) async throws -> ClerkMintedToken {

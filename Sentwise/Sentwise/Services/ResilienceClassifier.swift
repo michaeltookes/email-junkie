@@ -73,9 +73,9 @@ enum ResilienceClassifier {
             return .transient
         case .http(let status, _):
             return classifyHTTPStatus(status)
-        case .missingAPIKey, .managedNotSignedIn:
+        case .missingAPIKey, .managedNotSignedIn, .managedTrialExpired:
             return .authentication
-        case .invalidResponse, .invalidBaseURL, .managedTrialExpired:
+        case .invalidResponse, .invalidBaseURL:
             return .permanent
         }
     }

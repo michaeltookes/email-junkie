@@ -40,19 +40,21 @@ struct AIProviderSettingsView: View {
                     }
                     ManagedSignInControls()
                 }
+                ManagedAccountErrorMessage()
             }
 
             Section("Use your own AI provider") {
                 Picker("Provider", selection: Binding(
                     get: {
-                        appState.llmProviderKind == .managed
-                            ? (byoProviders.first ?? .anthropic)
-                            : appState.llmProviderKind
+                        appState.llmProviderKind == .managed ? nil : appState.llmProviderKind
                     },
-                    set: { appState.selectLLMProvider($0) }
+                    set: { provider in
+                        guard let provider else { return }
+                        appState.selectLLMProvider(provider)
+                    }
                 )) {
                     ForEach(byoProviders) { kind in
-                        Text(kind.displayName).tag(kind)
+                        Text(kind.displayName).tag(Optional(kind))
                     }
                 }
                 .accessibilityLabel("AI provider")
@@ -82,7 +84,7 @@ struct AIProviderSettingsView: View {
                             Text("Connected").foregroundStyle(.green)
                         }
                         Button("Disconnect", role: .destructive) {
-                            appState.disconnectLLM(provider: displayedBYOProvider)
+                            appState.disconnectLLM(provider: appState.llmProviderKind)
                         }
                         .accessibilityLabel("Disconnect AI provider")
                     } else {
@@ -173,11 +175,6 @@ struct AIProviderSettingsView: View {
     /// The bring-your-own providers (everything except managed inference).
     private var byoProviders: [LLMProviderKind] {
         LLMProviderKind.allCases.filter { $0 != .managed }
-    }
-
-    /// The BYO provider this section shows (see `BYOProviderControls`).
-    private var displayedBYOProvider: LLMProviderKind {
-        appState.llmProviderKind == .managed ? (byoProviders.first ?? .anthropic) : appState.llmProviderKind
     }
 
     /// Endpoint help text tailored to the selected provider.

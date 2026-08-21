@@ -35,9 +35,22 @@ struct ManagedInferenceCard: View {
             } else {
                 ManagedSignInControls()
             }
+            ManagedAccountErrorMessage()
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
+    }
+}
+
+/// Managed-account errors live at the enclosing provider level so sign-in and
+/// sign-out failures remain visible in both signed-in and signed-out states.
+struct ManagedAccountErrorMessage: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        if let error = appState.managedError {
+            OnboardingError(message: error)
+        }
     }
 }
 
@@ -87,9 +100,6 @@ struct ManagedSignInControls: View {
                 Text("Sign-in is disabled during Prowl hunts.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let error = appState.managedError {
-                OnboardingError(message: error)
-            }
         }
         // A stale error shouldn't linger once the user starts correcting it.
         .onChange(of: appState.managedEmailInput) { _, _ in appState.managedError = nil }
@@ -115,20 +125,23 @@ struct BYOProviderControls: View {
         LLMProviderKind.allCases.filter { $0 != .managed }
     }
 
-    /// The BYO provider this card shows: the active one, or the first BYO option
-    /// while managed inference is active.
-    private var displayedBYOProvider: LLMProviderKind {
-        appState.llmProviderKind == .managed ? (byoProviders.first ?? .anthropic) : appState.llmProviderKind
+    /// The BYO provider this card shows: the active one, or no selection while
+    /// managed inference is active so tapping any BYO provider activates it.
+    private var displayedBYOProvider: LLMProviderKind? {
+        appState.llmProviderKind == .managed ? nil : appState.llmProviderKind
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Provider", selection: Binding(
                 get: { displayedBYOProvider },
-                set: { appState.selectLLMProvider($0) }
+                set: { provider in
+                    guard let provider else { return }
+                    appState.selectLLMProvider(provider)
+                }
             )) {
                 ForEach(byoProviders) { kind in
-                    Text(kind.displayName).tag(kind)
+                    Text(kind.displayName).tag(Optional(kind))
                 }
             }
             .accessibilityIdentifier("byoProviderPicker")
@@ -148,7 +161,9 @@ struct BYOProviderControls: View {
 
                 if appState.isLLMConnected {
                     ConnectedBadge(text: "Connected")
-                    Button("Disconnect", role: .destructive) { appState.disconnectLLM(provider: displayedBYOProvider) }
+                    Button("Disconnect", role: .destructive) {
+                        appState.disconnectLLM(provider: appState.llmProviderKind)
+                    }
                 } else {
                     SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
                         .textFieldStyle(.roundedBorder)

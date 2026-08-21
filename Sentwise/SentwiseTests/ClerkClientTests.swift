@@ -220,4 +220,20 @@ final class ClerkClientTests: XCTestCase {
         XCTAssertTrue(tokenRequest.url.absoluteString.contains("/v1/client/sessions/sess_7/tokens"))
         XCTAssertEqual(tokenRequest.headers["authorization"], "Bearer client_C")
     }
+
+    func testMintSessionTokenMalformedResponseCarriesRotatedClientToken() async {
+        let transport = FakeClerkTransport([
+            clerkResponse(#"{"unexpected":"shape"}"#, clientToken: "client_D")
+        ])
+
+        do {
+            _ = try await client(transport).mintSessionToken(sessionId: "sess_7", clientToken: "client_C")
+            XCTFail("Expected malformed response")
+        } catch ClerkError.malformedResponse(let message, let clientToken) {
+            XCTAssertEqual(message, "session token jwt missing")
+            XCTAssertEqual(clientToken, "client_D")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }

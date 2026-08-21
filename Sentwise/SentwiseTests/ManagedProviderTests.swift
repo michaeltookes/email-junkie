@@ -229,6 +229,52 @@ final class ManagedProviderTests: XCTestCase {
         XCTAssertEqual(transport.lastHeaders?["authorization"], "Bearer live-session-jwt")
     }
 
+    func testManagedSignInStoresPendingFlowEmailWhenInputChangesBeforeVerify() async throws {
+        let secrets = InMemorySecretStore()
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "managed"
+        ))
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: ManagedProviderQueueClerkTransport([
+                managedProviderClerkResponse(
+                    #"{"response":{"id":"sia_1","supported_first_factors":[{"strategy":"email_code","email_address_id":"ema_1"}]}}"#,
+                    clientToken: "client_A"
+                ),
+                managedProviderClerkResponse(#"{"response":{"id":"sia_1"}}"#, clientToken: "client_B"),
+                managedProviderClerkResponse(
+                    #"{"response":{"id":"sia_1","status":"complete","created_session_id":"sess_1"}}"#,
+                    clientToken: "client_C"
+                ),
+                managedProviderClerkResponse(#"{"jwt":"session.jwt"}"#, clientToken: "client_D")
+            ])
+        )
+        let managedAccount = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(())),
+            managedAccount: managedAccount
+        )
+
+        appState.managedEmailInput = "marcus@example.com"
+        await appState.startManagedSignIn()
+
+        appState.managedEmailInput = "wrong@example.com"
+        appState.managedCodeInput = "123456"
+        await appState.verifyManagedCode()
+
+        XCTAssertEqual(appState.managedAccountEmail, "marcus@example.com")
+        XCTAssertEqual(appState.managedEmailInput, "marcus@example.com")
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_D")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
+    }
+
     func testSignOutManagedKeepsPublishedStateWhenKeychainRemovalFails() async throws {
         let secrets = ManagedProviderFailingRemoveSecretStore(seed: [
             .managedClientToken: "client_X",

@@ -35,8 +35,11 @@ extension AppState {
 
         isManagedBusy = true
         defer { isManagedBusy = false }
+        pendingManagedSignInEmail = nil
         do {
             try await managedAccount.startSignIn(email: email)
+            pendingManagedSignInEmail = email
+            managedEmailInput = email
             managedSignInStage = .codeSent
         } catch {
             managedError = Self.managedMessage(for: error)
@@ -62,9 +65,13 @@ extension AppState {
             return
         }
 
-        // Sign-in succeeded: record the account and mark managed connected.
-        managedAccountEmail = managedEmailInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Sign-in succeeded: record the account tied to the pending Clerk flow.
+        let signedInEmail = pendingManagedSignInEmail
+            ?? managedEmailInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        managedAccountEmail = signedInEmail
+        managedEmailInput = signedInEmail
         managedCodeInput = ""
+        pendingManagedSignInEmail = nil
         managedSignInStage = .idle
         isManagedSignedIn = true
 
@@ -77,6 +84,13 @@ extension AppState {
         }
         saveSettings()
         startTranscriptFolderWatchingIfEnabled()
+    }
+
+    func resetManagedSignInFlow() {
+        pendingManagedSignInEmail = nil
+        managedSignInStage = .idle
+        managedCodeInput = ""
+        managedError = nil
     }
 
     /// Signs out of the managed account: clears stored tokens and connected state.
@@ -108,6 +122,7 @@ extension AppState {
             managedEmailInput = ""
         }
         managedCodeInput = ""
+        pendingManagedSignInEmail = nil
         managedSignInStage = .idle
         if llmProviderKind == .managed {
             verifiedLLMModel = ""

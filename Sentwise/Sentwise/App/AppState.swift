@@ -102,6 +102,9 @@ final class AppState: ObservableObject {
     /// Email and OTP code typed into the managed sign-in form.
     @Published var managedEmailInput: String = ""
     @Published var managedCodeInput: String = ""
+    /// Email address tied to the current Clerk pending sign-in handle. This is
+    /// transient like the handle itself, so it is intentionally not persisted.
+    var pendingManagedSignInEmail: String?
 
     // MARK: - Voice Profile
 

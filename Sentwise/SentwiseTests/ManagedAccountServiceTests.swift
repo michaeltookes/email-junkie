@@ -460,6 +460,32 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
     }
 
+    func testCurrentSessionTokenPersistsRotatedClientTokenFromMalformedMintResponse() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let account = service(
+            QueueClerkTransport([
+                response(#"{"unexpected":"shape"}"#, clientToken: "client_Y")
+            ]),
+            secrets: secrets
+        )
+
+        do {
+            _ = try await account.currentSessionToken()
+            XCTFail("Expected transport error")
+        } catch LLMError.transport {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(await account.isSignedIn)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_Y")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+    }
+
     func testInvalidateSessionMarksAccountSignedOutWhenKeychainRemovalFails() async throws {
         let secrets = ManagedAccountFailingSecretStore(seed: [
             .managedClientToken: "client_X",

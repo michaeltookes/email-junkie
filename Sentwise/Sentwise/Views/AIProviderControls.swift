@@ -66,6 +66,7 @@ struct ManagedSignInControls: View {
                 TextField("Email address", text: $appState.managedEmailInput)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(appState.isManagedBusy)
                     .accessibilityIdentifier("managedEmailField")
                 Button {
                     Task { await appState.startManagedSignIn() }
@@ -88,12 +89,9 @@ struct ManagedSignInControls: View {
                     }
                     .disabled(appState.isManagedBusy || isHuntMode)
                     .accessibilityIdentifier("managedVerifyButton")
-                    Button("Use a different email") {
-                        appState.managedSignInStage = .idle
-                        appState.managedCodeInput = ""
-                        appState.managedError = nil
-                    }
-                    .buttonStyle(.link)
+                    Button("Use a different email") { appState.resetManagedSignInFlow() }
+                        .disabled(appState.isManagedBusy)
+                        .buttonStyle(.link)
                 }
             }
             if isHuntMode {

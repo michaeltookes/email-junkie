@@ -103,7 +103,7 @@ enum ClerkError: Error, Equatable, Sendable {
     /// The API returned a non-2xx with an optional user-facing message.
     case http(status: Int, message: String?, clientToken: String? = nil)
     /// A required field was missing from an otherwise-2xx response.
-    case malformedResponse(String)
+    case malformedResponse(String, clientToken: String? = nil)
     /// The sign-in didn't reach `complete` (e.g. needs a second factor we don't
     /// support in 56a).
     case notComplete(status: String?, missingFields: [String] = [], clientToken: String? = nil)
@@ -115,7 +115,9 @@ enum ClerkError: Error, Equatable, Sendable {
 
     var clientToken: String? {
         switch self {
-        case .http(_, _, let clientToken), .notComplete(_, _, let clientToken):
+        case .http(_, _, let clientToken),
+             .malformedResponse(_, let clientToken),
+             .notComplete(_, _, let clientToken):
             return clientToken
         default:
             return nil
@@ -297,7 +299,7 @@ struct ClerkClient: Sendable {
         }
         let decoded = try? JSONDecoder().decode(TokenEnvelope.self, from: response.body)
         guard let jwt = decoded?.jwt, !jwt.isEmpty else {
-            throw ClerkError.malformedResponse("session token jwt missing")
+            throw ClerkError.malformedResponse("session token jwt missing", clientToken: response.clientToken)
         }
         return ClerkMintedToken(jwt: jwt, clientToken: response.clientToken ?? clientToken)
     }
@@ -337,7 +339,7 @@ struct ClerkClient: Sendable {
             )
         }
         guard let resource = envelope?.response else {
-            throw ClerkError.malformedResponse("missing response object")
+            throw ClerkError.malformedResponse("missing response object", clientToken: clientToken)
         }
         return resource
     }

@@ -91,7 +91,8 @@ actor ManagedAccountService: ManagedSessionProviding {
     // MARK: - ManagedSessionProviding
 
     /// Mints a fresh, short-lived session JWT for the proxy. Rotates and re-stores
-    /// the device token that Clerk returns. Throws `LLMError.managedNotSignedIn`
+    /// the device token that Clerk returns, surfacing persistence failures so the
+    /// rotated token is never silently lost. Throws `LLMError.managedNotSignedIn`
     /// when there is no stored account.
     func currentSessionToken() async throws -> String {
         guard let clientToken = storedClientToken, let sessionID = storedSessionID else {
@@ -99,7 +100,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
         do {
             let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
-            try? persistClientToken(minted.clientToken)
+            try persistClientToken(minted.clientToken)
             return minted.jwt
         } catch LLMError.managedNotSignedIn {
             // Device token or session no longer valid — force a fresh sign-in.

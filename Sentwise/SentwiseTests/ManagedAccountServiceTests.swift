@@ -22,10 +22,12 @@ private func response(_ json: String, status: Int = 200, clientToken: String? = 
 }
 
 private enum ManagedAccountTestSecretError: Error {
+    case setDenied
     case removeDenied
 }
 
-private final class ManagedAccountFailingRemoveSecretStore: SecretStore {
+private final class ManagedAccountFailingSecretStore: SecretStore {
+    var failOnSetKeys: Set<SecretKey> = []
     var failOnRemoveKeys: Set<SecretKey> = []
     private var storage: [String: String]
 
@@ -36,6 +38,9 @@ private final class ManagedAccountFailingRemoveSecretStore: SecretStore {
     }
 
     func set(_ value: String, for key: SecretKey) throws {
+        if failOnSetKeys.contains(key) {
+            throw ManagedAccountTestSecretError.setDenied
+        }
         storage[key.rawValue] = value
     }
 
@@ -169,6 +174,30 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 
+    func testCurrentSessionTokenSurfacesRotatedClientTokenPersistenceFailure() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        secrets.failOnSetKeys = [.managedClientToken]
+        let account = service(
+            QueueClerkTransport([response(#"{"jwt":"fresh.jwt"}"#, clientToken: "client_Y")]),
+            secrets: secrets
+        )
+
+        do {
+            _ = try await account.currentSessionToken()
+            XCTFail("Expected client-token persistence failure")
+        } catch ManagedAccountTestSecretError.setDenied {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_X")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
+    }
+
     func testSignOutClearsStoredCredentials() async throws {
         let secrets = InMemorySecretStore(seed: [
             .managedClientToken: "client_X",
@@ -185,7 +214,7 @@ final class ManagedAccountServiceTests: XCTestCase {
     }
 
     func testSignOutSurfacesKeychainRemovalFailures() async throws {
-        let secrets = ManagedAccountFailingRemoveSecretStore(seed: [
+        let secrets = ManagedAccountFailingSecretStore(seed: [
             .managedClientToken: "client_X",
             .managedSessionID: "sess_X"
         ])

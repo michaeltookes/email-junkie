@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Shared AI-provider controls used by both onboarding and Settings (item 56a):
-/// the managed-inference sign-in card and the bring-your-own-provider controls.
-/// Extracted from `OnboardingView` to keep that file within length limits.
+/// Shared AI-provider controls used by both onboarding and Settings (items 56a,
+/// 59): the managed-inference sign-in card and the guided bring-your-own-provider
+/// controls. Extracted from `OnboardingView` to keep that file within length limits.
 
 /// The primary, pre-selected managed-inference option: sign in and draft, no key.
 struct ManagedInferenceCard: View {
     @EnvironmentObject var appState: AppState
 
-    private var isHuntMode: Bool { ProwlHuntRuntime.current.isEnabled }
-    private var isSelected: Bool { appState.llmProviderKind == .managed }
+    private var isActive: Bool { appState.isManagedProviderActive }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,14 +16,12 @@ struct ManagedInferenceCard: View {
                 Image(systemName: "sparkles").foregroundStyle(.tint)
                 Text("Sentwise AI — included with your subscription").font(.callout).bold()
                 Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                }
+                if isActive { ActiveProviderBadge() }
             }
             Text("Nothing to set up — no API key, no billing beyond Sentwise. 14-day free trial.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            if !isSelected {
+            if !isActive {
                 Button("Use Sentwise AI") { appState.selectLLMProvider(.managed) }
                     .accessibilityIdentifier("useManagedInference")
             } else if appState.isManagedSignedIn {
@@ -33,6 +30,8 @@ struct ManagedInferenceCard: View {
                     .disabled(appState.isManagedBusy)
                     .accessibilityIdentifier("managedSignOutButton")
             } else {
+                Text("Sign in or create your account")
+                    .font(.caption).foregroundStyle(.secondary)
                 ManagedSignInControls()
             }
             ManagedAccountErrorMessage()
@@ -54,15 +53,29 @@ struct ManagedAccountErrorMessage: View {
     }
 }
 
-/// Email-code sign-in controls for the managed account.
+/// Sign-in controls for the managed account: one-click Google alongside the
+/// email-code flow. First-time users pass transparently through Clerk's sign-up.
 struct ManagedSignInControls: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.openURL) private var openURL
 
     private var isHuntMode: Bool { ProwlHuntRuntime.current.isEnabled }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if appState.managedSignInStage == .idle {
+                Button {
+                    Task {
+                        await appState.startManagedGoogleSignIn { openURL($0) }
+                    }
+                } label: {
+                    signInLabel(busy: appState.isManagedBusy, title: "Continue with Google")
+                }
+                .disabled(appState.isManagedBusy || isHuntMode)
+                .accessibilityIdentifier("managedGoogleSignInButton")
+
+                Text("or use your email").font(.caption).foregroundStyle(.secondary)
+
                 TextField("Email address", text: $appState.managedEmailInput)
                     .textContentType(.username)
                     .textFieldStyle(.roundedBorder)
@@ -114,73 +127,101 @@ struct ManagedSignInControls: View {
     }
 }
 
-/// The bring-your-own-provider controls (picker + model + base URL + key + test).
-/// Managed is excluded from the picker here — it lives in its own card above.
+/// The guided bring-your-own-provider controls (item 59): featured OpenRouter
+/// one-click, a provider picker with per-provider key guidance, model/base-URL/key
+/// + Test Connection, the connected state, and the privacy note. Managed is
+/// excluded from the picker — it lives in its own card above.
 struct BYOProviderControls: View {
     @EnvironmentObject var appState: AppState
+
+    /// The provider highlighted in the picker. Staged locally so opening the
+    /// picker doesn't immediately switch the active provider; "Use this provider"
+    /// makes the switch. Synced to the active provider when BYO is live.
+    @State private var stagedProvider: LLMProviderKind = .anthropic
 
     private var byoProviders: [LLMProviderKind] {
         LLMProviderKind.allCases.filter { $0 != .managed }
     }
 
-    /// The BYO provider this card shows: the active one, or no selection while
-    /// managed inference is active so tapping any BYO provider activates it.
-    private var displayedBYOProvider: LLMProviderKind? {
-        appState.llmProviderKind == .managed ? nil : appState.llmProviderKind
+    /// Whether the staged provider is the one currently drafting.
+    private var isStagedProviderActive: Bool {
+        appState.llmProviderKind == stagedProvider
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Provider", selection: Binding(
-                get: { displayedBYOProvider },
-                set: { provider in
-                    guard let provider else { return }
-                    appState.selectLLMProvider(provider)
+            OpenRouterProvisionCard()
+
+            HStack {
+                Picker("Provider", selection: $stagedProvider) {
+                    ForEach(byoProviders) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
                 }
-            )) {
-                ForEach(byoProviders) { kind in
-                    Text(kind.displayName).tag(Optional(kind))
+                .accessibilityIdentifier("byoProviderPicker")
+                Spacer()
+                if isStagedProviderActive && appState.isBYOProviderActive {
+                    ActiveProviderBadge()
                 }
             }
-            .accessibilityIdentifier("byoProviderPicker")
 
-            if appState.llmProviderKind != .managed {
-                TextField("Model", text: modelBinding, prompt: Text(appState.llmProviderKind.defaultModel))
-                    .textFieldStyle(.roundedBorder)
+            if isStagedProviderActive {
+                activeProviderConfig
+            } else {
+                Button("Use this provider") { appState.selectLLMProvider(stagedProvider) }
+                    .accessibilityIdentifier("useThisProviderButton")
+                ProviderKeyGuidance(provider: stagedProvider)
+            }
 
-                if appState.llmProviderKind.supportsCustomBaseURL {
-                    TextField(
-                        "Base URL (optional)",
-                        text: baseURLBinding,
-                        prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
-                    )
-                    .textFieldStyle(.roundedBorder)
-                }
+            ProviderPrivacyNote()
+        }
+        .onAppear {
+            if appState.isBYOProviderActive {
+                stagedProvider = appState.llmProviderKind
+            }
+        }
+    }
 
-                if appState.isLLMConnected {
-                    ConnectedBadge(text: "Connected")
-                    Button("Disconnect", role: .destructive) {
-                        appState.disconnectLLM(provider: appState.llmProviderKind)
-                    }
+    /// Model / base URL / key / Test Connection (or the connected state) for the
+    /// active BYO provider.
+    @ViewBuilder
+    private var activeProviderConfig: some View {
+        TextField("Model", text: modelBinding, prompt: Text(appState.llmProviderKind.defaultModel))
+            .textFieldStyle(.roundedBorder)
+
+        if appState.llmProviderKind.supportsCustomBaseURL {
+            TextField(
+                "Base URL (optional)",
+                text: baseURLBinding,
+                prompt: Text(appState.llmProviderKind.baseURLPlaceholder ?? "")
+            )
+            .textFieldStyle(.roundedBorder)
+        }
+
+        if appState.isLLMConnected {
+            ConnectedBadge(text: "Connected")
+            Text("Saved to your Keychain.").font(.caption).foregroundStyle(.secondary)
+            Button("Disconnect", role: .destructive) {
+                appState.disconnectLLM(provider: appState.llmProviderKind)
+            }
+        } else {
+            ProviderKeyGuidance(provider: appState.llmProviderKind)
+            SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
+                .textFieldStyle(.roundedBorder)
+            if !appState.llmProviderKind.requiresAPIKey {
+                Text("Optional — leave blank for Ollama or unauthenticated local runtimes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await appState.testLLMConnection() }
+            } label: {
+                if appState.isTestingLLM {
+                    ProgressView().controlSize(.small)
                 } else {
-                    SecureField(apiKeyFieldTitle, text: $appState.llmAPIKey)
-                        .textFieldStyle(.roundedBorder)
-                    if !appState.llmProviderKind.requiresAPIKey {
-                        Text("Optional — leave blank for Ollama or unauthenticated local runtimes.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Button {
-                        Task { await appState.testLLMConnection() }
-                    } label: {
-                        if appState.isTestingLLM {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("Test Connection")
-                        }
-                    }
-                    .disabled(appState.isTestingLLM)
+                    Text("Test Connection")
                 }
             }
+            .disabled(appState.isTestingLLM)
         }
     }
 

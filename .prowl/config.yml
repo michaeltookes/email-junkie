@@ -156,3 +156,14 @@ guardrails:
     - "managedVerifyButton"
     - "managedSignOutButton"
     - "useManagedInference"
+    # Guided sign-in / BYO controls (item 59). Google sign-in and OpenRouter
+    # provisioning are disabled in hunt mode; forbid activating any of these plus
+    # the "Use this provider" / "Get an API key" affordances.
+    - "managedGoogleSignInButton"
+    - "openRouterConnectButton"
+    - "getAPIKeyButton"
+    - "useThisProviderButton"
+    - "Continue with Google"
+    - "Connect OpenRouter"
+    - "Get an API key"
+    - "Use this provider"

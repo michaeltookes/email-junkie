@@ -111,6 +111,7 @@ hunts may only assert their presence, never drive account auth:
 | Identifier | Control |
 |---|---|
 | `id=useManagedInference` | "Use Sentwise AI" (selects the managed provider) |
+| `id=managedGoogleSignInButton` | "Continue with Google" (Clerk OAuth sign-in) |
 | `id=managedEmailField` | Email field for the sign-in code |
 | `id=managedSendCodeButton` | "Send sign-in code" |
 | `id=managedCodeField` | One-time-code field |
@@ -118,6 +119,14 @@ hunts may only assert their presence, never drive account auth:
 | `id=managedSignOutButton` | "Sign out" of the managed account |
 | `id=useOwnProviderDisclosure` | "Use your own AI provider instead" disclosure |
 | `id=byoProviderPicker` | Bring-your-own provider picker |
+| `id=useThisProviderButton` | "Use this provider" (activates the staged BYO provider) |
+| `id=openRouterConnectButton` | "Connect OpenRouter" (PKCE one-click key provisioning) |
+| `id=getAPIKeyButton` | "Get an API key" (opens the provider's key-creation page) |
+| `id=activeProviderBadge` | "Active" badge on the provider currently drafting (non-interactive) |
+
+Google sign-in (`managedGoogleSignInButton`) and OpenRouter provisioning
+(`openRouterConnectButton`) both open the browser and are **disabled in hunt
+mode** for the same reason email sign-in is; hunts may assert their presence only.
 
 Window presence checks use `waitForSelector` with the exact AX label each
 window sets via `setAccessibilityLabel` (`label=` is a step selector; it is

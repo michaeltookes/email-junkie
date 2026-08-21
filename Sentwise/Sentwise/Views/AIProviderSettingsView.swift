@@ -40,12 +40,6 @@ struct AIProviderSettingsView: View {
                     }
                     ManagedSignInControls()
                 }
-
-                if let error = appState.managedError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
             }
 
             Section("Use your own AI provider") {

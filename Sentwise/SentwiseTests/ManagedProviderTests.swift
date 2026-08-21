@@ -30,6 +30,14 @@ final class ManagedProviderTests: XCTestCase {
 
     // MARK: - Error messages
 
+    func testManagedMessageNamesMissingSignUpFields() {
+        let message = AppState.managedMessage(for: ClerkError.notComplete(status: "missing_requirements", missingFields: ["password"]))
+        XCTAssertTrue(message.contains("password"), message)
+        XCTAssertTrue(message.contains("configuration issue"), message)
+        // Without missing fields it stays the generic bad-code message.
+        XCTAssertTrue(AppState.managedMessage(for: ClerkError.notComplete(status: "needs_second_factor")).contains("Request a new code"))
+    }
+
     func testManagedMessageMapsTransportErrorsToCouldNotReach() {
         let expected = "Couldn't reach Sentwise sign-in. Check your connection and try again."
         // A transport failure while minting a token surfaces as LLMError.transport.

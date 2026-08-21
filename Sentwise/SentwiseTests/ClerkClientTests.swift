@@ -179,7 +179,7 @@ final class ClerkClientTests: XCTestCase {
         do {
             _ = try await client(transport).verifyEmailCode(signInId: "sia_1", code: "000000", clientToken: "client_B")
             XCTFail("Expected notComplete")
-        } catch ClerkError.notComplete(let status) {
+        } catch ClerkError.notComplete(let status, _) {
             XCTAssertEqual(status, "needs_second_factor")
         } catch {
             XCTFail("Unexpected error: \(error)")

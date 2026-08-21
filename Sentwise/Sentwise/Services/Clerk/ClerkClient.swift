@@ -106,7 +106,7 @@ enum ClerkError: Error, Equatable, Sendable {
     case malformedResponse(String)
     /// The sign-in didn't reach `complete` (e.g. needs a second factor we don't
     /// support in 56a).
-    case notComplete(status: String?)
+    case notComplete(status: String?, missingFields: [String] = [])
     /// No `email_code` first factor is available for this identifier.
     case emailCodeUnsupported
     /// Clerk has no user for this email (`form_identifier_not_found`); the caller
@@ -226,7 +226,7 @@ struct ClerkClient: Sendable {
         let token = attempted.clientToken ?? clientToken
 
         guard resource.status == "complete", let sessionId = resource.createdSessionId else {
-            throw ClerkError.notComplete(status: resource.status)
+            throw ClerkError.notComplete(status: resource.status, missingFields: resource.missingFields ?? [])
         }
         return ClerkVerifiedSession(sessionId: sessionId, clientToken: token)
     }
@@ -303,11 +303,15 @@ private struct SignInResource: Decodable {
     let status: String?
     let createdSessionId: String?
     let supportedFirstFactors: [FirstFactor]?
+    /// Sign-up only: fields Clerk still requires (e.g. `password` when the
+    /// instance is misconfigured for a passwordless product).
+    let missingFields: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, status
         case createdSessionId = "created_session_id"
         case supportedFirstFactors = "supported_first_factors"
+        case missingFields = "missing_fields"
     }
 }
 

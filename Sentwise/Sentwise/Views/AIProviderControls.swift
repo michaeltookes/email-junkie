@@ -78,6 +78,7 @@ struct ManagedSignInControls: View {
                     Button("Use a different email") {
                         appState.managedSignInStage = .idle
                         appState.managedCodeInput = ""
+                        appState.managedError = nil
                     }
                     .buttonStyle(.link)
                 }
@@ -90,6 +91,9 @@ struct ManagedSignInControls: View {
                 OnboardingError(message: error)
             }
         }
+        // A stale error shouldn't linger once the user starts correcting it.
+        .onChange(of: appState.managedEmailInput) { _, _ in appState.managedError = nil }
+        .onChange(of: appState.managedCodeInput) { _, _ in appState.managedError = nil }
     }
 
     @ViewBuilder

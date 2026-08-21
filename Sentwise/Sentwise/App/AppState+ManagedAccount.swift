@@ -107,6 +107,10 @@ extension AppState {
             return "Couldn't reach Sentwise sign-in. Check your connection and try again."
         case ClerkError.http(_, let message):
             return message ?? "Sign-in failed. Please try again."
+        case ClerkError.notComplete(_, let missingFields) where !missingFields.isEmpty:
+            return "Sign-up couldn't finish: the account service still requires "
+                + missingFields.joined(separator: ", ")
+                + ". This is a Sentwise configuration issue, not your code — please contact support."
         case ClerkError.notComplete:
             return "That code didn't complete sign-in. Request a new code and try again."
         case ClerkError.emailCodeUnsupported:

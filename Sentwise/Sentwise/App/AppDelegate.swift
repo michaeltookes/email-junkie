@@ -89,6 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("Sentwise launched")
     }
 
+    /// Handles `sentwise://` deep links: the Clerk Google sign-in redirect and the
+    /// OpenRouter key-provisioning redirect (item 59). AppKit installs the
+    /// GetURL Apple Event handler automatically because the scheme is registered in
+    /// `Info.plist` and this delegate method is implemented.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            appState?.handleIncomingURL(url)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Flush any pending edits/settings to disk before quitting.
         appState.flushPendingDraftEdits()

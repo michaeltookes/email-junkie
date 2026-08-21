@@ -4,6 +4,15 @@ import Foundation
 /// stays within the file/type length limits.
 extension AppState {
 
+    /// Whether managed inference (Sentwise AI) is the provider currently drafting.
+    /// The two provider cards key their "Active" badge off this so exactly one is
+    /// ever shown live at a time (item 59).
+    var isManagedProviderActive: Bool { llmProviderKind == .managed }
+
+    /// Whether a bring-your-own provider (anything but managed) is the one
+    /// currently drafting — the exact inverse of `isManagedProviderActive`.
+    var isBYOProviderActive: Bool { llmProviderKind != .managed }
+
     /// The model to use: the user's choice, or the provider default if blank.
     var resolvedLLMModel: String {
         resolvedLLMModel(for: llmModel)

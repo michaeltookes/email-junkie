@@ -68,23 +68,7 @@ extension AppState {
         // Sign-in succeeded: record the account tied to the pending Clerk flow.
         let signedInEmail = pendingManagedSignInEmail
             ?? managedEmailInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        managedAccountEmail = signedInEmail
-        managedEmailInput = signedInEmail
-        managedCodeInput = ""
-        pendingManagedSignInEmail = nil
-        managedSignInStage = .idle
-        isManagedSignedIn = true
-
-        // Managed is now the active provider path; mark it verified so drafting
-        // and the connected UI light up. The model is always the managed default.
-        if llmProviderKind == .managed {
-            verifiedLLMModel = llmProviderKind.defaultModel
-            refreshLLMConnectionStatus()
-            resetDraftPreviewForLLMChange()
-        }
-        saveSettings()
-        resumeInboxWatchingAfterManagedReauthenticationIfNeeded()
-        startTranscriptFolderWatchingIfEnabled()
+        finalizeManagedSignIn(email: signedInEmail)
     }
 
     func resetManagedSignInFlow() {

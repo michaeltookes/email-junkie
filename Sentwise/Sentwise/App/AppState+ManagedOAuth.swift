@@ -1,0 +1,80 @@
+import AppKit
+import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.tookes.Sentwise", category: "ManagedOAuth")
+
+/// Managed-account Google sign-in via Clerk's OAuth flow (item 59), plus the
+/// shared post-sign-in finalization used by both the email-code and OAuth paths.
+/// Kept in its own file so `AppState+ManagedAccount` stays within length limits.
+extension AppState {
+
+    /// The custom-scheme URL Clerk redirects back to after the Google handshake.
+    /// Registered in `Info.plist` (`CFBundleURLTypes`) and must be added as an
+    /// allowed redirect URL in the Clerk dashboard.
+    static let managedOAuthRedirectURL = "sentwise://oauth-callback"
+
+    /// Shared success path once a session is stored (email code or OAuth): records
+    /// the account, marks managed verified when it's the active provider, and
+    /// resumes any watchers that a re-auth had paused.
+    func finalizeManagedSignIn(email: String) {
+        managedAccountEmail = email
+        managedEmailInput = email
+        managedCodeInput = ""
+        pendingManagedSignInEmail = nil
+        managedSignInStage = .idle
+        isManagedSignedIn = true
+
+        // Managed is now the active provider path; mark it verified so drafting
+        // and the connected UI light up. The model is always the managed default.
+        if llmProviderKind == .managed {
+            verifiedLLMModel = llmProviderKind.defaultModel
+            refreshLLMConnectionStatus()
+            resetDraftPreviewForLLMChange()
+        }
+        saveSettings()
+        resumeInboxWatchingAfterManagedReauthenticationIfNeeded()
+        startTranscriptFolderWatchingIfEnabled()
+    }
+
+    /// Starts Google sign-in: asks Clerk for the hosted URL and opens it in the
+    /// default browser. Disabled in Prowl hunt mode. `openURL` is injectable so
+    /// the browser hand-off is suppressed in tests.
+    func startManagedGoogleSignIn(openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }) async {
+        managedError = nil
+        guard !ProwlHuntRuntime.current.isEnabled else {
+            managedError = "Sign-in is disabled during Prowl hunts."
+            return
+        }
+        isManagedBusy = true
+        defer { isManagedBusy = false }
+        do {
+            let url = try await managedAccount.startGoogleSignIn(redirectURL: Self.managedOAuthRedirectURL)
+            openURL(url)
+        } catch {
+            managedError = Self.managedMessage(for: error)
+        }
+    }
+
+    /// Completes Google sign-in from the `sentwise://oauth-callback` redirect.
+    func handleManagedOAuthCallback(nonce: String) async {
+        managedError = nil
+        isManagedBusy = true
+        defer { isManagedBusy = false }
+        let identifier: String?
+        do {
+            identifier = try await managedAccount.completeGoogleSignIn(rotatingTokenNonce: nonce)
+        } catch {
+            managedError = Self.managedMessage(for: error)
+            return
+        }
+        // Managed inference is the point of signing in; make it the active
+        // provider so the account immediately starts drafting.
+        if llmProviderKind != .managed {
+            selectLLMProvider(.managed)
+        }
+        let email = (identifier?.isEmpty == false) ? identifier! : "your Google account"
+        finalizeManagedSignIn(email: email)
+        logger.info("Managed Google sign-in completed")
+    }
+}

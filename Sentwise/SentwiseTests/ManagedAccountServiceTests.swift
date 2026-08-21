@@ -209,10 +209,15 @@ final class ManagedAccountServiceTests: XCTestCase {
 
         XCTAssertFalse(await account.isSignedIn)
         XCTAssertNil(try secrets.value(for: .managedSessionID))
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_D")
 
         try await account.completeSignIn(code: "123456")
 
         XCTAssertTrue(await account.isSignedIn)
+        XCTAssertEqual(transport.requests[2].headers["authorization"], "Bearer client_B")
+        XCTAssertEqual(transport.requests[3].headers["authorization"], "Bearer client_C")
+        XCTAssertEqual(transport.requests[4].headers["authorization"], "Bearer client_D")
+        XCTAssertEqual(transport.requests[5].headers["authorization"], "Bearer client_E")
         XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_F")
         XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_1")
     }
@@ -274,6 +279,32 @@ final class ManagedAccountServiceTests: XCTestCase {
         XCTAssertFalse(await account.isSignedIn)
         XCTAssertNil(try secrets.value(for: .managedClientToken))
         XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
+
+    func testCurrentSessionTokenPersistsRotatedClientTokenFromNonAuthMintFailure() async throws {
+        let secrets = InMemorySecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let account = service(
+            QueueClerkTransport([
+                response(#"{"errors":[{"message":"temporarily unavailable"}]}"#, status: 503, clientToken: "client_Y")
+            ]),
+            secrets: secrets
+        )
+
+        do {
+            _ = try await account.currentSessionToken()
+            XCTFail("Expected transport error")
+        } catch LLMError.transport {
+            // expected
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(await account.isSignedIn)
+        XCTAssertEqual(try secrets.value(for: .managedClientToken), "client_Y")
+        XCTAssertEqual(try secrets.value(for: .managedSessionID), "sess_X")
     }
 
     func testInvalidateSessionMarksAccountSignedOutWhenKeychainRemovalFails() async throws {

@@ -391,13 +391,20 @@ final class AppState: ObservableObject {
         self.launchAtLogin = LoginItemManager.shared.isEnabled
 
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
+        let hasManagedCredentials = secrets.hasValue(for: .managedClientToken)
+            && secrets.hasValue(for: .managedSessionID)
+        let shouldRestoreManagedVerification = provider == .managed && hasManagedCredentials
+        let initialLLMModel = shouldRestoreManagedVerification ? "" : settings.llmModel
+        let initialVerifiedLLMModel = shouldRestoreManagedVerification
+            ? provider.defaultModel
+            : settings.llmVerifiedModel
         self.llmProviderKind = provider
-        self.llmModel = settings.llmModel
+        self.llmModel = initialLLMModel
         self.llmBaseURL = settings.llmBaseURL
-        self.verifiedLLMModel = settings.llmVerifiedModel
+        self.verifiedLLMModel = initialVerifiedLLMModel
         self.llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
         self.managedAccountEmail = settings.managedAccountEmail
-        self.isManagedSignedIn = secrets.hasValue(for: .managedClientToken) && secrets.hasValue(for: .managedSessionID)
+        self.isManagedSignedIn = hasManagedCredentials
 
         self.voiceProfile = persistence.loadVoiceProfile()
 
@@ -407,6 +414,15 @@ final class AppState: ObservableObject {
         refreshLLMConnectionStatus()
 
         setupAutoSave()
+
+        if shouldRestoreManagedVerification
+            && (settings.llmModel != initialLLMModel || settings.llmVerifiedModel != initialVerifiedLLMModel) {
+            do {
+                try persistSettingsSync(buildSettings())
+            } catch {
+                logger.error("Failed to persist restored managed verification: \(error.localizedDescription)")
+            }
+        }
 
         self.inboxWatcher = InboxWatcher(
             interval: { [weak self] in TimeInterval(self?.pollIntervalSeconds ?? 300) },

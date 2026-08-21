@@ -29,6 +29,32 @@ final class AppStateLLMTests: XCTestCase {
         XCTAssertEqual(appState.resolvedLLMModel, "claude-sonnet-4-6")
     }
 
+    func testManagedCredentialsRestoreDefaultVerificationOnLaunch() {
+        let secrets = InMemorySecretStore(seed: [
+            .managedClientToken: "client_X",
+            .managedSessionID: "sess_X"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "managed",
+            llmModel: "stale-custom-model",
+            llmVerifiedModel: "",
+            managedAccountEmail: "marcus@example.com"
+        ))
+
+        let appState = makeAppState(secrets: secrets, persistence: persistence)
+
+        XCTAssertTrue(appState.isManagedSignedIn)
+        XCTAssertEqual(appState.llmProviderKind, .managed)
+        XCTAssertEqual(appState.llmModel, "")
+        XCTAssertEqual(appState.verifiedLLMModel, LLMProviderKind.managed.defaultModel)
+        XCTAssertTrue(appState.isLLMConnected)
+        let saved = persistence.loadSettings()
+        XCTAssertEqual(saved.llmModel, "")
+        XCTAssertEqual(saved.llmVerifiedModel, LLMProviderKind.managed.defaultModel)
+    }
+
     func testResolvedModelUsesCustomModelWhenSet() {
         let appState = makeAppState()
         appState.llmModel = "  claude-haiku-4-5-20251001  "

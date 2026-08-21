@@ -79,11 +79,16 @@ actor ManagedAccountService: ManagedSessionProviding {
             throw error
         }
 
+        updatePendingSignIn(pending, clientToken: verified.clientToken)
         // Prove the credentials can mint a token before storing the session.
         guard isPendingSignIn(pending) else {
             throw ClerkError.malformedResponse("no sign-in in progress")
         }
-        let minted = try await mintSessionToken(sessionID: verified.sessionId, clientToken: verified.clientToken)
+        let minted = try await mintSessionToken(
+            sessionID: verified.sessionId,
+            clientToken: verified.clientToken,
+            preserveFailureClientToken: .pending(pending)
+        )
         guard isPendingSignIn(pending) else {
             throw ClerkError.malformedResponse("no sign-in in progress")
         }
@@ -162,7 +167,11 @@ actor ManagedAccountService: ManagedSessionProviding {
             }
             let generation = authenticationGeneration
             do {
-                let minted = try await mintSessionToken(sessionID: sessionID, clientToken: clientToken)
+                let minted = try await mintSessionToken(
+                    sessionID: sessionID,
+                    clientToken: clientToken,
+                    preserveFailureClientToken: .stored(generation: generation)
+                )
                 switch credentialState(generation: generation, sessionID: sessionID, clientToken: clientToken) {
                 case .current:
                     try persistClientToken(minted.clientToken)
@@ -256,6 +265,12 @@ actor ManagedAccountService: ManagedSessionProviding {
         case signedOutOrReplaced
     }
 
+    private enum MintFailureClientTokenHandling {
+        case none
+        case pending(ClerkSignInHandle)
+        case stored(generation: Int)
+    }
+
     private func credentialState(generation: Int, sessionID: String, clientToken: String) -> MintCredentialState {
         guard !areStoredCredentialsInvalidated,
               generation == authenticationGeneration,
@@ -266,15 +281,49 @@ actor ManagedAccountService: ManagedSessionProviding {
         return storedClientToken == clientToken ? .current : .rotated
     }
 
-    private func mintSessionToken(sessionID: String, clientToken: String) async throws -> ClerkMintedToken {
+    private func mintSessionToken(
+        sessionID: String,
+        clientToken: String,
+        preserveFailureClientToken: MintFailureClientTokenHandling = .none
+    ) async throws -> ClerkMintedToken {
         do {
             return try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
         } catch ClerkError.http(let status, _, _) where status == 401 || status == 404 {
             throw LLMError.managedNotSignedIn
         } catch let error as ClerkError {
+            try preserveRotatedClientTokenFromMintFailure(
+                error.clientToken,
+                sessionID: sessionID,
+                clientToken: clientToken,
+                handling: preserveFailureClientToken
+            )
             // Network/transport (or other non-auth) Clerk failure minting a token —
             // surface as a transport error so the user sees the "couldn't reach" message.
             throw LLMError.transport(String(describing: error))
+        }
+    }
+
+    private func preserveRotatedClientTokenFromMintFailure(
+        _ rotatedClientToken: String?,
+        sessionID: String,
+        clientToken: String,
+        handling: MintFailureClientTokenHandling
+    ) throws {
+        guard let rotatedClientToken, !rotatedClientToken.isEmpty else { return }
+        switch handling {
+        case .none:
+            return
+        case .pending(let handle):
+            updatePendingSignIn(handle, clientToken: rotatedClientToken)
+        case .stored(let generation):
+            guard credentialState(
+                generation: generation,
+                sessionID: sessionID,
+                clientToken: clientToken
+            ) == .current else {
+                return
+            }
+            try persistClientToken(rotatedClientToken)
         }
     }
 }

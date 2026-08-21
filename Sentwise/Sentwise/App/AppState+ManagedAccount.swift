@@ -83,6 +83,7 @@ extension AppState {
             resetDraftPreviewForLLMChange()
         }
         saveSettings()
+        resumeInboxWatchingAfterManagedReauthenticationIfNeeded()
         startTranscriptFolderWatchingIfEnabled()
     }
 

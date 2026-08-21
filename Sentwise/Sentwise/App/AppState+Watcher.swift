@@ -25,6 +25,7 @@ extension AppState {
             watchError = "Connect an email account and an AI provider before watching."
             return
         }
+        shouldResumeInboxWatchingAfterManagedReauthentication = false
         watchError = nil
         recordWatcherBaselineStartIfNeeded(account: mailCredentials.email, mailbox: .inbox)
         watchStatus = .watching
@@ -46,9 +47,17 @@ extension AppState {
         }
     }
 
+    func resumeInboxWatchingAfterManagedReauthenticationIfNeeded() {
+        guard shouldResumeInboxWatchingAfterManagedReauthentication else { return }
+        shouldResumeInboxWatchingAfterManagedReauthentication = false
+        guard watchStatus == .paused, canWatch else { return }
+        startWatching()
+    }
+
     /// Pauses watching; the queue and processed history are kept.
-    func pauseWatching() {
+    func pauseWatching(resumeAfterManagedReauthentication: Bool = false) {
         guard watchStatus == .watching else { return }
+        shouldResumeInboxWatchingAfterManagedReauthentication = resumeAfterManagedReauthentication
         watchStatus = .paused
         inboxWatcher.stop()
         logger.info("Inbox watching paused")
@@ -57,6 +66,7 @@ extension AppState {
     /// Stops watching entirely (e.g. on disconnect); returns to idle.
     func stopWatching() {
         guard watchStatus != .idle else { return }
+        shouldResumeInboxWatchingAfterManagedReauthentication = false
         watchStatus = .idle
         inboxWatcher.stop()
         // Outstanding auto-send countdowns (item 23) simply never fire; their
@@ -238,6 +248,7 @@ extension AppState {
             return
         }
         guard watchStatus == .watching, mailCredentials == credentials else { return }
+        let draftProvider = currentDraftLLMConfiguration?.provider
 
         do {
             // Retry transient fetch/LLM hiccups within the poll (item 27). On
@@ -263,10 +274,21 @@ extension AppState {
                     account: normalizedConnectedAccountEmail,
                     detail: Self.draftMessage(for: error)
                 ))
-                pauseWatching()
+                pauseWatching(
+                    resumeAfterManagedReauthentication: shouldResumeAfterManagedReauthentication(
+                        error: error,
+                        provider: draftProvider
+                    )
+                )
             }
             logger.error("Watcher draft failed: \(error.localizedDescription)")
         }
+    }
+
+    private func shouldResumeAfterManagedReauthentication(error: Error, provider: LLMProviderKind?) -> Bool {
+        guard provider == .managed else { return false }
+        guard case LLMError.managedNotSignedIn = error else { return false }
+        return true
     }
 
     private func validateWatcherDraftContext(_ credentials: MailAccountCredentials) throws {

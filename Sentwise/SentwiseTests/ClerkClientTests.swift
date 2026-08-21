@@ -70,6 +70,53 @@ final class ClerkClientTests: XCTestCase {
         XCTAssertEqual(prepare.form["email_address_id"], "ema_9")
     }
 
+    func testSendEmailCodeFallsBackToSignUpForUnknownEmail() async throws {
+        let transport = FakeClerkTransport([
+            // sign_ins: Clerk has no user for this email.
+            clerkResponse(
+                #"{"errors":[{"message":"Couldn't find your account.","code":"form_identifier_not_found"}]}"#,
+                status: 422,
+                clientToken: "client_A"
+            ),
+            // sign_ups create
+            clerkResponse(#"{"response":{"id":"sua_7","status":"missing_requirements"}}"#, clientToken: "client_B"),
+            // prepare_verification → sends the code
+            clerkResponse(#"{"response":{"id":"sua_7","status":"missing_requirements"}}"#, clientToken: "client_C")
+        ])
+
+        let handle = try await client(transport).sendEmailCode(email: "new@example.com", clientToken: "")
+
+        XCTAssertEqual(handle.flow, .signUp)
+        XCTAssertEqual(handle.signInId, "sua_7")
+        XCTAssertEqual(handle.clientToken, "client_C")
+        XCTAssertEqual(transport.requests.count, 3)
+
+        let create = transport.requests[1]
+        XCTAssertTrue(create.url.absoluteString.contains("/v1/client/sign_ups?"))
+        XCTAssertEqual(create.headers["authorization"], "Bearer client_A", "rotated token from the failed sign-in is reused")
+        XCTAssertEqual(create.form["email_address"], "new@example.com")
+
+        let prepare = transport.requests[2]
+        XCTAssertTrue(prepare.url.absoluteString.contains("/v1/client/sign_ups/sua_7/prepare_verification"))
+        XCTAssertEqual(prepare.form["strategy"], "email_code")
+    }
+
+    func testVerifyEmailCodeUsesSignUpAttemptVerificationForSignUpFlow() async throws {
+        let transport = FakeClerkTransport([
+            clerkResponse(#"{"response":{"id":"sua_7","status":"complete","created_session_id":"sess_1"}}"#, clientToken: "client_D")
+        ])
+
+        let verified = try await client(transport).verifyEmailCode(
+            signInId: "sua_7", code: "123456", clientToken: "client_C", flow: .signUp
+        )
+
+        XCTAssertEqual(verified.sessionId, "sess_1")
+        XCTAssertEqual(verified.clientToken, "client_D")
+        let attempt = transport.requests[0]
+        XCTAssertTrue(attempt.url.absoluteString.contains("/v1/client/sign_ups/sua_7/attempt_verification"))
+        XCTAssertEqual(attempt.form["code"], "123456")
+    }
+
     func testSendEmailCodeThrowsWhenEmailCodeUnsupported() async {
         let transport = FakeClerkTransport([
             clerkResponse(

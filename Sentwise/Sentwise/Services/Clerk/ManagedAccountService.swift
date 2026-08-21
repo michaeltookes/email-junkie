@@ -57,7 +57,8 @@ actor ManagedAccountService: ManagedSessionProviding {
         let verified = try await clerk.verifyEmailCode(
             signInId: pending.signInId,
             code: code,
-            clientToken: pending.clientToken
+            clientToken: pending.clientToken,
+            flow: pending.flow
         )
         try persistClientToken(verified.clientToken)
         try persistSessionID(verified.sessionId)

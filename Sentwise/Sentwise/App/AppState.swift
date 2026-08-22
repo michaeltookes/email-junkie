@@ -400,11 +400,7 @@ final class AppState: ObservableObject {
         self.llmModel = managedLaunch.llmModel
         self.llmBaseURL = settings.llmBaseURL
         self.verifiedLLMModel = managedLaunch.verifiedLLMModel
-        let llmAPIKeySecret = Self.llmAPIKeySecret(
-            provider: managedLaunch.provider,
-            baseURL: managedLaunch.provider.supportsCustomBaseURL ? settings.llmBaseURL : nil
-        )
-        self.llmAPIKey = ((try? secrets.value(for: llmAPIKeySecret)) ?? nil) ?? ""
+        self.llmAPIKey = managedLaunch.apiKey
         self.managedAccountEmail = managedLaunch.hasCredentials ? settings.managedAccountEmail : ""
         self.isManagedSignedIn = managedLaunch.hasCredentials
 

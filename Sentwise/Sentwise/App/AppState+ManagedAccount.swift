@@ -194,6 +194,8 @@ extension AppState {
         let restoreVerification: Bool
         let llmModel: String
         let verifiedLLMModel: String
+        /// The stored API key for the resolved provider (empty for managed/none).
+        let apiKey: String
     }
 
     static func managedLaunchState(settings: Settings, secrets: SecretStore) -> ManagedLaunchState {
@@ -203,12 +205,18 @@ extension AppState {
             && secrets.hasValue(for: .managedClientToken)
             && secrets.hasValue(for: .managedSessionID)
         let restore = provider == .managed && hasCredentials
+        let apiKeySecret = llmAPIKeySecret(
+            provider: provider,
+            baseURL: provider.supportsCustomBaseURL ? settings.llmBaseURL : nil
+        )
+        let apiKey = ((try? secrets.value(for: apiKeySecret)) ?? nil) ?? ""
         return ManagedLaunchState(
             provider: provider,
             hasCredentials: hasCredentials,
             restoreVerification: restore,
             llmModel: restore ? "" : settings.llmModel,
-            verifiedLLMModel: restore ? provider.defaultModel : settings.llmVerifiedModel
+            verifiedLLMModel: restore ? provider.defaultModel : settings.llmVerifiedModel,
+            apiKey: apiKey
         )
     }
 

@@ -189,10 +189,61 @@ migration is gated on the original schema version so it runs once
 ## Prowl hunt mode
 
 `LLMService` returns a `StubManagedInferenceClient` (deterministic canned
-response, zero network) whenever `ProwlHuntRuntime.current.isEnabled`, and the
-sign-in controls are disabled in hunt mode, so hunts stay offline-safe. The new
-sign-in controls carry `accessibilityIdentifier`s documented in
-`.prowl/README.md` and are added to `forbiddenSelectors` in `.prowl/config.yml`.
+response, zero network) whenever `ProwlHuntRuntime.current.isEnabled`, so drafting
+stays offline-safe.
+
+**Sign-in and provisioning are functional but fully offline in hunt mode
+(item 70).** Rather than being disabled, the item-59 flows run through a
+deterministic in-memory fake so accessibility hunts can drive them end-to-end
+without ever reaching Clerk/OpenRouter/Anthropic or opening a browser:
+
+- `startManagedSignIn` / `verifyManagedCode` (`AppState+ManagedAccount.swift`)
+  advance to the code stage and complete to the signed-in fixture account.
+- `startManagedGoogleSignIn` (`AppState+ManagedOAuth.swift`) shows the
+  "finish in your browser" panel without opening a browser;
+  `completeManagedGoogleSignInForHunt` (`AppState+ProwlHuntAuth.swift`) finishes it.
+- `completeOpenRouterProvisioningForHunt` (`AppState+ProwlHuntAuth.swift`)
+  activates a fake OpenAI-compatible/OpenRouter provider with no key exchange.
+
+Every fake is strictly guarded on `ProwlHuntRuntime.current.isEnabled` (injectable
+for unit tests — `AppStateProwlHuntAuthTests`), so the production paths are
+unchanged. The controls carry `accessibilityIdentifier`s documented in
+`.prowl/README.md`; `forbiddenSelectors` in `.prowl/config.yml` was relaxed so the
+sign-in/provider hunts can activate exactly those controls while mail dispatch,
+draft mutation, LLM generation, mailbox search, and system toggles stay forbidden.
+
+## Live end-to-end sign-in test (env-gated)
+
+`ClerkLiveSignInTests` exercises the **real `ClerkClient`** against the live Clerk
+dev instance (`peaceful-eel-9660.clerk.accounts.dev`) via the Frontend API. It
+**skips by default** and only runs when `SENTWISE_LIVE_CLERK_TEST` is set, so CI
+and normal `xcodebuild test` runs stay offline.
+
+It uses **Clerk's test-email mechanism**
+([docs](https://clerk.com/docs/testing/test-emails-and-phones)): any address with
+the **`+clerk_test`** subaddress is a test address (no email is sent), and the
+**fixed code `424242`** always verifies it. This needs **no real inbox** and **no
+Clerk secret key** — the Frontend API authenticates with the public instance, like
+the app's native flow. The test creates the sign-in (falling back to sign-up for a
+new test email, which `ClerkClient` handles), attempts the test code, asserts a
+completed session, and mints a session token.
+
+Run it:
+
+```bash
+SENTWISE_LIVE_CLERK_TEST=1 xcodebuild test \
+  -project Sentwise/Sentwise.xcodeproj -scheme Sentwise \
+  -only-testing:SentwiseTests/ClerkLiveSignInTests \
+  -derivedDataPath <scratch> CODE_SIGNING_ALLOWED=NO
+```
+
+Prerequisite (already configured on the dev instance): Email address (verification
+code) on, Password off, Organizations off.
+
+**Google and OpenRouter are not tested live** — their browser round-trips are not
+automatable from a headless test. Google/OpenRouter are covered by the offline
+hunt fakes (above) and their unit tests (`ManagedAccountServiceOAuthTests`,
+`OpenRouterKeyProvisionerTests`).
 
 ## Live verification
 

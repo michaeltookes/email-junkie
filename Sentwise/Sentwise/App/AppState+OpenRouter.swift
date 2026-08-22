@@ -73,7 +73,6 @@ extension AppState {
             llmError = Self.llmMessage(for: error)
             return
         }
-        try? secrets.remove(.openRouterPKCEVerifier)
 
         do {
             try secrets.set(key, for: LLMProviderKind.openAICompatible.apiKeySecret)
@@ -81,6 +80,7 @@ extension AppState {
             llmError = Self.keychainLLMMessage(action: "save", error: error)
             return
         }
+        try? secrets.remove(.openRouterPKCEVerifier)
 
         // Activate the OpenAI-compatible provider pointed at OpenRouter.
         llmProviderKind = .openAICompatible

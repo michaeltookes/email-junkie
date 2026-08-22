@@ -102,7 +102,9 @@ struct ManagedSignInControls: View {
                     }
                     .disabled(appState.isManagedBusy)
                     .accessibilityIdentifier("managedVerifyButton")
-                    Button("Use a different email") { appState.resetManagedSignInFlow() }
+                    Button("Use a different email") {
+                        Task { await appState.cancelManagedSignInFlow() }
+                    }
                         .disabled(appState.isManagedBusy)
                         .buttonStyle(.link)
                 }
@@ -111,7 +113,9 @@ struct ManagedSignInControls: View {
                     .font(.callout)
                 Text("A browser window opened — approve the sign-in there, then you'll be brought back automatically.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Cancel") { appState.resetManagedSignInFlow() }
+                Button("Cancel") {
+                    Task { await appState.cancelManagedSignInFlow() }
+                }
                     .buttonStyle(.link)
                     .accessibilityIdentifier("managedCancelBrowserSignIn")
                 // Hunt-only: complete the (faked) browser sign-in deterministically,

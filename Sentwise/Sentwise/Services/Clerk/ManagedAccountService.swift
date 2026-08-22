@@ -60,6 +60,7 @@ actor ManagedAccountService: ManagedSessionProviding {
     /// before entering the code.
     func startSignIn(email: String) async throws {
         let existingClientToken = signInClientTokenForCurrentCredentialState()
+        clearPendingSignInHandles()
         let created: ClerkSignInHandle
         do {
             created = try await clerk.createEmailCodeSignIn(email: email, clientToken: existingClientToken)
@@ -119,6 +120,19 @@ actor ManagedAccountService: ManagedSessionProviding {
         try finalizeVerifiedSession(sessionID: verified.sessionId, clientToken: minted.clientToken)
     }
 
+    /// Cancels any in-progress email-code or browser-based sign-in. Rotated client
+    /// tokens stay persisted because Clerk treats them as the current device token,
+    /// not as proof that the sign-in should still complete.
+    func cancelSignIn() {
+        clearPendingSignInHandles()
+    }
+
+    func clearPendingSignInHandles() {
+        pendingSignIn = nil
+        pendingOAuthSignIn = nil
+        clearPendingOAuthSignInIDBestEffort(context: "after cancelling sign-in")
+    }
+
     /// Persists a freshly verified session and clears all in-progress/invalidation
     /// state. Shared by the email-code and OAuth completion paths.
     func finalizeVerifiedSession(sessionID: String, clientToken: String) throws {
@@ -131,6 +145,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         authenticationGeneration &+= 1
         pendingSignIn = nil
         pendingOAuthSignIn = nil
+        clearPendingOAuthSignInIDBestEffort(context: "after sign-in")
     }
 
     /// Signs out: clears the stored device token and session id. Local mail data
@@ -151,6 +166,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         } catch {
             firstError = firstError ?? error
         }
+        clearPendingOAuthSignInIDBestEffort(context: "after sign-out")
         if wasSignedIn && !isSignedIn {
             authenticationGeneration &+= 1
         }
@@ -201,6 +217,7 @@ actor ManagedAccountService: ManagedSessionProviding {
         } catch {
             logger.error("Failed to remove invalid managed session id: \(error.localizedDescription)")
         }
+        clearPendingOAuthSignInIDBestEffort(context: "after invalidation")
         if !hasStoredManagedCredential {
             clearCredentialInvalidationMarkerBestEffort(context: "after invalidation cleanup")
         }
@@ -341,6 +358,46 @@ actor ManagedAccountService: ManagedSessionProviding {
         }
     }
 
+    private var storedPendingOAuthSignInID: String? {
+        let value = (try? secrets.value(for: .managedOAuthSignInID)) ?? nil
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    func pendingOAuthSignInHandle() -> ClerkOAuthHandle? {
+        if let pendingOAuthSignIn {
+            return pendingOAuthSignIn
+        }
+        guard let signInID = storedPendingOAuthSignInID else { return nil }
+        let clientToken = signInClientTokenForCurrentCredentialState()
+        guard !clientToken.isEmpty else { return nil }
+        return ClerkOAuthHandle(
+            signInId: signInID,
+            externalRedirectURL: URL(string: "about:blank")!,
+            clientToken: clientToken
+        )
+    }
+
+    func persistPendingOAuthSignInIDBestEffort(_ signInID: String, context: String) {
+        guard !signInID.isEmpty else { return }
+        do {
+            try secrets.set(signInID, for: .managedOAuthSignInID)
+        } catch {
+            logger.error("Failed to persist Clerk OAuth sign-in id \(context): \(error.localizedDescription)")
+        }
+    }
+
+    private func clearPendingOAuthSignInID() throws {
+        try secrets.remove(.managedOAuthSignInID)
+    }
+
+    private func clearPendingOAuthSignInIDBestEffort(context: String) {
+        do {
+            try clearPendingOAuthSignInID()
+        } catch {
+            logger.error("Failed to clear Clerk OAuth sign-in id \(context): \(error.localizedDescription)")
+        }
+    }
+
     private func isPendingSignIn(_ handle: ClerkSignInHandle) -> Bool {
         pendingSignIn?.signInId == handle.signInId && pendingSignIn?.flow == handle.flow
     }
@@ -358,6 +415,28 @@ actor ManagedAccountService: ManagedSessionProviding {
             try persistClientToken(clientToken)
         } catch {
             logger.error("Failed to persist Clerk client token after sign-in attempt: \(error.localizedDescription)")
+        }
+    }
+
+    func isPendingOAuthSignIn(_ handle: ClerkOAuthHandle) -> Bool {
+        if let pendingOAuthSignIn {
+            return pendingOAuthSignIn.signInId == handle.signInId
+        }
+        return storedPendingOAuthSignInID == handle.signInId
+    }
+
+    func updatePendingOAuthSignIn(_ handle: ClerkOAuthHandle, clientToken: String?) {
+        guard let clientToken, !clientToken.isEmpty, isPendingOAuthSignIn(handle) else { return }
+        pendingOAuthSignIn = ClerkOAuthHandle(
+            signInId: handle.signInId,
+            externalRedirectURL: handle.externalRedirectURL,
+            clientToken: clientToken
+        )
+        persistReauthenticationClientTokenIfNeeded(clientToken)
+        do {
+            try persistClientToken(clientToken)
+        } catch {
+            logger.error("Failed to persist Clerk client token after OAuth sign-in attempt: \(error.localizedDescription)")
         }
     }
 
@@ -389,6 +468,7 @@ actor ManagedAccountService: ManagedSessionProviding {
     enum MintFailureClientTokenHandling {
         case none
         case pending(ClerkSignInHandle)
+        case pendingOAuth(ClerkOAuthHandle)
         case stored(generation: Int)
     }
 
@@ -410,13 +490,16 @@ actor ManagedAccountService: ManagedSessionProviding {
         do {
             return try await clerk.mintSessionToken(sessionId: sessionID, clientToken: clientToken)
         } catch ClerkError.http(let status, _, let rotatedClientToken) where status == 401 || status == 404 {
-            if case .pending = preserveFailureClientToken {
+            switch preserveFailureClientToken {
+            case .pending, .pendingOAuth:
                 try preserveRotatedClientTokenFromMintFailure(
                     rotatedClientToken,
                     sessionID: sessionID,
                     clientToken: clientToken,
                     handling: preserveFailureClientToken
                 )
+            case .none, .stored:
+                break
             }
             throw LLMError.managedNotSignedIn
         } catch let error as ClerkError {
@@ -444,6 +527,8 @@ actor ManagedAccountService: ManagedSessionProviding {
             return
         case .pending(let handle):
             updatePendingSignIn(handle, clientToken: rotatedClientToken)
+        case .pendingOAuth(let handle):
+            updatePendingOAuthSignIn(handle, clientToken: rotatedClientToken)
         case .stored(let generation):
             guard credentialState(
                 generation: generation,

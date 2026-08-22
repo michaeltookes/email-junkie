@@ -11,6 +11,7 @@ extension ManagedAccountService {
     /// email-code flow) so a redirect that arrives after a relaunch still lines up.
     func startGoogleSignIn(redirectURL: String) async throws -> URL {
         let existingClientToken = signInClientTokenForCurrentCredentialState()
+        clearPendingSignInHandles()
         let handle: ClerkOAuthHandle
         do {
             handle = try await clerk.startOAuthSignIn(
@@ -24,6 +25,7 @@ extension ManagedAccountService {
         }
         persistClientTokenBestEffort(handle.clientToken, context: "after starting oauth")
         pendingOAuthSignIn = handle
+        persistPendingOAuthSignInIDBestEffort(handle.signInId, context: "after starting oauth")
         return handle.externalRedirectURL
     }
 
@@ -32,7 +34,7 @@ extension ManagedAccountService {
     /// "Connected as …". Mirrors `completeSignIn`'s mint-and-persist tail.
     @discardableResult
     func completeGoogleSignIn(rotatingTokenNonce: String) async throws -> String? {
-        guard let pending = pendingOAuthSignIn else {
+        guard let pending = pendingOAuthSignInHandle() else {
             throw ClerkError.malformedResponse("no oauth sign-in in progress")
         }
         let verified: ClerkVerifiedSession
@@ -43,14 +45,22 @@ extension ManagedAccountService {
                 clientToken: pending.clientToken
             )
         } catch let error as ClerkError {
-            persistClientTokenBestEffort(error.clientToken, context: "after failed oauth complete")
+            updatePendingOAuthSignIn(pending, clientToken: error.clientToken)
             throw error
+        }
+        updatePendingOAuthSignIn(pending, clientToken: verified.clientToken)
+        guard isPendingOAuthSignIn(pending) else {
+            throw ClerkError.malformedResponse("no oauth sign-in in progress")
         }
         let minted = try await mintSessionToken(
             sessionID: verified.sessionId,
             clientToken: verified.clientToken,
-            preserveFailureClientToken: .none
+            preserveFailureClientToken: .pendingOAuth(pending)
         )
+        guard isPendingOAuthSignIn(pending) else {
+            throw ClerkError.malformedResponse("no oauth sign-in in progress")
+        }
+        updatePendingOAuthSignIn(pending, clientToken: minted.clientToken)
         try finalizeVerifiedSession(sessionID: verified.sessionId, clientToken: minted.clientToken)
         return verified.identifier
     }

@@ -21,7 +21,7 @@ final class AppStateProviderActivationTests: XCTestCase {
 
     private func makeAppState(
         provider: String = "managed",
-        secrets: InMemorySecretStore = InMemorySecretStore(),
+        secrets: SecretStore = InMemorySecretStore(),
         managedAccount: ManagedAccountService? = nil
     ) -> AppState {
         let persistence = AppStateMemoryPersistence(settings: Settings(
@@ -89,6 +89,25 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertNil(appState.llmError)
     }
 
+    func testHandleOpenRouterCallbackPreservesVerifierWhenAPIKeySaveFails() async throws {
+        let secrets = ManagedAccountFailingSecretStore(seed: [.openRouterPKCEVerifier: "VER"])
+        secrets.failOnSetKeys = [LLMProviderKind.openAICompatible.apiKeySecret]
+        let appState = makeAppState(provider: "managed", secrets: secrets)
+        let transport = ActivationFakeJSONTransport(
+            HTTPResponse(statusCode: 200, body: Data(#"{"key":"sk-or-xyz"}"#.utf8))
+        )
+
+        await appState.handleOpenRouterCallback(
+            code: "CODE",
+            provisioner: OpenRouterKeyProvisioner(transport: transport)
+        )
+
+        XCTAssertEqual(appState.llmProviderKind, .managed)
+        XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertNotNil(appState.llmError)
+        XCTAssertEqual(try secrets.value(for: .openRouterPKCEVerifier), "VER")
+    }
+
     func testHandleOpenRouterCallbackWithoutVerifierSetsError() async {
         let appState = makeAppState(provider: "managed")
 
@@ -142,5 +161,27 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertTrue(appState.isManagedProviderActive)
         XCTAssertEqual(appState.managedAccountEmail, "marcus@example.com")
         XCTAssertNil(appState.managedError)
+    }
+
+    func testCancelManagedGoogleSignInIgnoresLaterCallback() async throws {
+        let secrets = InMemorySecretStore()
+        let transport = QueueClerkTransport([clerkReply(startResponse, clientToken: "client_A")])
+        let clerk = ClerkClient(
+            frontendAPIBaseURL: URL(string: "https://peaceful-eel-9660.clerk.accounts.dev")!,
+            transport: transport
+        )
+        let managed = ManagedAccountService(secrets: secrets, clerk: clerk)
+        let appState = makeAppState(provider: "managed", secrets: secrets, managedAccount: managed)
+
+        await appState.startManagedGoogleSignIn { _ in }
+        XCTAssertEqual(appState.managedSignInStage, .awaitingBrowser)
+
+        await appState.cancelManagedSignInFlow()
+        await appState.handleManagedOAuthCallback(nonce: "nonce_1")
+
+        XCTAssertEqual(appState.managedSignInStage, .idle)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertNotNil(appState.managedError)
+        XCTAssertNil(try secrets.value(for: .managedSessionID))
     }
 }

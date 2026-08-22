@@ -111,6 +111,11 @@ extension AppState {
         managedError = nil
     }
 
+    func cancelManagedSignInFlow() async {
+        await managedAccount.cancelSignIn()
+        resetManagedSignInFlow()
+    }
+
     /// Signs out of the managed account: clears stored tokens and connected state.
     /// Local mail data and voice profile are untouched.
     func signOutManaged() async {

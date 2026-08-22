@@ -75,7 +75,13 @@ extension AppState {
         }
 
         do {
-            try secrets.set(key, for: LLMProviderKind.openAICompatible.apiKeySecret)
+            try secrets.set(
+                key,
+                for: Self.llmAPIKeySecret(
+                    provider: .openAICompatible,
+                    baseURL: OpenRouterKeyProvisioner.apiBaseURL
+                )
+            )
         } catch {
             llmError = Self.keychainLLMMessage(action: "save", error: error)
             return

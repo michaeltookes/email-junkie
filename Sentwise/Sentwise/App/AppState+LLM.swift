@@ -34,18 +34,30 @@ extension AppState {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    var currentLLMAPIKeySecret: SecretKey {
+        Self.llmAPIKeySecret(provider: llmProviderKind, baseURL: currentLLMBaseURL)
+    }
+
+    static func llmAPIKeySecret(provider: LLMProviderKind, baseURL: String?) -> SecretKey {
+        guard provider == .openAICompatible, isOpenRouterBaseURL(baseURL) else {
+            return provider.apiKeySecret
+        }
+        return .openRouterAPIKey
+    }
+
     /// Applies a user edit to the custom base URL. Because the endpoint is part
     /// of what a connection test verifies, editing it clears the verified state
     /// so the user must re-test before the provider counts as connected.
     func updateLLMBaseURLFromUser(_ newValue: String) {
         guard newValue != llmBaseURL else { return }
         let previousOrigin = currentLLMEndpointOrigin
+        let previousAPIKeySecret = currentLLMAPIKeySecret
         llmBaseURL = newValue
         let shouldClearKey = llmProviderKind.supportsCustomBaseURL
             && shouldClearLLMAPIKeyForEndpointChange(from: previousOrigin, to: currentLLMEndpointOrigin)
         llmError = nil
         if shouldClearKey {
-            clearLLMAPIKeyForEndpointChange()
+            clearLLMAPIKeyForEndpointChange(secret: previousAPIKeySecret)
         }
         verifiedLLMModel = ""
         refreshLLMConnectionStatus()
@@ -65,7 +77,7 @@ extension AppState {
             return
         }
         let hasCredential = !llmProviderKind.requiresAPIKey
-            || secrets.hasValue(for: llmProviderKind.apiKeySecret)
+            || secrets.hasValue(for: currentLLMAPIKeySecret)
         isLLMConnected = hasCredential
             && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
     }
@@ -80,7 +92,8 @@ extension AppState {
         llmProviderKind = provider
         llmModel = ""
         llmBaseURL = ""
-        llmAPIKey = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil) ?? ""
+        let secret = Self.llmAPIKeySecret(provider: provider, baseURL: nil)
+        llmAPIKey = ((try? secrets.value(for: secret)) ?? nil) ?? ""
         // Managed carries no API key; if already signed in, mark it verified so
         // the connected state is reflected immediately on switch.
         verifiedLLMModel = (provider == .managed && isManagedSignedIn) ? provider.defaultModel : ""
@@ -108,6 +121,7 @@ extension AppState {
         let testedProvider = llmProviderKind
         let testedModel = resolvedLLMModel
         let testedBaseURL = currentLLMBaseURL
+        let testedAPIKeySecret = currentLLMAPIKeySecret
 
         do {
             try await llm.testConnection(
@@ -133,14 +147,14 @@ extension AppState {
 
         if key.isEmpty {
             do {
-                try secrets.remove(testedProvider.apiKeySecret)
+                try secrets.remove(testedAPIKeySecret)
             } catch {
                 llmError = Self.keychainLLMMessage(action: "remove", error: error)
                 return
             }
         } else {
             do {
-                try secrets.set(key, for: testedProvider.apiKeySecret)
+                try secrets.set(key, for: testedAPIKeySecret)
             } catch {
                 llmError = Self.keychainLLMMessage(action: "save", error: error)
                 return
@@ -165,8 +179,9 @@ extension AppState {
         // Managed inference has no stored API key; disconnecting it means signing
         // out of the account, which is a distinct, explicit action in the UI.
         guard target != .managed else { return }
+        let targetSecret = target == llmProviderKind ? currentLLMAPIKeySecret : target.apiKeySecret
         do {
-            try secrets.remove(target.apiKeySecret)
+            try secrets.remove(targetSecret)
         } catch {
             llmError = Self.keychainLLMMessage(action: "remove", error: error)
             return
@@ -231,12 +246,26 @@ extension AppState {
         oldOrigin != newOrigin || oldOrigin == nil || newOrigin == nil
     }
 
-    private func clearLLMAPIKeyForEndpointChange() {
+    private func clearLLMAPIKeyForEndpointChange(secret: SecretKey) {
         llmAPIKey = ""
         do {
-            try secrets.remove(llmProviderKind.apiKeySecret)
+            try secrets.remove(secret)
         } catch {
             llmError = Self.keychainLLMMessage(action: "remove", error: error)
         }
+    }
+
+    private static func isOpenRouterBaseURL(_ baseURL: String?) -> Bool {
+        guard let endpoint = try? OpenAICompatibleClient.resolveEndpoint(
+            baseURL: baseURL,
+            defaultEndpoint: OpenAICompatibleClient.defaultEndpoint
+        ) else {
+            return false
+        }
+        guard endpoint.scheme?.lowercased() == "https",
+              endpoint.host?.lowercased() == "openrouter.ai" else {
+            return false
+        }
+        return endpoint.path == "/api/v1/chat/completions"
     }
 }

@@ -88,6 +88,7 @@ final class AppStateProwlHuntAuthTests: XCTestCase {
         XCTAssertEqual(appState.verifiedLLMModel, AppState.openRouterDefaultModel)
         XCTAssertTrue(appState.isLLMConnected)
         XCTAssertTrue(appState.isBYOProviderActive)
+        XCTAssertEqual(try? appState.secrets.value(for: .openRouterAPIKey), "hunt-openrouter-fixture-key")
     }
 
     func testCompletionFakesNoOpOutsideHuntMode() {

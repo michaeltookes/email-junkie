@@ -39,7 +39,10 @@ extension AppState {
         // Store the fake key like the real callback so `refreshLLMConnectionStatus`
         // recomputes the provider as connected. In hunt mode (and tests) `secrets`
         // is an in-memory store, so nothing is written to the real Keychain.
-        try? secrets.set(fakeKey, for: LLMProviderKind.openAICompatible.apiKeySecret)
+        try? secrets.set(
+            fakeKey,
+            for: Self.llmAPIKeySecret(provider: .openAICompatible, baseURL: OpenRouterKeyProvisioner.apiBaseURL)
+        )
         llmProviderKind = .openAICompatible
         llmBaseURL = OpenRouterKeyProvisioner.apiBaseURL
         llmAPIKey = fakeKey

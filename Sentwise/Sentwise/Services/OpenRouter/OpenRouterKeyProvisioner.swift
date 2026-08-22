@@ -4,8 +4,8 @@ import Foundation
 /// path. The app sends the user to `openrouter.ai/auth` with a `code_challenge`;
 /// OpenRouter redirects back to the app's custom scheme with a `code`, which the
 /// app exchanges for a real API key at `/api/v1/auth/keys`. No manual copy/paste
-/// and no OpenRouter dashboard visit. The resulting key is stored as the
-/// OpenAI-compatible provider pointed at OpenRouter's base URL.
+/// and no OpenRouter dashboard visit. The resulting key is stored in an
+/// OpenRouter-scoped slot for the OpenAI-compatible provider.
 ///
 /// Stateless and injectable (like the LLM adapters) so the exchange is unit-tested
 /// against a fake transport.

@@ -280,7 +280,12 @@ extension AppState {
 
         let provider = LLMProviderKind(rawValue: settings.llmProvider) ?? .anthropic
         if provider != .managed {
-            let hasKey = secrets.hasValue(for: .llmAPIKey(provider: settings.llmProvider))
+            let apiKeySecret = Self.llmAPIKeySecret(
+                provider: provider,
+                baseURL: provider.supportsCustomBaseURL ? settings.llmBaseURL : nil
+            )
+            let hasKey = secrets.hasValue(for: apiKeySecret)
+                || (apiKeySecret != provider.apiKeySecret && secrets.hasValue(for: provider.apiKeySecret))
             let hasVerifiedModel = !settings.llmVerifiedModel
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let isConfigured = hasKey || hasVerifiedModel

@@ -60,6 +60,10 @@ struct SecretKey: RawRepresentable, Hashable {
     /// key provisioning (item 59). Written when the browser hand-off starts and
     /// read+removed when the `sentwise://openrouter-callback` code comes back.
     static let openRouterPKCEVerifier = SecretKey(rawValue: "openRouter.pkceVerifier")
+    /// The OpenRouter-provisioned OpenAI-compatible API key. Kept separate from the
+    /// generic OpenAI-compatible slot so one-click setup never overwrites a manual
+    /// OpenAI or gateway credential.
+    static let openRouterAPIKey = SecretKey(rawValue: "llm.openRouter.apiKey")
 }
 
 /// Secure storage for sensitive strings — OAuth tokens, API keys, client secrets.

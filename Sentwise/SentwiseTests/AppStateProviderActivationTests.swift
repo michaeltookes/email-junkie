@@ -68,7 +68,10 @@ final class AppStateProviderActivationTests: XCTestCase {
     }
 
     func testHandleOpenRouterCallbackActivatesOpenAICompatibleProvider() async throws {
-        let secrets = InMemorySecretStore(seed: [.openRouterPKCEVerifier: "VER"])
+        let secrets = InMemorySecretStore(seed: [
+            .openRouterPKCEVerifier: "VER",
+            LLMProviderKind.openAICompatible.apiKeySecret: "sk-openai-existing"
+        ])
         let appState = makeAppState(provider: "managed", secrets: secrets)
         let transport = ActivationFakeJSONTransport(
             HTTPResponse(statusCode: 200, body: Data(#"{"key":"sk-or-xyz"}"#.utf8))
@@ -84,14 +87,19 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertEqual(appState.llmModel, AppState.openRouterDefaultModel)
         XCTAssertTrue(appState.isLLMConnected)
         XCTAssertTrue(appState.isBYOProviderActive)
-        XCTAssertEqual(try secrets.value(for: LLMProviderKind.openAICompatible.apiKeySecret), "sk-or-xyz")
+        XCTAssertEqual(try secrets.value(for: .openRouterAPIKey), "sk-or-xyz")
+        XCTAssertEqual(try secrets.value(for: LLMProviderKind.openAICompatible.apiKeySecret), "sk-openai-existing")
+        XCTAssertEqual(appState.currentDraftLLMConfiguration?.apiKey, "sk-or-xyz")
         XCTAssertNil((try secrets.value(for: .openRouterPKCEVerifier)) ?? nil, "verifier is consumed")
         XCTAssertNil(appState.llmError)
     }
 
     func testHandleOpenRouterCallbackPreservesVerifierWhenAPIKeySaveFails() async throws {
-        let secrets = ManagedAccountFailingSecretStore(seed: [.openRouterPKCEVerifier: "VER"])
-        secrets.failOnSetKeys = [LLMProviderKind.openAICompatible.apiKeySecret]
+        let secrets = ManagedAccountFailingSecretStore(seed: [
+            .openRouterPKCEVerifier: "VER",
+            LLMProviderKind.openAICompatible.apiKeySecret: "sk-openai-existing"
+        ])
+        secrets.failOnSetKeys = [.openRouterAPIKey]
         let appState = makeAppState(provider: "managed", secrets: secrets)
         let transport = ActivationFakeJSONTransport(
             HTTPResponse(statusCode: 200, body: Data(#"{"key":"sk-or-xyz"}"#.utf8))
@@ -106,6 +114,8 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertFalse(appState.isLLMConnected)
         XCTAssertNotNil(appState.llmError)
         XCTAssertEqual(try secrets.value(for: .openRouterPKCEVerifier), "VER")
+        XCTAssertNil((try secrets.value(for: .openRouterAPIKey)) ?? nil)
+        XCTAssertEqual(try secrets.value(for: LLMProviderKind.openAICompatible.apiKeySecret), "sk-openai-existing")
     }
 
     func testHandleOpenRouterCallbackWithoutVerifierSetsError() async {

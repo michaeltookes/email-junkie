@@ -88,7 +88,7 @@ struct ManagedSignInControls: View {
                 }
                 .disabled(appState.isManagedBusy || isHuntMode)
                 .accessibilityIdentifier("managedSendCodeButton")
-            } else {
+            } else if appState.managedSignInStage == .codeSent {
                 Text("Enter the code we emailed to \(appState.managedEmailInput).")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("6-digit code", text: $appState.managedCodeInput)
@@ -106,6 +106,14 @@ struct ManagedSignInControls: View {
                         .disabled(appState.isManagedBusy)
                         .buttonStyle(.link)
                 }
+            } else {
+                Label("Finish signing in in your browser.", systemImage: "safari")
+                    .font(.callout)
+                Text("A browser window opened — approve the sign-in there, then you'll be brought back automatically.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Cancel") { appState.resetManagedSignInFlow() }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier("managedCancelBrowserSignIn")
             }
             if isHuntMode {
                 Text("Sign-in is disabled during Prowl hunts.")

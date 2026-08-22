@@ -132,9 +132,12 @@ final class AppStateProviderActivationTests: XCTestCase {
         var opened: URL?
         await appState.startManagedGoogleSignIn { opened = $0 }
         XCTAssertEqual(opened?.absoluteString, "https://accounts.google.com/o/oauth2/auth?x=1")
+        XCTAssertEqual(appState.managedSignInStage, .awaitingBrowser,
+                       "opening the browser should switch the panel to the waiting state")
 
         await appState.handleManagedOAuthCallback(nonce: "nonce_1")
 
+        XCTAssertEqual(appState.managedSignInStage, .idle, "a completed sign-in leaves the waiting state")
         XCTAssertTrue(appState.isManagedSignedIn)
         XCTAssertTrue(appState.isManagedProviderActive)
         XCTAssertEqual(appState.managedAccountEmail, "marcus@example.com")

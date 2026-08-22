@@ -9,6 +9,9 @@ enum ManagedSignInStage: Equatable {
     case idle
     /// A code was emailed — show the code field.
     case codeSent
+    /// A browser-based sign-in (Google) is underway — show a "finish in your
+    /// browser" panel instead of the form until the callback returns.
+    case awaitingBrowser
 }
 
 /// Managed-inference account actions on `AppState` (backlog item 56a): the

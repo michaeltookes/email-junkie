@@ -116,6 +116,7 @@ hunts may only assert their presence, never drive account auth:
 | `id=managedSendCodeButton` | "Send sign-in code" |
 | `id=managedCodeField` | One-time-code field |
 | `id=managedVerifyButton` | "Verify & connect" |
+| `id=managedCancelBrowserSignIn` | "Cancel" (abort a browser-based Google sign-in) |
 | `id=managedSignOutButton` | "Sign out" of the managed account |
 | `id=useOwnProviderDisclosure` | "Use your own AI provider instead" disclosure |
 | `id=byoProviderPicker` | Bring-your-own provider picker |

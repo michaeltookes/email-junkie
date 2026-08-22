@@ -56,6 +56,7 @@ extension AppState {
         do {
             let url = try await managedAccount.startGoogleSignIn(redirectURL: Self.managedOAuthRedirectURL)
             openURL(url)
+            managedSignInStage = .awaitingBrowser
         } catch {
             managedError = Self.managedMessage(for: error)
         }
@@ -71,6 +72,7 @@ extension AppState {
             identifier = try await managedAccount.completeGoogleSignIn(rotatingTokenNonce: nonce)
         } catch {
             managedError = Self.managedMessage(for: error)
+            managedSignInStage = .idle
             return
         }
         // Managed inference is the point of signing in; make it the active

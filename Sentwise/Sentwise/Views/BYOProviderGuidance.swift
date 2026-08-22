@@ -69,28 +69,45 @@ struct OpenRouterProvisionCard: View {
 
     private var isHuntMode: Bool { ProwlHuntRuntime.current.isEnabled }
 
+    /// Whether OpenRouter (the OpenAI-compatible provider pointed at OpenRouter's
+    /// base URL) is the connected, active provider — i.e. provisioning succeeded.
+    private var isOpenRouterConnected: Bool {
+        appState.llmProviderKind == .openAICompatible
+            && appState.llmBaseURL == OpenRouterKeyProvisioner.apiBaseURL
+            && appState.isLLMConnected
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "bolt.fill").foregroundStyle(.tint)
                 Text("OpenRouter — one-click setup").font(.callout).bold()
+                Spacer()
+                if isOpenRouterConnected {
+                    ConnectedBadge(text: "Connected")
+                        .accessibilityIdentifier("openRouterConnectedBadge")
+                }
             }
             Text("Provisions a key with no copy-paste — one account reaches every major model.")
                 .font(.caption).foregroundStyle(.secondary)
-            Button {
-                if let url = appState.beginOpenRouterProvisioning() { openURL(url) }
-            } label: {
-                if appState.isTestingLLM {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("Connect OpenRouter")
+            if !isOpenRouterConnected {
+                Button {
+                    // Hunt mode: complete deterministically offline — no browser,
+                    // no PKCE exchange, no real key. Production opens the browser.
+                    if isHuntMode {
+                        appState.completeOpenRouterProvisioningForHunt()
+                    } else if let url = appState.beginOpenRouterProvisioning() {
+                        openURL(url)
+                    }
+                } label: {
+                    if appState.isTestingLLM {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Connect OpenRouter")
+                    }
                 }
-            }
-            .disabled(appState.isTestingLLM || isHuntMode)
-            .accessibilityIdentifier("openRouterConnectButton")
-            if isHuntMode {
-                Text("OpenRouter sign-in is disabled during Prowl hunts.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .disabled(appState.isTestingLLM)
+                .accessibilityIdentifier("openRouterConnectButton")
             }
         }
         .padding(10)

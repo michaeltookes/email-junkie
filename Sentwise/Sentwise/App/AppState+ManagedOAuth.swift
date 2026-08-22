@@ -43,12 +43,19 @@ extension AppState {
     }
 
     /// Starts Google sign-in: asks Clerk for the hosted URL and opens it in the
-    /// default browser. Disabled in Prowl hunt mode. `openURL` is injectable so
-    /// the browser hand-off is suppressed in tests.
-    func startManagedGoogleSignIn(openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }) async {
+    /// default browser. `openURL` is injectable so the browser hand-off is
+    /// suppressed in tests. In Prowl hunt mode this is a deterministic, fully-offline
+    /// fake: it advances to the `awaitingBrowser` panel WITHOUT opening a real
+    /// browser or calling Clerk (item 70); a hunt completes it via
+    /// `completeManagedGoogleSignInForHunt`. `isHuntMode` is injectable for tests.
+    func startManagedGoogleSignIn(
+        openURL: (URL) -> Void = { NSWorkspace.shared.open($0) },
+        isHuntMode: Bool = ProwlHuntRuntime.current.isEnabled
+    ) async {
         managedError = nil
-        guard !ProwlHuntRuntime.current.isEnabled else {
-            managedError = "Sign-in is disabled during Prowl hunts."
+        if isHuntMode {
+            // Deterministic offline fake: show the browser-wait panel, open nothing.
+            managedSignInStage = .awaitingBrowser
             return
         }
         managedBusyAction = .google

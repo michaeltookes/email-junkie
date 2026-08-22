@@ -34,16 +34,23 @@ extension AppState {
     // MARK: - Sign-in flow
 
     /// Sends a one-time code to the email in `managedEmailInput` and advances the
-    /// flow to the code-entry stage. Disabled in Prowl hunt mode.
-    func startManagedSignIn() async {
+    /// flow to the code-entry stage. In Prowl hunt mode this is a deterministic,
+    /// fully-offline fake: it advances to the code-entry stage without any network
+    /// or Clerk call, so hunts can drive the sign-in UI end-to-end (item 70).
+    /// `isHuntMode` is injectable so unit tests can exercise the fake path.
+    func startManagedSignIn(isHuntMode: Bool = ProwlHuntRuntime.current.isEnabled) async {
         managedError = nil
-        guard !ProwlHuntRuntime.current.isEnabled else {
-            managedError = "Sign-in is disabled during Prowl hunts."
-            return
-        }
         let email = managedEmailInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), email.count >= 3 else {
             managedError = "Enter your email address."
+            return
+        }
+
+        if isHuntMode {
+            // Deterministic offline fake: advance to code entry, no network.
+            pendingManagedSignInEmail = email
+            managedEmailInput = email
+            managedSignInStage = .codeSent
             return
         }
 
@@ -62,11 +69,23 @@ extension AppState {
 
     /// Verifies the code in `managedCodeInput`, completing sign-in. On success the
     /// managed provider becomes the connected provider and drafting is enabled.
-    func verifyManagedCode() async {
+    /// In Prowl hunt mode this is a deterministic, fully-offline fake: any non-empty
+    /// code completes to the signed-in fixture account without any network or Clerk
+    /// call (item 70). `isHuntMode` is injectable so unit tests can exercise it.
+    func verifyManagedCode(isHuntMode: Bool = ProwlHuntRuntime.current.isEnabled) async {
         managedError = nil
         let code = managedCodeInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !code.isEmpty else {
             managedError = "Enter the code from your email."
+            return
+        }
+
+        if isHuntMode {
+            // Deterministic offline fake: any code completes to the fixture account.
+            let signedInEmail = pendingManagedSignInEmail
+                ?? managedEmailInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            if llmProviderKind != .managed { selectLLMProvider(.managed) }
+            finalizeManagedSignIn(email: signedInEmail)
             return
         }
 

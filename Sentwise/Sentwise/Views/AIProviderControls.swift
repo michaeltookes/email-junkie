@@ -71,7 +71,7 @@ struct ManagedSignInControls: View {
                 } label: {
                     signInLabel(busy: appState.managedBusyAction == .google, title: "Continue with Google")
                 }
-                .disabled(appState.isManagedBusy || isHuntMode)
+                .disabled(appState.isManagedBusy)
                 .accessibilityIdentifier("managedGoogleSignInButton")
 
                 Text("or use your email").font(.caption).foregroundStyle(.secondary)
@@ -86,7 +86,7 @@ struct ManagedSignInControls: View {
                 } label: {
                     signInLabel(busy: appState.managedBusyAction == .emailCode, title: "Send sign-in code")
                 }
-                .disabled(appState.isManagedBusy || isHuntMode)
+                .disabled(appState.isManagedBusy)
                 .accessibilityIdentifier("managedSendCodeButton")
             } else if appState.managedSignInStage == .codeSent {
                 Text("Enter the code we emailed to \(appState.managedEmailInput).")
@@ -100,7 +100,7 @@ struct ManagedSignInControls: View {
                     } label: {
                         signInLabel(busy: appState.managedBusyAction == .verifyCode, title: "Verify & connect")
                     }
-                    .disabled(appState.isManagedBusy || isHuntMode)
+                    .disabled(appState.isManagedBusy)
                     .accessibilityIdentifier("managedVerifyButton")
                     Button("Use a different email") { appState.resetManagedSignInFlow() }
                         .disabled(appState.isManagedBusy)
@@ -114,9 +114,17 @@ struct ManagedSignInControls: View {
                 Button("Cancel") { appState.resetManagedSignInFlow() }
                     .buttonStyle(.link)
                     .accessibilityIdentifier("managedCancelBrowserSignIn")
+                // Hunt-only: complete the (faked) browser sign-in deterministically,
+                // since a Prowl hunt cannot drive a real browser round-trip.
+                if isHuntMode {
+                    Button("Simulate browser sign-in (Prowl hunt)") {
+                        appState.completeManagedGoogleSignInForHunt()
+                    }
+                    .accessibilityIdentifier("managedSimulateGoogleCallback")
+                }
             }
             if isHuntMode {
-                Text("Sign-in is disabled during Prowl hunts.")
+                Text("Prowl hunt: sign-in uses a deterministic offline fake.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

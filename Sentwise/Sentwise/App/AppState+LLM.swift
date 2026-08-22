@@ -45,6 +45,29 @@ extension AppState {
         return .openRouterAPIKey
     }
 
+    static func storedLLMAPIKey(
+        provider: LLMProviderKind,
+        baseURL: String?,
+        secrets: SecretStore
+    ) -> String {
+        let primarySecret = llmAPIKeySecret(provider: provider, baseURL: baseURL)
+        if let primary = ((try? secrets.value(for: primarySecret)) ?? nil), !primary.isEmpty {
+            return primary
+        }
+        guard primarySecret == .openRouterAPIKey,
+              let legacy = ((try? secrets.value(for: provider.apiKeySecret)) ?? nil),
+              !legacy.isEmpty else {
+            return ""
+        }
+        do {
+            try secrets.set(legacy, for: primarySecret)
+            try? secrets.remove(provider.apiKeySecret)
+        } catch {
+            // Keep using the legacy key as a read fallback if migration fails.
+        }
+        return legacy
+    }
+
     /// Applies a user edit to the custom base URL. Because the endpoint is part
     /// of what a connection test verifies, editing it clears the verified state
     /// so the user must re-test before the provider counts as connected.
@@ -77,7 +100,11 @@ extension AppState {
             return
         }
         let hasCredential = !llmProviderKind.requiresAPIKey
-            || secrets.hasValue(for: currentLLMAPIKeySecret)
+            || !Self.storedLLMAPIKey(
+                provider: llmProviderKind,
+                baseURL: currentLLMBaseURL,
+                secrets: secrets
+            ).isEmpty
         isLLMConnected = hasCredential
             && resolvedLLMModel(for: model ?? llmModel) == verifiedLLMModel
     }
@@ -92,8 +119,7 @@ extension AppState {
         llmProviderKind = provider
         llmModel = ""
         llmBaseURL = ""
-        let secret = Self.llmAPIKeySecret(provider: provider, baseURL: nil)
-        llmAPIKey = ((try? secrets.value(for: secret)) ?? nil) ?? ""
+        llmAPIKey = Self.storedLLMAPIKey(provider: provider, baseURL: nil, secrets: secrets)
         // Managed carries no API key; if already signed in, mark it verified so
         // the connected state is reflected immediately on switch.
         verifiedLLMModel = (provider == .managed && isManagedSignedIn) ? provider.defaultModel : ""

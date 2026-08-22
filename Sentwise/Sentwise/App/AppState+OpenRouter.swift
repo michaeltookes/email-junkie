@@ -30,6 +30,11 @@ extension AppState {
             llmError = "OpenRouter sign-in is disabled during Prowl hunts."
             return nil
         }
+        if isOpenRouterProvisioning || secrets.hasValue(for: .openRouterPKCEVerifier) {
+            isOpenRouterProvisioning = true
+            llmError = "Finish OpenRouter setup in your browser, or cancel it and try again."
+            return nil
+        }
         let codes = PKCEGenerator.generate()
         do {
             try secrets.set(codes.verifier, for: .openRouterPKCEVerifier)
@@ -37,6 +42,7 @@ extension AppState {
             llmError = Self.keychainLLMMessage(action: "save", error: error)
             return nil
         }
+        isOpenRouterProvisioning = true
         return OpenRouterKeyProvisioner().authorizationURL(
             callbackURL: Self.openRouterCallbackURL,
             challenge: codes.challenge
@@ -49,6 +55,18 @@ extension AppState {
         openURL(url)
     }
 
+    /// Cancels the browser-based provisioning flow so the next Connect click can
+    /// mint a fresh verifier instead of invalidating an in-flight browser tab.
+    func cancelOpenRouterProvisioning() {
+        llmError = nil
+        isOpenRouterProvisioning = false
+        do {
+            try secrets.remove(.openRouterPKCEVerifier)
+        } catch {
+            llmError = Self.keychainLLMMessage(action: "remove", error: error)
+        }
+    }
+
     /// Completes provisioning from the redirect `code`: exchanges it (with the
     /// stored PKCE verifier) for an API key and activates the OpenAI-compatible
     /// provider with OpenRouter's base URL. The provisioner is injectable so the
@@ -59,6 +77,7 @@ extension AppState {
     ) async {
         llmError = nil
         guard let verifier = (try? secrets.value(for: .openRouterPKCEVerifier)) ?? nil, !verifier.isEmpty else {
+            isOpenRouterProvisioning = false
             llmError = "OpenRouter sign-in didn't start on this Mac. Try connecting again."
             return
         }
@@ -70,6 +89,7 @@ extension AppState {
         do {
             key = try await provisioner.exchangeCodeForKey(code: code, codeVerifier: verifier)
         } catch {
+            isOpenRouterProvisioning = false
             llmError = Self.llmMessage(for: error)
             return
         }
@@ -83,10 +103,12 @@ extension AppState {
                 )
             )
         } catch {
+            isOpenRouterProvisioning = false
             llmError = Self.keychainLLMMessage(action: "save", error: error)
             return
         }
         try? secrets.remove(.openRouterPKCEVerifier)
+        isOpenRouterProvisioning = false
 
         // Activate the OpenAI-compatible provider pointed at OpenRouter.
         llmProviderKind = .openAICompatible

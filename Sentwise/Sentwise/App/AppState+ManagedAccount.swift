@@ -205,11 +205,11 @@ extension AppState {
             && secrets.hasValue(for: .managedClientToken)
             && secrets.hasValue(for: .managedSessionID)
         let restore = provider == .managed && hasCredentials
-        let apiKeySecret = llmAPIKeySecret(
+        let apiKey = storedLLMAPIKey(
             provider: provider,
-            baseURL: provider.supportsCustomBaseURL ? settings.llmBaseURL : nil
+            baseURL: provider.supportsCustomBaseURL ? settings.llmBaseURL : nil,
+            secrets: secrets
         )
-        let apiKey = ((try? secrets.value(for: apiKeySecret)) ?? nil) ?? ""
         return ManagedLaunchState(
             provider: provider,
             hasCredentials: hasCredentials,

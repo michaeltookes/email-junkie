@@ -91,23 +91,34 @@ struct OpenRouterProvisionCard: View {
             Text("Provisions a key with no copy-paste — one account reaches every major model.")
                 .font(.caption).foregroundStyle(.secondary)
             if !isOpenRouterConnected {
-                Button {
-                    // Hunt mode: complete deterministically offline — no browser,
-                    // no PKCE exchange, no real key. Production opens the browser.
-                    if isHuntMode {
-                        appState.completeOpenRouterProvisioningForHunt()
-                    } else if let url = appState.beginOpenRouterProvisioning() {
-                        openURL(url)
+                if appState.isOpenRouterProvisioning {
+                    Label("Finish connecting in your browser.", systemImage: "safari")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") {
+                        appState.cancelOpenRouterProvisioning()
                     }
-                } label: {
-                    if appState.isTestingLLM {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Connect OpenRouter")
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier("openRouterCancelButton")
+                } else {
+                    Button {
+                        // Hunt mode: complete deterministically offline — no browser,
+                        // no PKCE exchange, no real key. Production opens the browser.
+                        if isHuntMode {
+                            appState.completeOpenRouterProvisioningForHunt()
+                        } else if let url = appState.beginOpenRouterProvisioning() {
+                            openURL(url)
+                        }
+                    } label: {
+                        if appState.isTestingLLM {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Connect OpenRouter")
+                        }
                     }
+                    .disabled(appState.isTestingLLM || appState.isOpenRouterProvisioning)
+                    .accessibilityIdentifier("openRouterConnectButton")
                 }
-                .disabled(appState.isTestingLLM)
-                .accessibilityIdentifier("openRouterConnectButton")
             }
         }
         .padding(10)

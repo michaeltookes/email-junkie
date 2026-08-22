@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import Sentwise
 
 /// A fake `LLMHTTPTransport` returning a fixed response (OpenRouter exchange).
@@ -67,6 +68,30 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertFalse((verifier ?? "").isEmpty)
     }
 
+    func testBeginOpenRouterProvisioningDoesNotOverwritePendingVerifier() throws {
+        let secrets = InMemorySecretStore(seed: [.openRouterPKCEVerifier: "VER_A"])
+        let appState = makeAppState(secrets: secrets)
+        XCTAssertTrue(appState.isOpenRouterProvisioning)
+
+        let url = appState.beginOpenRouterProvisioning()
+
+        XCTAssertNil(url)
+        XCTAssertEqual(try secrets.value(for: .openRouterPKCEVerifier), "VER_A")
+        XCTAssertTrue(appState.isOpenRouterProvisioning)
+        XCTAssertNotNil(appState.llmError)
+    }
+
+    func testCancelOpenRouterProvisioningClearsPendingVerifier() throws {
+        let secrets = InMemorySecretStore(seed: [.openRouterPKCEVerifier: "VER_A"])
+        let appState = makeAppState(secrets: secrets)
+
+        appState.cancelOpenRouterProvisioning()
+
+        XCTAssertFalse(appState.isOpenRouterProvisioning)
+        XCTAssertNil(try secrets.value(for: .openRouterPKCEVerifier))
+        XCTAssertNil(appState.llmError)
+    }
+
     func testHandleOpenRouterCallbackActivatesOpenAICompatibleProvider() async throws {
         let secrets = InMemorySecretStore(seed: [
             .openRouterPKCEVerifier: "VER",
@@ -85,6 +110,7 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertEqual(appState.llmProviderKind, .openAICompatible)
         XCTAssertEqual(appState.llmBaseURL, OpenRouterKeyProvisioner.apiBaseURL)
         XCTAssertEqual(appState.llmModel, AppState.openRouterDefaultModel)
+        XCTAssertFalse(appState.isOpenRouterProvisioning)
         XCTAssertTrue(appState.isLLMConnected)
         XCTAssertTrue(appState.isBYOProviderActive)
         XCTAssertEqual(try secrets.value(for: .openRouterAPIKey), "sk-or-xyz")
@@ -112,6 +138,7 @@ final class AppStateProviderActivationTests: XCTestCase {
 
         XCTAssertEqual(appState.llmProviderKind, .managed)
         XCTAssertFalse(appState.isLLMConnected)
+        XCTAssertFalse(appState.isOpenRouterProvisioning)
         XCTAssertNotNil(appState.llmError)
         XCTAssertEqual(try secrets.value(for: .openRouterPKCEVerifier), "VER")
         XCTAssertNil((try secrets.value(for: .openRouterAPIKey)) ?? nil)
@@ -124,7 +151,37 @@ final class AppStateProviderActivationTests: XCTestCase {
         await appState.handleOpenRouterCallback(code: "CODE")
 
         XCTAssertNotNil(appState.llmError)
+        XCTAssertFalse(appState.isOpenRouterProvisioning)
         XCTAssertEqual(appState.llmProviderKind, .managed, "provider is left unchanged on failure")
+    }
+
+    func testLegacyOpenRouterKeyMigratesToDedicatedSecretOnInit() {
+        let secrets = InMemorySecretStore(seed: [
+            .llmAPIKey(provider: "openAICompatible"): "sk-legacy-openrouter"
+        ])
+        let persistence = AppStateMemoryPersistence(settings: Settings(
+            schemaVersion: Settings.currentSchemaVersion,
+            pollIntervalSeconds: 300,
+            llmProvider: "openAICompatible",
+            llmModel: "gpt-4o-mini",
+            llmBaseURL: "https://openrouter.ai/api/v1",
+            llmVerifiedModel: "gpt-4o-mini"
+        ))
+
+        let appState = AppState(
+            persistence: persistence,
+            secrets: secrets,
+            mailProvider: FakeAppMailProvider(result: .success(())),
+            llm: FakeLLMProvider(result: .success(()))
+        )
+
+        XCTAssertEqual(appState.llmProviderKind, .openAICompatible)
+        XCTAssertEqual(appState.llmBaseURL, "https://openrouter.ai/api/v1")
+        XCTAssertEqual(appState.llmAPIKey, "sk-legacy-openrouter")
+        XCTAssertTrue(appState.isLLMConnected)
+        XCTAssertEqual(try? secrets.value(for: .openRouterAPIKey), "sk-legacy-openrouter")
+        XCTAssertNil((try? secrets.value(for: .llmAPIKey(provider: "openAICompatible"))) ?? nil)
+        XCTAssertEqual(appState.currentDraftLLMConfiguration?.apiKey, "sk-legacy-openrouter")
     }
 
     // MARK: - URL routing / hunt-mode guard
@@ -193,5 +250,30 @@ final class AppStateProviderActivationTests: XCTestCase {
         XCTAssertFalse(appState.isManagedSignedIn)
         XCTAssertNotNil(appState.managedError)
         XCTAssertNil(try secrets.value(for: .managedSessionID))
+    }
+
+    func testStaleManagedOAuthCallbackDoesNotClearEmailCodeStage() async {
+        let appState = makeAppState(provider: "managed")
+        appState.managedEmailInput = "marcus@example.com"
+        await appState.startManagedSignIn(isHuntMode: true)
+        XCTAssertEqual(appState.managedSignInStage, .codeSent)
+
+        await appState.handleManagedOAuthCallback(nonce: "stale_nonce")
+
+        XCTAssertEqual(appState.managedSignInStage, .codeSent)
+        XCTAssertFalse(appState.isManagedSignedIn)
+        XCTAssertNotNil(appState.managedError)
+    }
+
+    func testAppDelegateQueuesIncomingURLsUntilLaunchInitializesAppState() {
+        let delegate = AppDelegate(runtime: ProwlHuntRuntime(isEnabled: true))
+        let url = URL(string: "sentwise://openrouter-callback?code=CODE")!
+
+        delegate.application(NSApplication.shared, open: [url])
+        XCTAssertEqual(delegate.pendingIncomingURLCount, 1)
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        XCTAssertEqual(delegate.pendingIncomingURLCount, 0)
     }
 }

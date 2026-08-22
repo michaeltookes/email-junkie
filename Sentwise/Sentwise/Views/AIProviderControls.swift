@@ -53,6 +53,19 @@ struct ManagedAccountErrorMessage: View {
     }
 }
 
+/// BYO-provider errors live with the shared provider controls so Settings and
+/// onboarding surface failed tests, invalid URLs, Keychain failures, and callback
+/// failures consistently.
+struct BYOProviderErrorMessage: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        if let error = appState.llmError {
+            OnboardingError(message: error)
+        }
+    }
+}
+
 /// Sign-in controls for the managed account: one-click Google alongside the
 /// email-code flow. First-time users pass transparently through Clerk's sign-up.
 struct ManagedSignInControls: View {
@@ -196,12 +209,14 @@ struct BYOProviderControls: View {
                 ProviderKeyGuidance(provider: stagedProvider)
             }
 
+            BYOProviderErrorMessage()
             ProviderPrivacyNote()
         }
         .onAppear {
-            if appState.isBYOProviderActive {
-                stagedProvider = appState.llmProviderKind
-            }
+            syncStagedProviderWithActiveProvider()
+        }
+        .onChange(of: appState.llmProviderKind) { _, _ in
+            syncStagedProviderWithActiveProvider()
         }
     }
 
@@ -267,5 +282,11 @@ struct BYOProviderControls: View {
 
     private var apiKeyFieldTitle: String {
         appState.llmProviderKind.requiresAPIKey ? "API key" : "API key (optional)"
+    }
+
+    private func syncStagedProviderWithActiveProvider() {
+        if appState.isBYOProviderActive {
+            stagedProvider = appState.llmProviderKind
+        }
     }
 }

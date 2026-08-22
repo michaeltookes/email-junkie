@@ -79,7 +79,9 @@ extension AppState {
             identifier = try await managedAccount.completeGoogleSignIn(rotatingTokenNonce: nonce)
         } catch {
             managedError = Self.managedMessage(for: error)
-            managedSignInStage = .idle
+            if managedSignInStage == .awaitingBrowser {
+                managedSignInStage = .idle
+            }
             return
         }
         // Managed inference is the point of signing in; make it the active

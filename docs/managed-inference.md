@@ -253,3 +253,19 @@ hunt fakes (above) and their unit tests (`ManagedAccountServiceOAuthTests`,
 
 `sentwise-service` `main` is the source of truth for the deployed Worker. On every push/PR, CI runs the privacy guard (no `console.*` in `src/`), ESLint + Prettier, typecheck, vitest, and `npm audit --audit-level=high`; Dependabot watches npm and GitHub Actions weekly; Claude code review runs on PRs. Merges to `main` trigger the **Deploy** workflow, which is gated by the `production` environment (required reviewer: the owner; `main` only) and ends with a `/healthz` smoke check. Secrets live as repository secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLAUDE_CODE_OAUTH_TOKEN`); the Worker's own `CLERK_SECRET_KEY` / `ANTHROPIC_API_KEY` remain Cloudflare secrets set via `wrangler secret put`. First gated deploy: PR #1 → `0f73d51`.
 
+### Live Clerk sign-in — confirmed 2026-08-21
+
+`ClerkLiveSignInTests.testLiveEmailCodeSignInCompletesSession` was run against the real
+`peaceful-eel-9660.clerk.accounts.dev` dev instance and **passed**: it created a sign-up for
+`sentwise-live+clerk_test@sentwise.ai` (Clerk test address — no email sent), verified with the
+universal test code `424242`, and got a completed session with a minted token. This exercises the
+real `ClerkClient` including the sign-up fallback and native token rotation.
+
+Running it: the gate reads `SENTWISE_LIVE_CLERK_TEST=1` from the test process environment. A plain
+shell `env` (or `TEST_RUNNER_…`) does **not** propagate into a macOS app-hosted unit test via
+`xcodebuild test`; set it in the scheme/test-plan test-action environment, or inject it into the
+`.xctestrun` (`build-for-testing` → set `SentwiseTests.EnvironmentVariables.SENTWISE_LIVE_CLERK_TEST=1`
+→ `test-without-building -destination 'platform=macOS'`). Google/OpenRouter remain browser
+round-trips and are not automatable as live tests — they are covered by the deterministic hunt-mode
+fake and unit tests instead.
+
